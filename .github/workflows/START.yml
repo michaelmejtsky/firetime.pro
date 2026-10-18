@@ -511,6 +511,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
+          # GitHub-Actions-Token darf keine weiteren Workflow-Dateien erstellen.
+          # Der START-Workflow veroeffentlicht die Website bereits selbst.
+          git reset -q HEAD -- .github/workflows/pages.yml
           if ! git diff --cached --quiet; then
             git commit -m 'FireTime Pro: GitHub, Google-Backend und Cloudflare vollständig anlegen'
             git push
