@@ -102,7 +102,7 @@ function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.inne
 async function load(){
   if(!ST.token){ST.h=null;auth();return;}
   try{
-    const home=await api('home',{month:ST.month,companyId:ST.cid});
+    const home=await api('home',{month:ST.month,companyId:ST.cid,reportsMode:ST.tab==='reports'?'all':ST.tab==='dashboard'?'self':'none'});
     if(!home||!home.me)throw Error('Sitzung oder Benutzerdaten ungültig.');
     ST.h=home;
     if(me().role==='SYSADMIN'&&!ST.cid&&!['dashboard','customers','profile'].includes(ST.tab))ST.tab='dashboard';
@@ -171,7 +171,42 @@ if(form.id==='loginForm')return run(async()=>{const result=await rpc('ft_login',
 if(form.id==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
 if(form.id==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
 if(form.id==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
-if(form.id==='staffForm')return run(async()=>{if(p.id)await api('userUpdate',p);else await api('userCreate',{...p,companyId:firm().id});ST.edit='';await load();},'Mitarbeiter gespeichert.');
+if(form.id==='staffForm'){
+  if(form.dataset.saving==='1')return;
+  form.dataset.saving='1';
+  const submitButton=form.querySelector('button.btn.primary');
+  if(submitButton){submitButton.disabled=true;submitButton.textContent='Wird gespeichert …';}
+  try{
+    const updated=Boolean(p.id);
+    const result=updated
+      ?await api('userUpdate',p)
+      :await api('userCreate',{...p,companyId:firm().id,deferInvite:true});
+    const user=updated?result:result.user;
+    if(!user||!user.id)throw Error('Google hat keine Mitarbeiter-ID zurueckgegeben. Bitte Mitarbeiterliste pruefen.');
+    if(!Array.isArray(ST.h.users))ST.h.users=[];
+    const i=ST.h.users.findIndex(x=>x.id===user.id);
+    if(i>=0)ST.h.users[i]=user;
+    else ST.h.users.push(user);
+    ST.edit='';page();
+    say(updated?'Mitarbeiteränderung gespeichert.':'Mitarbeiter angelegt. Einladung wird getrennt versendet.');
+    if(!updated){
+      // E-Mail nicht in die Speicher-Transaktion hineinziehen: dadurch
+      // bleibt der Mitarbeiter bei E-Mail-Fehlern trotzdem gespeichert.
+      api('userInvite',{id:user.id})
+        .then(()=>say('Mitarbeiter gespeichert und Einladung verschickt.'))
+        .catch(err=>say('Mitarbeiter ist gespeichert. Einladung nicht bestätigt: '+err.message+' – über „Einladung senden“ erneut versuchen.',true));
+    }
+  }catch(err){
+    const message=String(err?.message||'Speichern fehlgeschlagen.');
+    say(message.includes('E-Mail ist bereits')
+      ?message+' Bitte erst die Mitarbeiterliste prüfen, bevor du erneut anlegst.'
+      :message,true);
+  }finally{
+    form.dataset.saving='0';
+    if(submitButton){submitButton.disabled=false;submitButton.textContent='Speichern';}
+  }
+  return;
+}
 if(form.id==='timeForm')return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
 if(form.id==='leaveForm')return run(async()=>{await api('leaveRequest',{...p,companyId:firm().id});await load();},'Urlaub beantragt.');
 if(form.id==='workForm')return run(async()=>{await api('workSave',{...p,companyId:firm().id});await load();},'Dienst als Entwurf gespeichert.');
@@ -193,6 +228,11 @@ document.addEventListener('click',e=>{const b=e.target.closest('button[data-tab]
     api('rulesGet',{companyId:firm().id,month:ST.month})
       .then(r=>{ST.rules=r;page();}).catch(err=>say(err.message,true));
     return;
+  }
+  // Monatliche Auswertungen werden nur bei Bedarf von Google geladen.
+  if(ST.h?.me && firm() && has('REPORTS') &&
+      (ST.tab==='reports' || (ST.tab==='dashboard' && !ST.h.reports[me().id]))) {
+    load(); return;
   }
   if(ST.h?.me)page();else load();
 }else action(b);return;}const zone=e.target.closest('[data-pick]');if(zone){const f=document.getElementById(zone.dataset.pick);if(f)f.click();}});
