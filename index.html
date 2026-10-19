@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-staff-speed-fix"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -26,6 +26,8 @@ input[type=checkbox]{width:17px;min-height:0;accent-color:var(--accent)}input[ty
 const INVITE=new URLSearchParams(location.search).get('invite') || ''; 
 const SLUG=new URLSearchParams(location.search).get('firm') || ''; 
 const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:null,logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const FT_VIEWS_LOADED=new Set();
+let FT_LAST_CONTEXT='';
 const LABELS={dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
@@ -102,9 +104,28 @@ function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.inne
 async function load(){
   if(!ST.token){ST.h=null;auth();return;}
   try{
-    const home=await api('home',{month:ST.month,companyId:ST.cid,reportsMode:ST.tab==='reports'?'all':ST.tab==='dashboard'?'self':'none'});
+    const home=await api('home',{month:ST.month,companyId:ST.cid,view:ST.tab,reportsMode:ST.tab==='reports'?'all':ST.tab==='dashboard'?'self':'none'});
     if(!home||!home.me)throw Error('Sitzung oder Benutzerdaten ungültig.');
+    // Preserve sections already fetched in the same company/month, do not mix customer data.
+    const context=(home.company?.id||'SYS')+'|'+home.month;
+    const same=FT_LAST_CONTEXT===context&&ST.h?.me?.id===home.me.id;
+    const view=ST.tab;
+    const fresh={
+      dashboard:['shifts','workShifts','reports'],staff:[],time:['activities'],
+      reports:['months','reports'],leave:['leaves'],work:['workShifts'],
+      standby:['shifts','availability','availSubmissions'],
+      availability:['availability','availSubmissions'],rules:[],settings:[],
+      license:[],customers:[],profile:[]
+    }[view]||[];
+    if(same){
+      if(!home.logo&&ST.h.logo)home.logo=ST.h.logo;
+      for(const k of ['activities','availability','availSubmissions','shifts','workShifts','leaves','months','reports']){
+        if(!fresh.includes(k))home[k]=ST.h[k];
+      }
+    } else FT_VIEWS_LOADED.clear();
+    FT_LAST_CONTEXT=context;
     ST.h=home;
+    FT_VIEWS_LOADED.add(context+'|'+view);
     if(me().role==='SYSADMIN'&&!ST.cid&&!['dashboard','customers','profile'].includes(ST.tab))ST.tab='dashboard';
     if(ST.tab==='rules'&&firm())ST.rules=await api('rulesGet',{companyId:firm().id,month:ST.month});
     theme(firm()?.color||ST.brand?.color||'#f37850',ST.h.profile?.secondaryColor||ST.brand?.secondaryColor||'#172c44');
@@ -128,7 +149,7 @@ function profileFields(p){return `<div class="cols">${select('workModel','Arbeit
 function modulesForm(enabled,scope){return `<div class="cols">${MODULES.map(([key,title,desc])=>`<label class="cbox"><input name="module" type="checkbox" value="${key}" ${enabled.includes(key)?'checked':''}><span><b>${E(title)}</b><div class="muted small">${E(desc)}</div></span></label>`).join('')}</div><p class="muted small">${scope==='sale'?'Nur du als FireTime-Pro-Systemadministrator bestimmst, welche Funktionen gekauft/freigeschaltet sind.':'Die Firmenadministration kann ihre freigeschalteten Module nicht selbst erweitern.'}</p>`;}
 function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue Firma erhält ein eigenes Logo, eigene Farben, ein eigenes Arbeitsmodell und nur die Module, die du verkaufst. BSB3100 ist bereits angelegt.')+`<div class="card"><h2>Bestehende Kunden</h2>${ST.h.companies.map(c=>`<div class="row between"><b>${E(c.name)}</b><button class="btn" data-act="openFirm" data-id="${c.id}">Öffnen</button></div>`).join('')}</div><div class="card"><h2>Neuen Kunden samt Administrator anlegen</h2><form id="onboardForm"><div class="cols">${input('Firmenname','name','','text','required')}${input('Firmenkürzel / Link','slug','','text','required')}${input('Primärfarbe','color','#f37850','color')}${input('Name des ersten Firmenadministrators','adminName','','text','required')}${input('E-Mail des Firmenadministrators','adminEmail','','email','required')}</div><h3>Firmenlogo</h3><div class="drop" data-pick="newLogo">Logo anklicken oder hineinziehen (PNG/JPG/WEBP, max. 2 MB)<input type="file" id="newLogo" accept="image/png,image/jpeg,image/webp"></div><div id="newLogoLabel" class="muted small"></div><h3 style="margin-top:20px">Arbeitsmodell</h3>${profileFields({workModel:'OFFICE',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24})}<h3>Welche Module hat die Firma gekauft?</h3>${modulesForm(['TIME','REPORTS','LEAVE'],'sale')}<button class="btn primary">Kunden erstellen und Admin einladen</button></form></div>`;}
 function license(){if(me().role!=='SYSADMIN'||!firm())return '';return hint('Nur du schaltest die gekauften Funktionen frei. Der Firmenadministrator kann keine Module dazukaufen oder selbst aktivieren.')+`<div class="card"><h2>Modulfreigabe · ${E(firm().name)}</h2><form id="licenseForm">${modulesForm(ST.h.modules,'sale')}<button class="btn primary">Modulfreigabe speichern</button></form></div>`;}
-function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${input('Monatssoll (Stunden)','monthlyHours',u?.monthlyHours??25,'number','min="0" max="300" step="0.25"')}${input('Stundensatz (€)','hourlyRate',u?.hourlyRate??0,'number','min="0" step="0.01"')}${input('Urlaubsrest in Tagen','leaveBalance',u?.leaveBalance??25,'number','min="0"')}${input('Urlaubsanspruch in Tagen','leaveEntitlement',u?.leaveEntitlement??25,'number','min="0"')}${input('Stunden-Startsaldo','openingHours',u?.openingHours??0,'number','step="0.25"')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div><button class="btn primary">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
+function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${input('Monatssoll (Stunden)','monthlyHours',u?.monthlyHours??25,'number','min="0" max="300" step="0.25"')}${input('Stundensatz (€)','hourlyRate',u?.hourlyRate??0,'number','min="0" step="0.01"')}${input('Urlaubsrest in Tagen','leaveBalance',u?.leaveBalance??25,'number','min="0"')}${input('Urlaubsanspruch in Tagen','leaveEntitlement',u?.leaveEntitlement??25,'number','min="0"')}${input('Stunden-Startsaldo','openingHours',u?.openingHours??0,'number','step="0.25"')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
 function time(){const a=ST.h.activities.filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month),edit=a.find(x=>x.id===ST.edit);return hint('Hier werden nur tatsächliche Arbeitsstunden erfasst. Ein Objekt ist ein Freitextfeld – keine Objektlisten oder Objektzuweisung. BSB3100: Objektkontrollen zählen zum Soll und dürfen parallel zur Bereitschaft laufen. Störungseinsätze zählen zum Soll und unterbrechen die Bereitschaft von Alarm bis Rückkehr.')+monthPick()+`<div class="card"><h2>${edit?'Arbeitszeit bearbeiten':'Arbeitszeit erfassen'}</h2><form id="timeForm"><input type="hidden" name="id" value="${E(edit?.id||'')}"><div class="cols">${isAdmin()?optionsUsers('userId',edit?.userId||me().id):''}${select('type','Art der Tätigkeit',[['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz (Anruf bis Rückkehr)'],['OTHER','Sonstige Arbeitszeit']],edit?.type||'OBJECT')}${input('Beginn','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')}${input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')}${input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')}${input('Objekt (optional)','object',edit?.object||'')}</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">${E(edit?.description||'')}</textarea></label><button class="btn primary">Arbeitszeit speichern</button>${edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt</th><th></th></tr>${a.map(x=>`<tr><td>${DT(x.start)} – ${DT(x.end)}</td><td>${E(who(x.userId).name)}</td><td>${E(x.type)}</td><td>${E(x.object)}</td><td><button class="btn" data-act="editTime" data-id="${x.id}">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="${x.id}">Löschen</button></td></tr>`).join('')}</table></div></div>`;}
 function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div><h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn" data-act="pdf">PDF-Monatszettel</button></div></div>`;}
 function leave(){return hint('Mitarbeiter dürfen Urlaub beantragen und ihre bisherigen Anträge sehen. Genehmigung oder Ablehnung erfolgt durch den Firmenadministrator.')+`<div class="cols"><div class="card"><h2>Urlaubsantrag</h2><p>Resturlaub: <b>${N(me().leaveBalance)} Tage</b></p><form id="leaveForm">${input('Von','from','','date','required')}${input('Bis','to','','date','required')}${input('Grund (optional)','reason')}<button class="btn primary">Urlaub beantragen</button></form></div><div class="card"><h2>Anträge</h2>${ST.h.leaves.map(l=>`<div class="row between" style="margin:9px 0"><div><b>${E(who(l.userId).name)}</b><br>${E(l.from)} bis ${E(l.to)} (${N(l.days)} Tage) · ${E(l.status)}</div>${isAdmin()&&l.status==='PENDING'?`<div><button class="btn" data-act="leaveApprove" data-id="${l.id}">Genehmigen</button><button class="btn danger" data-act="leaveReject" data-id="${l.id}">Ablehnen</button></div>`:''}</div>`).join('')||'Noch keine Anträge.'}</div></div>`;}
@@ -167,11 +188,11 @@ if(a==='calendarTest'){await run(async()=>{const c=await api('calendarTest',{com
 if(a==='copyUrl'){try{await navigator.clipboard.writeText(ST.h.loginUrl);say('Kundenlink kopiert.');}catch(e){say('Bitte Link im Firmenprofil markieren und kopieren.',true);}return;}
 }
 async function submit(form){const p=fields(form);
-if(form.id==='loginForm')return run(async()=>{const result=await rpc('ft_login',p.email,p.password);ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';await load();},'Angemeldet.');
-if(form.id==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
-if(form.id==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
-if(form.id==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
-if(form.id==='staffForm'){
+if(form.getAttribute('id')==='loginForm')return run(async()=>{const result=await rpc('ft_login',p.email,p.password);ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';await load();},'Angemeldet.');
+if(form.getAttribute('id')==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
+if(form.getAttribute('id')==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
+if(form.getAttribute('id')==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
+if(form.getAttribute('id')==='staffForm'){
   if(form.dataset.saving==='1')return;
   form.dataset.saving='1';
   const submitButton=form.querySelector('button.btn.primary');
@@ -207,13 +228,13 @@ if(form.id==='staffForm'){
   }
   return;
 }
-if(form.id==='timeForm')return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
-if(form.id==='leaveForm')return run(async()=>{await api('leaveRequest',{...p,companyId:firm().id});await load();},'Urlaub beantragt.');
-if(form.id==='workForm')return run(async()=>{await api('workSave',{...p,companyId:firm().id});await load();},'Dienst als Entwurf gespeichert.');
-if(form.id==='settingsForm')return run(async()=>{await api('companyUpdate',{...p,id:firm().id});await load();},'Firmeneinstellungen gespeichert.');
-if(form.id==='profileForm')return run(async()=>{await api('profileSave',{...p,companyId:firm().id});await load();},'Arbeitsmodell gespeichert.');
-if(form.id==='rulesForm')return run(async()=>{const types={};['nightTypes','sundayTypes','holidayTypes'].forEach(k=>types[k]=[...form.querySelectorAll(`[name="${k}"]:checked`)].map(x=>x.value));await api('rulesSave',{...p,...types,companyId:firm().id});ST.month=p.effectiveMonth;await load();},'Neue Zuschlagsregel gespeichert.');
-if(form.id==='passwordForm')return run(async()=>{await rpc('ft_changePassword',ST.token,p.current,p.next);ST.token='';sessionStorage.removeItem('ft_token');auth();},'Passwort geändert. Bitte neu anmelden.');
+if(form.getAttribute('id')==='timeForm')return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
+if(form.getAttribute('id')==='leaveForm')return run(async()=>{await api('leaveRequest',{...p,companyId:firm().id});await load();},'Urlaub beantragt.');
+if(form.getAttribute('id')==='workForm')return run(async()=>{await api('workSave',{...p,companyId:firm().id});await load();},'Dienst als Entwurf gespeichert.');
+if(form.getAttribute('id')==='settingsForm')return run(async()=>{await api('companyUpdate',{...p,id:firm().id});await load();},'Firmeneinstellungen gespeichert.');
+if(form.getAttribute('id')==='profileForm')return run(async()=>{await api('profileSave',{...p,companyId:firm().id});await load();},'Arbeitsmodell gespeichert.');
+if(form.getAttribute('id')==='rulesForm')return run(async()=>{const types={};['nightTypes','sundayTypes','holidayTypes'].forEach(k=>types[k]=[...form.querySelectorAll(`[name="${k}"]:checked`)].map(x=>x.value));await api('rulesSave',{...p,...types,companyId:firm().id});ST.month=p.effectiveMonth;await load();},'Neue Zuschlagsregel gespeichert.');
+if(form.getAttribute('id')==='passwordForm')return run(async()=>{await rpc('ft_changePassword',ST.token,p.current,p.next);ST.token='';sessionStorage.removeItem('ft_token');auth();},'Passwort geändert. Bitte neu anmelden.');
 }
 async function fileAsData(file){if(!file)return null;if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){say('Logo: PNG/JPG/WEBP maximal 2 MB.',true);return null;}return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error('Datei nicht lesbar.'));reader.readAsDataURL(file);});}
 async function uploadFile(input){const str=await fileAsData(input.files[0]);if(!str)return;if(input.id==='newLogo'){ST.logoNew=str;const el=document.getElementById('newLogoLabel');if(el)el.textContent='Ausgewählt: '+input.files[0].name;}else if(input.id==='existingLogo')await run(async()=>{await api('logoUpload',{companyId:firm().id,data:str});await load();},'Firmenlogo gespeichert.');}
@@ -229,12 +250,14 @@ document.addEventListener('click',e=>{const b=e.target.closest('button[data-tab]
       .then(r=>{ST.rules=r;page();}).catch(err=>say(err.message,true));
     return;
   }
-  // Monatliche Auswertungen werden nur bei Bedarf von Google geladen.
-  if(ST.h?.me && firm() && has('REPORTS') &&
-      (ST.tab==='reports' || (ST.tab==='dashboard' && !ST.h.reports[me().id]))) {
-    load(); return;
+  // First visit to a view only loads its own data; subsequent navigation is instant.
+  const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
+  if(!ST.h?.me||!FT_VIEWS_LOADED.has(key)){
+    const pane=document.getElementById('content');
+    if(pane)pane.innerHTML='<div class="card">Ansicht wird geladen …</div>';
+    load();return;
   }
-  if(ST.h?.me)page();else load();
+  page();
 }else action(b);return;}const zone=e.target.closest('[data-pick]');if(zone){const f=document.getElementById(zone.dataset.pick);if(f)f.click();}});
 function staffValidationError(form){
   const invalid=Array.from(form.elements).find(el=>el.willValidate&&!el.checkValidity());
@@ -249,27 +272,27 @@ function staffValidationError(form){
 }
 // Eingabefehler sichtbar zeigen, statt einen scheinbar funktionslosen Button zu haben.
 document.addEventListener('invalid',e=>{
-  if(e.target?.form?.id!=='staffForm')return;
+  if(e.target?.form?.getAttribute('id')!=='staffForm')return;
   const el=e.target;
   const label=el.closest('label')?.querySelector('span')?.textContent || el.name || 'Eingabe';
   say('Bitte „'+label+'“ korrigieren: '+(el.validationMessage||'Ungültige Eingabe.'),true);
 },true);
 // Speichern wird gezielt ausgeloest und jeder JavaScript-Fehler angezeigt.
 // click im Capture-Modus verhindert nicht, dass andere Menuebuttons funktionieren.
-document.addEventListener('click',async e=>{
-  const button=e.target.closest?.('#staffForm button.btn.primary');
+document.addEventListener('click',e=>{
+  const button=e.target.closest?.('[data-ft-staff-save="1"]');
   if(!button)return;
   e.preventDefault();
-  e.stopImmediatePropagation();
+  // Prevent other click actions from accidentally handling the save.
+  e.stopPropagation();
   const form=button.closest('form');
   if(!form||form.dataset.saving==='1')return;
   if(staffValidationError(form))return;
-  try{await submit(form);}
-  catch(err){say('Mitarbeiter konnte nicht gespeichert werden: '+(err?.message||String(err)),true);}
+  Promise.resolve(submit(form)).catch(err=>say('Mitarbeiter konnte nicht gespeichert werden: '+(err?.message||String(err)),true));
 },true);
 document.addEventListener('submit',e=>{
   e.preventDefault();
-  if(e.target.id==='staffForm'&&staffValidationError(e.target))return;
+  if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
 document.addEventListener('change',e=>{const x=e.target;if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;page();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){const date=x.dataset.standby,old=ST.h.shifts.find(s=>s.day===date),available=has('AVAILABILITY')&&ST.h.availability.some(a=>a.userId===x.value&&Number(a.day)===Number(date.slice(-2))&&a.answer==='YES')&&ST.h.availSubmissions.some(a=>a.userId===x.value);if(x.value&&!available&&has('AVAILABILITY')&&!confirm('Keine bestätigte Verfügbarkeit. Trotzdem einteilen?')){load();return;}if(old?.status==='PUBLISHED'&&!confirm('Veröffentlichten Bereitschaftsdienst ändern?')){load();return;}run(async()=>{const r=await api('planAssign',{companyId:firm().id,month:ST.month,day:date,userId:x.value,confirmAvailability:!available,confirmChange:old?.status==='PUBLISHED'});await load();if(r.warning)say(r.warning,true);},'Bereitschaft eingeteilt.');}});
@@ -277,5 +300,7 @@ document.addEventListener('dragover',e=>{if(e.target.closest('[data-pick]'))e.pr
 document.addEventListener('drop',e=>{const zone=e.target.closest('[data-pick]');if(zone){e.preventDefault();const el=document.getElementById(zone.dataset.pick),file=e.dataTransfer.files[0];if(el&&file){const dt=new DataTransfer();dt.items.add(file);el.files=dt.files;run(()=>uploadFile(el));}}});
 if(SLUG)rpc('ft_brandForLogin',SLUG).then(b=>{ST.brand=b;if(b)theme(b.color,b.secondaryColor);if(!ST.token)auth();}).catch(()=>{});
 load();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+// Previous service worker versions cached obsolete forms. Remove them once.
+if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations()
+  .then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});
 </script></body></html>
