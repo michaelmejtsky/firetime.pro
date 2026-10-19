@@ -140,7 +140,7 @@ async function rpc(name,...args){
 function api(action,p={}){
   const startedContext=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
   const result=rpc('ft_api',ST.token,action,p);
-  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne']);
+  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk']);
   if(readOnly.has(action))return result;
   return result.then(value=>{
     // Nach Schreibzugriff dürfen zuvor geöffnete Ansichten nicht als frisch gelten.
@@ -454,7 +454,19 @@ if(a==='pdf'){await run(async()=>{
  ftPdfMessage('PDF-Auftrag angelegt. Google erstellt den Bericht; der Status wird weiter geprüft …');
  ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
  });return;}
- if(a==='pdfArchive'){await run(async()=>{const userId=ST.selected||me().id;const archive=await api('pdfArchive',{companyId:firm().id,userId,month:ST.month});if(!Array.isArray(archive))throw Error('PDF-Archiv: Der Server liefert keine gültige Liste. Apps-Script-Bereitstellung prüfen.');const pane=document.getElementById('ftPdfArchive');if(pane)pane.innerHTML=archive.length?archive.map(x=>`<div class="row between"><span>${E(x.name)} · ${E(x.createdAt)}</span><span><button class="btn" data-act="pdfView" data-id="${E(x.id)}">Ansehen</button><button class="btn" data-act="pdfDownload" data-id="${E(x.id)}">Herunterladen</button></span></div>`).join(''):'Für diesen Monat ist noch kein PDF gespeichert.';});return;}
+ if(a==='pdfArchive'){
+ ftPdfMessage('PDF-Archiv wird geladen …');
+ try{
+  const userId=ST.selected||me().id;
+  const archive=await api('pdfArchive',{companyId:firm().id,userId,month:ST.month});
+  if(!Array.isArray(archive))throw Error('Der Server liefert keine gültige Archivliste.');
+  const pane=document.getElementById('ftPdfArchive');
+  let pending=null;try{pending=JSON.parse(sessionStorage.getItem(FT_PDF_JOB_STORE)||'null');}catch(e){}
+  const hasPending=pending&&pending.companyId===firm().id&&pending.userId===userId&&pending.month===ST.month;
+  if(pane)pane.innerHTML=archive.length?archive.map(x=>`<div class="row between"><span>${E(x.name)} · ${E(x.createdAt)}</span><span><button class="btn" data-act="pdfView" data-id="${E(x.id)}">Ansehen</button><button class="btn" data-act="pdfDownload" data-id="${E(x.id)}">Herunterladen</button></span></div>`).join(''):hasPending?'Noch kein fertiges PDF. Der PDF-Auftrag läuft; Status wird weiter geprüft.':'Für diesen Monat ist noch kein PDF gespeichert.';
+ }catch(err){ftPdfMessage('PDF-Archiv konnte nicht geladen werden: '+String(err.message||err),true);}
+ return;
+}
  if(a==='pdfView'||a==='pdfDownload'){await run(()=>ftPdfDownload({id,month:ST.month,userId:ST.selected||me().id},a==='pdfView'));return;}
 if(a==='preset'){const form=document.getElementById('rulesForm');const preset=id==='bsb'?{nightTypes:['OBJECT','INCIDENT','OTHER'],sundayTypes:['STANDBY'],holidayTypes:['STANDBY']}:{nightTypes:['OBJECT','INCIDENT','OTHER'],sundayTypes:['OBJECT','INCIDENT','OTHER'],holidayTypes:['OBJECT','INCIDENT','OTHER']};Object.keys(preset).forEach(k=>form.querySelectorAll(`[name="${k}"]`).forEach(x=>x.checked=preset[k].includes(x.value)));say('Vorlage ausgewählt. Erst Speichern aktiviert sie.');return;}
 if(a==='calendarTest'){await run(async()=>{const c=await api('calendarTest',{companyId:firm().id});say('Kalender gefunden: '+c.name);});return;}
