@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-ui-v2-iphone-fields-hotfix"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-at-pdf-times-archive-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -170,6 +170,22 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
   min-inline-size:0!important;max-inline-size:100%!important;overflow:hidden;
  }
 }
+
+/* Austrian PDF archive: clear month, employee, version, and local creation time. */
+.ft-pdf-archive-head{display:flex;flex-direction:column;gap:3px;margin:4px 0 16px}
+.ft-pdf-archive-head strong{font-size:16px;font-weight:760}
+.ft-pdf-archive-head span,.ft-pdf-archive-foot{color:#afc5d8;font-size:12px;line-height:1.55}
+.ft-pdf-archive-entry{background:#102438;border:1px solid #45627b;border-radius:14px;padding:15px;margin:12px 0}
+.ft-pdf-archive-top{display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px}
+.ft-pdf-archive-top strong{font-size:14px;line-height:1.45}
+.ft-pdf-archive-details{font-size:12px;color:#bed1e2;margin-top:5px}
+.ft-pdf-archive-new,.ft-pdf-archive-old{font-size:11px;padding:5px 9px;border-radius:999px;font-weight:700}
+.ft-pdf-archive-new{background:#1d513e;color:#d4f8e5}
+.ft-pdf-archive-old{background:#263e54;color:#d0e1ee}
+.ft-pdf-archive-file{margin-top:10px;color:#90acc4;font-size:11px;overflow-wrap:anywhere}
+.ft-pdf-archive-entry .actions{margin-bottom:0;gap:8px}
+.ft-pdf-archive-foot{padding:12px 2px}
+@media(max-width:500px){.ft-pdf-archive-entry .btn{flex:1 1 135px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -213,7 +229,40 @@ const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','
 const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:2});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
-const DT=v=>{if(!v)return '–';const d=new Date(v);return Number.isFinite(d.getTime())?d.toLocaleString('de-AT',{dateStyle:'short',timeStyle:'short'}):'–';};
+const FT_DISPLAY_TZ='Europe/Vienna';
+const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+function ftViennaParts(value){
+ if(!value)return null;
+ // ISO without timezone is a local wall clock, not a UTC instant.
+ const raw=typeof value==='string'?value:'';
+ const wall=/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::\d\d(?:\.\d+)?)?$/.exec(raw);
+ if(wall)return {year:wall[1],month:wall[2],day:wall[3],hour:wall[4],minute:wall[5]};
+ const d=value instanceof Date?value:new Date(value);
+ if(!Number.isFinite(d.getTime()))return null;
+ const p=Object.fromEntries(FT_VIENNA_FORMAT.formatToParts(d).filter(v=>v.type!=='literal').map(v=>[v.type,v.value]));
+ return {year:p.year,month:p.month,day:p.day,hour:p.hour,minute:p.minute};
+}
+function ftViennaDateTime(value){
+ const p=ftViennaParts(value);
+ return p?p.day+'.'+p.month+'.'+p.year+', '+p.hour+':'+p.minute:'–';
+}
+const DT=ftViennaDateTime;
+function ftPdfMonthLabel(month){
+ if(!/^20\d\d-(0[1-9]|1[012])$/.test(String(month||'')))return String(month||'Unbekannter Monat');
+ return new Intl.DateTimeFormat('de-AT',{timeZone:'UTC',month:'long',year:'numeric'}).format(new Date(month+'-01T12:00:00Z'));
+}
+function ftPdfArchiveCard(item,userName,isNewest=false){
+ const label=ftPdfMonthLabel(item.month||ST.month);
+ const version=Math.max(1,Number(item.version)||1);
+ const created=ftViennaDateTime(item.createdAt);
+ const dateLabel=created==='–'?'Datum unbekannt':created+' Uhr';
+ return '<article class="ft-pdf-archive-entry"><div class="ft-pdf-archive-top"><div><strong>'+E(label)+' · '+E(userName||'Mitarbeiter')+'</strong>'+
+   '<div class="ft-pdf-archive-details">Version '+E(version)+' · Erstellt am '+E(dateLabel)+' (Österreich)</div></div>'+
+   (isNewest?'<span class="ft-pdf-archive-new">Neueste Version</span>':'<span class="ft-pdf-archive-old">Ältere Version</span>')+'</div>'+
+   '<div class="ft-pdf-archive-file" title="'+E(item.name||'')+'">'+E(item.name||'Monatsbericht.pdf')+'</div>'+
+   '<div class="actions"><button class="btn primary" data-act="pdfView" data-id="'+E(item.id)+'">PDF ansehen</button>'+
+   '<button class="btn" data-act="pdfDownload" data-id="'+E(item.id)+'">Herunterladen</button></div></article>';
+}
 function monthOf(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 function nextMonth(m){const [y,n]=m.split('-').map(Number);return monthOf(new Date(y,n,1));}
 function days(m){const [y,n]=m.split('-').map(Number);return new Date(y,n,0).getDate();}
@@ -237,11 +286,8 @@ function shiftedEnd(start,hours){
   return stampInput(d);
 }
 function stampInput(s){
-  if(!s)return '';
-  const d=s instanceof Date?s:new Date(s);
-  if(!Number.isFinite(d.getTime()))return '';
-  const z=n=>String(n).padStart(2,'0');
-  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'T'+z(d.getHours())+':'+z(d.getMinutes());
+ const p=ftViennaParts(s);
+ return p?p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute:'';
 }
 function say(s,bad=false){const el=document.getElementById('toast');el.textContent=s;el.className='toast'+(bad?' bad':'');clearTimeout(window.ftHide);window.ftHide=setTimeout(()=>el.className='toast hide',6500);}
 async function rpc(name,...args){
@@ -544,16 +590,25 @@ async function ftSavePdf(){
   const result=await api('pdfStore',{companyId,userId,month,base64,requestId});
   if(!result?.id||!result?.name)throw Error('PDF-Speicherung wurde nicht bestätigt.');
   const pane=document.getElementById('ftPdfArchive');
-  if(pane)pane.innerHTML='<b>PDF im Firmenarchiv gespeichert (Version '+E(result.version)+')</b><div>'+E(result.name)+'</div><div class="actions"><button class="btn" data-act="pdfView" data-id="'+E(result.id)+'">Ansehen</button><button class="btn primary" data-act="pdfDownload" data-id="'+E(result.id)+'">Herunterladen</button></div>';
+  if(pane)pane.innerHTML='<div class="ft-pdf-archive-head"><strong>PDF dauerhaft gespeichert</strong><span>Eine neue Archivversion wurde angelegt.</span></div>'+ftPdfArchiveCard({...result,month},(ST.h?.users||[]).find(u=>u.id===userId)?.name||me()?.name,true);
   say('PDF wurde im Firmenarchiv gespeichert.');
  }catch(err){ftPdfMessage('PDF-Speicherung fehlgeschlagen: '+String(err.message||err)+'. Die Stunden bleiben gespeichert.',true);}
  finally{FT_PDF_SAVE_BUSY=false;if(button){button.disabled=false;button.textContent='PDF erstellen und speichern';}}
 }
 async function ftLocalPdf(options={download:true}){
- const c=firm(), id=ST.selected||me().id, u=(ST.h?.users||[]).find(x=>x.id===id)||me();
- const r=ST.h?.reports?.[id];
- if(!c||!u||!r||r.target===undefined||r.worked===undefined)throw Error('Die Monatswerte sind noch nicht vollständig geladen. Bitte Monatsberichte neu öffnen.');
- const month=ST.month, status=(ST.h.months||[]).find(x=>x.userId===id&&x.month===month)?.status||'OFFEN';
+ const c=firm(),id=ST.selected||me().id,month=ST.month;
+ if(!c?.id||!id)throw Error('Firma oder Mitarbeiter fehlen.');
+ ftPdfMessage('Aktuelle Stunden und Tätigkeiten werden aus FireTime Pro geladen …');
+ // One authoritative, access-controlled snapshot: no stale view-cache activities.
+ const snapshot=await api('report',{companyId:c.id,userId:id,month});
+ if(firm()?.id!==c.id||ST.month!==month||(ST.selected||me().id)!==id)
+  throw Error('Firma, Monat oder Mitarbeiter haben sich geändert. Bitte Export erneut starten.');
+ const u=snapshot?.user,r=snapshot?.report;
+ if(!u||String(u.id)!==String(id)||!r||r.target===undefined||r.worked===undefined||!Array.isArray(snapshot.entries))
+  throw Error('Unvollständige Berichtsdaten. Das PDF wurde nicht gespeichert.');
+ const entries=snapshot.entries.filter(a=>String(a.userId)===String(id)&&
+   String(a.companyId)===String(c.id)).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+ const status=(ST.h?.months||[]).find(x=>x.userId===id&&x.month===month)?.status||'OFFEN';
  const state={APPROVED:'FREIGEGEBEN',FINAL:'ABGESCHLOSSEN',SUBMITTED:'EINGEREICHT',RETURNED:'ZURÜCKGEGEBEN'}[status]||'VORLÄUFIG / OFFEN';
  const W=595,H=842,S=2,pages=[];let ctx,y;
  const fmt=n=>Number(n||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' h';
@@ -595,22 +650,28 @@ async function ftLocalPdf(options={download:true}){
  rows.forEach((row,i)=>{const yy=y+i*36;if(i%2===0){ctx.fillStyle='#F2F6FA';ctx.fillRect(40,yy,515,35);}text(row[0],53,yy+23,11);text(fmt(row[1]),444,yy+23,11,true);});
  y+=rows.length*36+16;
  if(has('PAY_PREVIEW')&&Number.isFinite(Number(r.estimatedGross))){text('UNVERBINDLICHE BRUTTOVORSCHAU',40,y+5,11,true,'#14273D');text(euro(r.estimatedGross),390,y+5,13,true);y+=34;}
- text('Hinweis: Bereitschaft zählt nicht zum regulären Monatssoll.',40,738,9,false,'#64748B');
- text('Browser-PDF aus geladenen Monatswerten – nicht im Google-Archiv gespeichert.',40,757,9,false,'#64748B');
- text('Keine rechtsverbindliche Lohn- oder Gehaltsabrechnung.',40,773,9,false,'#64748B');
- const entries=(ST.h.activities||[]).filter(a=>a.userId===id&&String(a.start||'').slice(0,7)===month).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+ text('Tätigkeitseinträge in diesem Bericht: '+entries.length,40,716,9,true,'#243449');
+ text('Bereitschaft wird separat geführt und zählt nicht zum Monatssoll.',40,736,9,false,'#64748B');
+ text('Uhrzeiten: Österreich (Europe/Vienna) · 24-Stunden-Format · MEZ/MESZ.',40,754,9,false,'#64748B');
+ text('Aus gespeicherten FireTime-Pro-Daten · keine Lohnabrechnung.',40,772,9,false,'#64748B');
  if(entries.length){
   newPage(true);
   const typ={OBJECT:'Objektkontrolle',INCIDENT:'Einsatz',OTHER:'Sonstige Tätigkeit'};
   for(const a of entries){
-   if(y>751)newPage(true);
-   const start=new Date(a.start),end=new Date(a.end);
-   const when=Number.isFinite(start.getTime())?start.toLocaleString('de-AT',{dateStyle:'short',timeStyle:'short'}):String(a.start||'');
-   const hrs=Number.isFinite(start.getTime())&&Number.isFinite(end.getTime())?Math.max(0,(end-start)/3600000-Number(a.breakMinutes||0)/60):0;
-   ctx.fillStyle=y%2?'#F4F7FA':'#FFFFFF';ctx.fillRect(40,y-16,515,53);
-   text(when+'  ·  '+(typ[a.type]||'Arbeit')+'  ·  '+fmt(hrs),51,y,10,true);
-   text(String(a.description||a.object||'').slice(0,90),51,y+19,9,false,'#64748B');
-   y+=55;
+   if(y>736)newPage(true);
+   const start=new Date(a.start),end=new Date(a.end),pause=Number(a.breakMinutes)||0;
+   const hrs=Number.isFinite(start.getTime())&&Number.isFinite(end.getTime())
+    ?Math.max(0,(end-start)/3600000-pause/60):null;
+   const from=ftViennaDateTime(a.start),to=ftViennaDateTime(a.end);
+   const title=(typ[a.type]||'Arbeitszeit')+(hrs===null?'':'  ·  '+fmt(hrs));
+   ctx.fillStyle='#F2F6FA';ctx.fillRect(40,y-19,515,67);
+   text(title,51,y,11,true,'#172D42');
+   text('Beginn: '+from+' Uhr   |   Ende: '+to+' Uhr',51,y+19,9,false,'#344960');
+   const details=['Pause: '+pause+' min'];
+   if(a.object)details.push('Objekt: '+String(a.object).slice(0,42));
+   if(a.description)details.push(String(a.description).slice(0,55));
+   text(details.join('   ·   ').slice(0,105),51,y+37,9,false,'#64748B');
+   y+=76;
   }
  }
  pages.forEach((p,i)=>{const cx=p.getContext('2d');cx.setTransform(S,0,0,S,0,0);cx.fillStyle='#64748B';cx.font='9px Arial';cx.fillText('FireTime Pro  ·  Developed by Michael Mejtsky',40,813);cx.fillText('Seite '+(i+1)+'/'+pages.length,492,813);});
@@ -634,7 +695,7 @@ async function ftLocalPdf(options={download:true}){
  write('xref\n0 '+count+'\n0000000000 65535 f \n');
  for(let i=1;i<count;i++)write(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
  write('trailer\n<< /Size '+count+' /Root 1 0 R >>\nstartxref\n'+start+'\n%%EOF');
- const blob=new Blob(pieces,{type:'application/pdf'}),name='FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_Monatsbericht.pdf';
+ const blob=new Blob(pieces,{type:'application/pdf'}),name='FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_'+String(u.name||'Mitarbeiter').replace(/[^\p{L}\p{N}_-]+/gu,'_').slice(0,45)+'_Monatsbericht.pdf';
  if(options.download){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);
@@ -813,7 +874,14 @@ if(a==='pdf'){
   const pane=document.getElementById('ftPdfArchive');
   let pending=null;try{pending=JSON.parse(sessionStorage.getItem(FT_PDF_JOB_STORE)||'null');}catch(e){}
   const hasPending=pending&&pending.companyId===firm().id&&pending.userId===userId&&pending.month===ST.month;
-  if(pane)pane.innerHTML=archive.length?archive.map(x=>`<div class="row between"><span>${E(x.name)} · ${E(x.createdAt)}</span><span><button class="btn" data-act="pdfView" data-id="${E(x.id)}">Ansehen</button><button class="btn" data-act="pdfDownload" data-id="${E(x.id)}">Herunterladen</button></span></div>`).join(''):hasPending?'Noch kein fertiges PDF. Der PDF-Auftrag läuft; Status wird weiter geprüft.':'Für diesen Monat ist noch kein PDF gespeichert.';
+  if(pane){
+    const selected=(ST.h?.users||[]).find(u=>u.id===userId);
+    const ordered=archive.slice().sort((a,b)=>(Number(b.version)||0)-(Number(a.version)||0)||String(b.createdAt).localeCompare(String(a.createdAt)));
+    pane.innerHTML=ordered.length?'<div class="ft-pdf-archive-head"><strong>Gespeicherte Monatsberichte</strong><span>Monat und Mitarbeiter · Neueste Version zuerst</span></div>'+
+      ordered.map((x,i)=>ftPdfArchiveCard(x,selected?.name||me()?.name,i===0)).join('')+
+      '<div class="ft-pdf-archive-foot">Ältere PDF-Versionen bleiben unverändert. Bei abweichenden Uhrzeiten bitte einen neuen Bericht erstellen und speichern.</div>':
+      hasPending?'Noch kein fertiges PDF. Der PDF-Auftrag läuft; Status wird weiter geprüft.':'Für diesen Monat ist noch kein PDF gespeichert.';
+  }
  }catch(err){ftPdfMessage('PDF-Archiv konnte nicht geladen werden: '+String(err.message||err),true);}
  return;
 }
