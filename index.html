@@ -462,7 +462,7 @@ if(a==='pdf'){
  const context={month:ST.month,userId:ST.selected||me().id,companyId:firm().id};
  try{
    ftPdfMessage('PDF-Auftrag wird gestartet …');
-   const r=await api('pdfPrepare',context);
+   const r=await api('pdfPrepare',{...context,refresh:true});
    if(r.status==='READY'){await ftPdfDownload({...r,...context},false);ftPdfMessage('PDF erfolgreich heruntergeladen.');return;}
    if(!r.id||!['QUEUED','RUNNING'].includes(r.status))throw Error('PDF-Auftrag nicht gestartet: '+(r.error||r.status||'Keine Antwort'));
    const job={id:r.id,...context};
