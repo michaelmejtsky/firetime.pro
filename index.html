@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-tempo-v1.6.1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-tempo-v1.6.1-pwa-install-1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -22,7 +22,35 @@ input[type=checkbox]{width:17px;min-height:0;accent-color:var(--accent)}input[ty
 .drop{border:2px dashed #7093ae;text-align:center;padding:22px;border-radius:12px;cursor:pointer}.drop input{display:none}
 .toast{position:fixed;bottom:18px;right:18px;z-index:30;padding:14px 17px;max-width:400px;border-radius:12px;background:#216249;box-shadow:0 8px 30px #0009}.toast.bad{background:#903b47}.hide{display:none!important}
 @media(max-width:800px){.shell{display:block}.side{padding:8px 10px}.side>.brand,.side>.small{display:none}.nav{flex-direction:row;overflow-x:auto;margin:0}.nav button{white-space:nowrap}.main{padding:15px}.days{gap:3px}.day{min-height:48px;font-size:12px}}
-</style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"></head><body><div id="app"></div><div id="toast" class="toast hide"></div><script>
+
+/* FireTime Pro installierbar – unaufdringlicher eigener Installationsdialog */
+.ft-install-backdrop{position:fixed;inset:0;z-index:1001;background:rgba(3,12,24,.76);display:none;align-items:center;justify-content:center;padding:16px}
+.ft-install-backdrop.is-open{display:flex}
+.ft-install-dialog{width:min(100%,440px);border-radius:20px;padding:24px;background:#17293e;color:#f3f8ff;border:1px solid #45627d;box-shadow:0 28px 80px #0008}
+.ft-install-logo{display:flex;align-items:center;gap:14px;margin-bottom:15px}
+.ft-install-logo img{width:62px;height:62px;border-radius:15px;background:#13263d}
+.ft-install-dialog h2{font-size:23px;margin:0 0 6px}
+.ft-install-dialog p{margin:0 0 15px;color:#bed2e6;line-height:1.5}
+.ft-install-actions{display:flex;flex-wrap:wrap;gap:9px}
+.ft-install-actions button{flex:1;min-width:115px;min-height:47px}
+.ft-install-foot{font-size:12px;margin-top:13px;color:#b0c4d8}
+.ft-install-help{display:none;margin-top:15px;padding:14px;border-radius:10px;background:#213d53;color:#e9f6ff;line-height:1.65}
+.ft-install-help.is-visible{display:block}
+.ft-install-help ol{margin:6px 0 0 20px;padding:0}
+.ft-install-shortcut{position:fixed;z-index:998;bottom:16px;left:16px;border-radius:10px;padding:9px 14px;background:#213e5b;border:1px solid #6988a6;color:#fff;box-shadow:0 6px 16px #0005;font-weight:650;display:none}
+.ft-install-shortcut.is-visible{display:block}
+@media(max-width:480px){.ft-install-dialog{padding:20px}.ft-install-shortcut{bottom:11px;left:11px;font-size:13px}}
+</style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
+<div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
+  <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
+    <div class="ft-install-logo"><img src="./assets/firetime-192.png" alt="FireTime-Pro-Symbol"><div><h2 id="ft-install-title">FireTime Pro installieren?</h2><span class="muted small">Direkt vom Homebildschirm öffnen</span></div></div>
+    <p id="ft-install-info">Möchtest du FireTime Pro als App zu deinem Homebildschirm hinzufügen? Deine Anmeldung bleibt geschützt.</p>
+    <div class="ft-install-actions"><button type="button" class="btn primary" id="ft-install-yes">Ja, installieren</button><button type="button" class="btn" id="ft-install-later">Später</button></div>
+    <div class="ft-install-help" id="ft-install-help" aria-live="polite"></div>
+    <div class="ft-install-foot">Kostenlos · Keine App-Store-Installation erforderlich. Die eigentliche Installation muss im Browser bestätigt werden.</div>
+  </div>
+</div>
+<button type="button" class="ft-install-shortcut" id="ft-install-open" aria-label="FireTime Pro installieren">↧ App installieren</button><script>
 const INVITE=new URLSearchParams(location.search).get('invite') || ''; 
 const SLUG=new URLSearchParams(location.search).get('firm') || ''; 
 const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:null,logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
@@ -462,7 +490,87 @@ document.addEventListener('dragover',e=>{if(e.target.closest('[data-pick]'))e.pr
 document.addEventListener('drop',e=>{const zone=e.target.closest('[data-pick]');if(zone){e.preventDefault();const el=document.getElementById(zone.dataset.pick),file=e.dataTransfer.files[0];if(el&&file){const dt=new DataTransfer();dt.items.add(file);el.files=dt.files;run(()=>uploadFile(el));}}});
 if(SLUG)rpc('ft_brandForLogin',SLUG).then(b=>{ST.brand=b;if(b)theme(b.color,b.secondaryColor);if(!ST.token)auth();}).catch(()=>{});
 load();
-// Previous service worker versions cached obsolete forms. Remove them once.
-if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations()
-  .then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});
+// PWA-Installation: Eigener Dialog + systemeigene Bestätigung (nur bei unterstützten Browsern).
+// Einladungstoken bleiben ausschließlich in der geöffneten Webseite; die App-Start-URL ist immer /.
+(function ftInstallUI(){
+  const dialog=document.getElementById('ft-install-mask');
+  const help=document.getElementById('ft-install-help');
+  const openBtn=document.getElementById('ft-install-open');
+  const yesBtn=document.getElementById('ft-install-yes');
+  const laterBtn=document.getElementById('ft-install-later');
+  const installKey='ft_pwa_installed_v1';
+  const dismissKey='ft_pwa_snooze_until_v1';
+  const agent=navigator.userAgent||'';
+  const ios=/iPad|iPhone|iPod/.test(agent)||(/Macintosh/.test(agent)&&navigator.maxTouchPoints>1);
+  const mobile=ios||/Android/i.test(agent);
+  const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+  const installed=()=>standalone()||localStorage.getItem(installKey)==='yes';
+  let nativePrompt=null;
+  function close(){dialog.classList.remove('is-open');dialog.setAttribute('aria-hidden','true');help.classList.remove('is-visible');}
+  function show(force=false){
+    if(installed())return;
+    if(!force&&Date.now()<Number(localStorage.getItem(dismissKey)||'0'))return;
+    dialog.classList.add('is-open');dialog.setAttribute('aria-hidden','false');
+    help.classList.remove('is-visible');
+    yesBtn.textContent=ios?'Ja, Anleitung anzeigen':'Ja, installieren';
+  }
+  function updateButton(){openBtn.classList.toggle('is-visible',!installed());}
+  function showHelp(message){help.textContent='';help.classList.add('is-visible');
+    const p=document.createElement('div');p.textContent=message;help.appendChild(p);
+  }
+  window.addEventListener('beforeinstallprompt',event=>{
+    event.preventDefault();
+    nativePrompt=event;
+    updateButton();
+  });
+  window.addEventListener('appinstalled',()=>{
+    nativePrompt=null;localStorage.setItem(installKey,'yes');close();updateButton();
+  });
+  openBtn.addEventListener('click',()=>show(true));
+  laterBtn.addEventListener('click',()=>{
+    localStorage.setItem(dismissKey,String(Date.now()+7*86400000));close();
+  });
+  dialog.addEventListener('click',event=>{if(event.target===dialog)close();});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')close();});
+  yesBtn.addEventListener('click',async()=>{
+    if(nativePrompt){
+      const chosen=nativePrompt;
+      nativePrompt=null;
+      try{
+        await chosen.prompt();
+        const result=await chosen.userChoice;
+        if(result?.outcome==='accepted'){
+          localStorage.setItem(installKey,'yes');close();updateButton();
+        }else{
+          showHelp('Installation abgebrochen. Du kannst FireTime Pro später wieder über „App installieren“ hinzufügen.');
+        }
+      }catch(err){showHelp('Das Gerät hat die automatische Installationsabfrage nicht geöffnet. Bitte installiere FireTime Pro über das Browsermenü.');}
+      return;
+    }
+    if(ios){
+      showHelp('Auf dem iPhone: Im Browser auf „Teilen“ (Quadrat mit Pfeil) tippen → „Zum Home-Bildschirm“ / „Zum Homebildschirm hinzufügen“ → „Hinzufügen“. Apple erlaubt diesen Schritt nicht automatisch.');
+    }else if(/Android/i.test(agent)){
+      showHelp('Bitte in Chrome oder Samsung Internet öffnen und im Browsermenü ⋮ → „App installieren“ oder „Zum Startbildschirm hinzufügen“ auswählen. In manchen E-Mail-Apps muss die Seite zuerst über „Im Browser öffnen“ geöffnet werden.');
+    }else{
+      showHelp('Öffne das Installationssymbol in der Adressleiste von Chrome oder Edge oder verwende das Browsermenü „App installieren“.');
+    }
+  });
+  updateButton();
+  if(mobile&&!installed()){
+    // Beim Öffnen eines Einladungslinks direkt anbieten; sonst nur beim ersten Besuch.
+    const onInvite=new URLSearchParams(location.search).has('invite');
+    const hasSeen=localStorage.getItem('ft_pwa_offer_seen_v1')==='yes';
+    if(onInvite||!hasSeen){
+      localStorage.setItem('ft_pwa_offer_seen_v1','yes');
+      setTimeout(()=>show(false),1100);
+    }
+  }
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',()=>{
+      navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(err=>{
+        console.warn('FireTime Pro: PWA-Service-Worker konnte nicht aktiviert werden:',err.message);
+      });
+    });
+  }
+})();
 </script></body></html>
