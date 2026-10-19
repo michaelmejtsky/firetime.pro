@@ -129,8 +129,8 @@ async function rpc(name,...args){
     case 'ft_api':request={type:'api',token:args[0],action:args[1],data:args[2]||{}};break;
     default:throw Error('Nicht freigegebener API-Aufruf: '+name);
   }
-  const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk'].includes(request.action);
-  const deadline=pdfAction?(request.action==='pdfPrepare'?25000:20000):65000;
+  const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk','pdfStore'].includes(request.action);
+  const deadline=pdfAction?(request.action==='pdfStore'?55000:request.action==='pdfPrepare'?25000:20000):65000;
   const abort=new AbortController();
   const timeout=setTimeout(()=>abort.abort(),deadline);
   let response;
@@ -331,7 +331,42 @@ function ftResumePdfJob(){
  ftPdfMessage('PDF-Auftrag vorhanden. Status wird geprüft …');
  if(!FT_PDF_RUNNING_ID)ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
 }
-async function ftLocalPdf(){
+const FT_PDF_SAVE_CONTEXT_KEY='ft_pdf_save_request_';
+let FT_PDF_SAVE_BUSY=false;
+function ftFileBase64(blob){
+ return new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=()=>{const result=String(reader.result||'');const pos=result.indexOf(',');if(pos<0)return reject(Error('PDF-Konvertierung fehlgeschlagen.'));resolve(result.slice(pos+1));};
+  reader.onerror=()=>reject(Error('PDF konnte nicht zum Speichern eingelesen werden.'));
+  reader.readAsDataURL(blob);
+ });
+}
+async function ftCreateAndSavePdf(){
+ if(FT_PDF_SAVE_BUSY)return;
+ FT_PDF_SAVE_BUSY=true;
+ const btn=document.querySelector('button[data-act="pdfSave"]');
+ const context={companyId:firm()?.id,userId:ST.selected||me()?.id,month:ST.month};
+ if(btn){btn.disabled=true;btn.textContent='PDF wird gespeichert …';}
+ try{
+  ftPdfMessage('Monatsbericht wird erstellt …');
+  const pdf=await ftLocalPdf({download:false});
+  if(pdf.size>2*1024*1024)throw Error('PDF ist zu groß für den Direktexport. Bitte den Monat mit weniger Einträgen exportieren.');
+  ftPdfMessage('PDF wird dauerhaft in Google Drive gespeichert …');
+  const base64=await ftFileBase64(pdf.blob);
+  const requestId=(typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function')?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+  const saved=await api('pdfStore',{...context,requestId,base64});
+  if(!saved?.id||!saved?.name)throw Error('Die Speicherung wurde vom Server nicht bestätigt.');
+  const pane=document.getElementById('ftPdfArchive');
+  if(pane) pane.innerHTML='<div><b>Im Firmenarchiv gespeichert: Version '+E(saved.version||1)+'</b></div><div class="small muted">'+E(saved.name)+'</div><div class="actions"><button class="btn primary" data-act="pdfDownload" data-id="'+E(saved.id)+'">Herunterladen</button><button class="btn" data-act="pdfView" data-id="'+E(saved.id)+'">Ansehen</button></div>';
+  say('PDF im Firmenarchiv gespeichert.');
+ }catch(err){
+  ftPdfMessage('PDF nicht gespeichert: '+String(err?.message||err)+'. Die Stunden bleiben in der Datenbank erhalten.',true);
+ }finally{
+  FT_PDF_SAVE_BUSY=false;
+  if(btn){btn.disabled=false;btn.textContent='PDF erstellen und speichern';}
+ }
+}
+async function ftLocalPdf(options={download:true}){
  const c=firm(), id=ST.selected||me().id, u=(ST.h?.users||[]).find(x=>x.id===id)||me();
  const r=ST.h?.reports?.[id];
  if(!c||!u||!r||r.target===undefined||r.worked===undefined)throw Error('Die Monatswerte sind noch nicht vollständig geladen. Bitte Monatsberichte neu öffnen.');
@@ -417,11 +452,14 @@ async function ftLocalPdf(){
  for(let i=1;i<count;i++)write(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
  write('trailer\n<< /Size '+count+' /Root 1 0 R >>\nstartxref\n'+start+'\n%%EOF');
  const blob=new Blob(pieces,{type:'application/pdf'});
- const url=URL.createObjectURL(blob);
- const a=document.createElement('a');a.href=url;a.download='FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_Monatsbericht.pdf';document.body.appendChild(a);
- try{a.click();}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);}
- ftPdfMessage('PDF sofort erstellt. Datei wurde zum Herunterladen angeboten (nicht im Google-Archiv gespeichert).');
- return {size:blob.size,pages:pages.length};
+ const filename='FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_Monatsbericht.pdf';
+ if(options.download){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);
+  try{a.click();}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);}
+  ftPdfMessage('PDF heruntergeladen (nicht im Google-Archiv gespeichert).');
+ }
+ return {blob,filename,size:blob.size,pages:pages.length};
 }
 async function ftPdfDownload(record,view){
  const p={companyId:firm().id,userId:record.userId||ST.selected||me().id,month:record.month||ST.month,id:record.id};
@@ -450,7 +488,7 @@ async function ftPdfDownload(record,view){
    setTimeout(()=>URL.revokeObjectURL(url),120000);
  }
 }
-function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfLocal">PDF sofort herunterladen</button><button class="btn" data-act="pdf">PDF ins Archiv speichern (Google)</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>`;}
+function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfSave">PDF erstellen und speichern</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button><button class="btn" data-act="pdfLocal">PDF nur herunterladen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>`;}
 function leave(){
  const mine=ST.h.leaves||[];
  const statuses={PENDING:'Offen',APPROVED:'Genehmigt',REJECTED:'Abgelehnt',WITHDRAWN:'Zurückgezogen',CANCEL_PENDING:'Stornierung beantragt',CANCELLED:'Storniert'};
@@ -546,6 +584,7 @@ if(a==='leaveCancelApprove'||a==='leaveCancelReject'){if(!confirm(a==='leaveCanc
 if(a==='leaveApprove'||a==='leaveReject'){const approve=a==='leaveApprove',credit=approve?prompt('Zeitgutschrift für den Urlaub in Stunden (nach Stundenmodell):','0'):'0';if(credit===null)return;await run(async()=>{await api('leaveReview',{id,companyId:firm().id,status:approve?'APPROVED':'REJECTED',creditHours:Number(credit)});await load();},'Urlaub bearbeitet.');return;}
 if(a==='submitMonth'){if(confirm('Alle eigenen Stunden vollständig erfasst?'))await run(async()=>{await api('monthSubmit',{month:ST.month,userId:ST.selected||me().id,companyId:firm().id});await load();},'Monat eingereicht.');return;}
 if(a==='approveMonth'||a==='returnMonth'){const approved=a==='approveMonth',note=approved?'':prompt('Begründung für die Rückgabe','');if(note===null)return;await run(async()=>{await api('monthReview',{id,companyId:firm().id,status:approved?'APPROVED':'RETURNED',note});await load();},'Monat bearbeitet.');return;}
+if(a==='pdfSave'){await ftCreateAndSavePdf();return;}
 if(a==='pdfLocal'){await run(()=>ftLocalPdf(),'PDF-Download angeboten.');return;}
 if(a==='pdf'){
  if(FT_PDF_PREPARE_BUSY)return;
