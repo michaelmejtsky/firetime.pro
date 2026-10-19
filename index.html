@@ -263,6 +263,7 @@ function page(){
    if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
  });
  const el=document.getElementById('content');if(el)el.innerHTML=(views[ST.tab]||dashboard)();
+ if(ST.tab==='reports')ftResumePdfJob();
 }
 function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;const r=ST.h.reports[me().id]||{};return hint('Deine freigeschalteten Funktionen für '+E(firm().name)+'. Geplante Dienste sind nicht automatisch Arbeitszeit – erst die erfassten Ist-Zeiten zählen zum Soll.')+`<div class="grid">${[['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']].map(([k,v])=>`<div class="card"><div class="muted small">${E(k)}</div><div class="metric">${E(v)}</div></div>`).join('')}</div>${has('WORKPLAN')?`<div class="card"><h3>Meine veröffentlichten Arbeitsdienste</h3>${ST.h.workShifts.filter(s=>s.userId===me().id||isAdmin()).slice(0,12).map(s=>`<div>${E(s.title)} · ${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine Dienste'}</div>`:''}${has('STANDBY')?`<div class="card"><h3>Bereitschaftsübersicht</h3>${ST.h.shifts.filter(s=>s.status==='PUBLISHED').map(s=>`<div>${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine veröffentlichten Dienste'}</div>`:''}`;}
 function profileFields(p){return `<div class="cols">${select('workModel','Arbeitszeitmodell',[['OFFICE','Büro / fixe Wochenzeiten'],['SHIFT12','12-Stunden-Schicht'],['SHIFT24','24-Stunden-Schicht'],['FLEX','Flexible Arbeitszeit']],p.workModel)}${input('Üblicher Beginn','workStart',p.workStart||'08:00','time','required')}${input('Übliche Stunden je Dienst','workHours',p.workHours||8,'number','min="0.25" max="24" step="0.25" required')}${input('Übliche Wochentage (Mo=1, So=7)','workdays',p.workdays||'1,2,3,4,5')}${input('Bereitschaftsbeginn (wenn gebucht)','standbyStart',p.standbyStart||'07:00','time','required')}${input('Bereitschaftsdauer in Stunden','standbyHours',p.standbyHours||24,'number','min="1" max="48" required')}${input('Zweite Firmenfarbe','secondaryColor',p.secondaryColor||'#19354d','color')}</div>${input('Begrüßung auf der Login-Seite (optional)','welcomeText',p.welcomeText||'')}`;}
@@ -271,16 +272,53 @@ function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue 
 function license(){if(me().role!=='SYSADMIN'||!firm())return '';return hint('Nur du schaltest die gekauften Funktionen frei. Der Firmenadministrator kann keine Module dazukaufen oder selbst aktivieren.')+`<div class="card"><h2>Modulfreigabe · ${E(firm().name)}</h2><form id="licenseForm">${modulesForm(ST.h.modules,'sale')}<button class="btn primary">Modulfreigabe speichern</button></form></div>`;}
 function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${input('Monatssoll (Stunden)','monthlyHours',u?.monthlyHours??25,'number','min="0" max="300" step="0.25"')}${input('Stundensatz (€)','hourlyRate',u?.hourlyRate??0,'number','min="0" step="0.01"')}${input('Urlaubsrest in Tagen','leaveBalance',u?.leaveBalance??25,'number','min="0"')}${input('Urlaubsanspruch in Tagen','leaveEntitlement',u?.leaveEntitlement??25,'number','min="0"')}${input('Stunden-Startsaldo','openingHours',u?.openingHours??0,'number','step="0.25"')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
 function time(){const a=ST.h.activities.filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month),edit=a.find(x=>x.id===ST.edit);return hint('Hier werden nur tatsächliche Arbeitsstunden erfasst. Ein Objekt ist ein Freitextfeld – keine Objektlisten oder Objektzuweisung. BSB3100: Objektkontrollen zählen zum Soll und dürfen parallel zur Bereitschaft laufen. Störungseinsätze zählen zum Soll und unterbrechen die Bereitschaft von Alarm bis Rückkehr.')+monthPick()+`<div class="card"><h2>${edit?'Arbeitszeit bearbeiten':'Arbeitszeit erfassen'}</h2><form id="timeForm"><input type="hidden" name="id" value="${E(edit?.id||'')}"><div class="cols">${isAdmin()?optionsUsers('userId',edit?.userId||me().id):''}${select('type','Art der Tätigkeit',[['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz (Anruf bis Rückkehr)'],['OTHER','Sonstige Arbeitszeit']],edit?.type||'OBJECT')}${input('Beginn','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')}${input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')}${input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')}${input('Objekt (optional)','object',edit?.object||'')}</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">${E(edit?.description||'')}</textarea></label><button class="btn primary">Arbeitszeit speichern</button>${edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt</th><th></th></tr>${a.map(x=>`<tr><td>${DT(x.start)} – ${DT(x.end)}</td><td>${E(who(x.userId).name)}</td><td>${E(x.type)}</td><td>${E(x.object)}</td><td><button class="btn" data-act="editTime" data-id="${x.id}">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="${x.id}">Löschen</button></td></tr>`).join('')}</table></div></div>`;}
-async function ftPollPdfJob(job){
- const currentCompany=firm().id,userId=ST.selected||me().id,month=ST.month;
- for(let n=0;n<8;n++){
-  await new Promise(resolve=>setTimeout(resolve,3000));
-  const r=await api('pdfJobStatus',{id:job.id,companyId:currentCompany,userId,month});
-  if(r.status==='READY'){say('PDF fertig – bitte im Archiv öffnen.');return r;}
-  if(r.status==='ERROR')throw Error('PDF-Erstellung fehlgeschlagen: '+(r.error||'Serverfehler'));
+const FT_PDF_JOB_STORE='ft_pdf_pending_job_v2';
+let FT_PDF_RUNNING_ID='';
+function ftPdfMessage(message,bad=false){
+ const pane=document.getElementById('ftPdfArchive');
+ if(pane){pane.textContent=message;pane.style.whiteSpace='normal';}
+ if(bad)say(message,true);
+}
+function ftPdfJobReady(result,job){
+ try{sessionStorage.removeItem(FT_PDF_JOB_STORE);}catch(e){}
+ const pane=document.getElementById('ftPdfArchive');
+ if(pane&&ST.tab==='reports'&&firm()?.id===job.companyId&&ST.month===job.month&&(ST.selected||me().id)===job.userId){
+  pane.innerHTML='<div class="row between"><span>PDF fertig: '+E(result.name||'Monatsbericht')+'</span><span><button class="btn" data-act="pdfView" data-id="'+E(result.id)+'">Ansehen</button><button class="btn" data-act="pdfDownload" data-id="'+E(result.id)+'">Herunterladen</button></span></div>';
  }
- say('PDF wird weiter erstellt. Bitte das Archiv später erneut öffnen.');
- return null;
+ say('PDF ist fertig – jetzt ansehen oder herunterladen.');
+}
+async function ftPollPdfJob(job){
+ if(!job?.id||!job?.companyId||!job?.userId||!job?.month)return;
+ if(FT_PDF_RUNNING_ID===job.id)return;
+ FT_PDF_RUNNING_ID=job.id;
+ try{
+  // Einmal-Trigger starten in Apps Script nicht zwingend sofort.
+  // Auch langsame Dokumentenerstellung kann mehrere Minuten benötigen.
+  for(let n=0;n<48;n++){
+   await new Promise(resolve=>setTimeout(resolve,10000));
+   let r;
+   try{r=await api('pdfJobStatus',{id:job.id,companyId:job.companyId,userId:job.userId,month:job.month});}
+   catch(err){ftPdfMessage('PDF-Status vorübergehend nicht erreichbar: '+(err.message||'Verbindungsfehler'));continue;}
+   if(r.status==='READY'){ftPdfJobReady(r,job);return r;}
+   if(r.status==='ERROR'){
+    try{sessionStorage.removeItem(FT_PDF_JOB_STORE);}catch(e){}
+    ftPdfMessage('PDF konnte nicht erzeugt werden: '+(r.error||'Backend-Fehler ohne Details'),true);
+    return null;
+   }
+   if(ST.tab==='reports'&&firm()?.id===job.companyId&&ST.month===job.month){
+    ftPdfMessage('PDF wird erzeugt (Status: '+(r.status==='RUNNING'?'in Bearbeitung':'wartet auf Google')+'). Die Seite kann geöffnet bleiben.');
+   }
+  }
+  ftPdfMessage('PDF ist nach längerer Zeit noch nicht fertig. Der Auftrag bleibt im Backend gespeichert. Bitte später erneut das Archiv öffnen.',true);
+  return null;
+ }finally{FT_PDF_RUNNING_ID='';}
+}
+function ftResumePdfJob(){
+ if(ST.tab!=='reports'||!firm()||!me())return;
+ let job=null;try{job=JSON.parse(sessionStorage.getItem(FT_PDF_JOB_STORE)||'null');}catch(e){}
+ if(!job||!job.id||job.companyId!==firm().id||job.month!==ST.month||job.userId!==(ST.selected||me().id))return;
+ ftPdfMessage('PDF-Auftrag vorhanden. Status wird geprüft …');
+ if(!FT_PDF_RUNNING_ID)ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
 }
 async function ftPdfDownload(record,view){
  const p={companyId:firm().id,userId:record.userId||ST.selected||me().id,month:record.month||ST.month,id:record.id};
@@ -405,7 +443,17 @@ if(a==='leaveCancelApprove'||a==='leaveCancelReject'){if(!confirm(a==='leaveCanc
 if(a==='leaveApprove'||a==='leaveReject'){const approve=a==='leaveApprove',credit=approve?prompt('Zeitgutschrift für den Urlaub in Stunden (nach Stundenmodell):','0'):'0';if(credit===null)return;await run(async()=>{await api('leaveReview',{id,companyId:firm().id,status:approve?'APPROVED':'REJECTED',creditHours:Number(credit)});await load();},'Urlaub bearbeitet.');return;}
 if(a==='submitMonth'){if(confirm('Alle eigenen Stunden vollständig erfasst?'))await run(async()=>{await api('monthSubmit',{month:ST.month,userId:ST.selected||me().id,companyId:firm().id});await load();},'Monat eingereicht.');return;}
 if(a==='approveMonth'||a==='returnMonth'){const approved=a==='approveMonth',note=approved?'':prompt('Begründung für die Rückgabe','');if(note===null)return;await run(async()=>{await api('monthReview',{id,companyId:firm().id,status:approved?'APPROVED':'RETURNED',note});await load();},'Monat bearbeitet.');return;}
-if(a==='pdf'){await run(async()=>{say('PDF-Auftrag wird angelegt …');const r=await api('pdfPrepare',{month:ST.month,userId:ST.selected||me().id,companyId:firm().id});if(r.status==='READY'){await ftPdfDownload(r,false);say('PDF heruntergeladen.');return;}if(!r.id)throw Error('PDF-Auftrag konnte nicht angelegt werden.');say('PDF wird im Hintergrund erstellt.');await ftPollPdfJob(r);});return;}
+if(a==='pdf'){await run(async()=>{
+ const context={month:ST.month,userId:ST.selected||me().id,companyId:firm().id};
+ ftPdfMessage('PDF-Auftrag wird gestartet …');
+ const r=await api('pdfPrepare',context);
+ if(r.status==='READY'){await ftPdfDownload(r,false);ftPdfMessage('PDF erfolgreich heruntergeladen.');return;}
+ if(!r.id||!['QUEUED','RUNNING'].includes(r.status))throw Error('PDF-Auftrag nicht gestartet: '+(r.error||r.status||'Keine Antwort'));
+ const job={id:r.id,...context};
+ try{sessionStorage.setItem(FT_PDF_JOB_STORE,JSON.stringify(job));}catch(e){}
+ ftPdfMessage('PDF-Auftrag angelegt. Google erstellt den Bericht; der Status wird weiter geprüft …');
+ ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
+ });return;}
  if(a==='pdfArchive'){await run(async()=>{const userId=ST.selected||me().id;const archive=await api('pdfArchive',{companyId:firm().id,userId,month:ST.month});if(!Array.isArray(archive))throw Error('PDF-Archiv: Der Server liefert keine gültige Liste. Apps-Script-Bereitstellung prüfen.');const pane=document.getElementById('ftPdfArchive');if(pane)pane.innerHTML=archive.length?archive.map(x=>`<div class="row between"><span>${E(x.name)} · ${E(x.createdAt)}</span><span><button class="btn" data-act="pdfView" data-id="${E(x.id)}">Ansehen</button><button class="btn" data-act="pdfDownload" data-id="${E(x.id)}">Herunterladen</button></span></div>`).join(''):'Für diesen Monat ist noch kein PDF gespeichert.';});return;}
  if(a==='pdfView'||a==='pdfDownload'){await run(()=>ftPdfDownload({id,month:ST.month,userId:ST.selected||me().id},a==='pdfView'));return;}
 if(a==='preset'){const form=document.getElementById('rulesForm');const preset=id==='bsb'?{nightTypes:['OBJECT','INCIDENT','OTHER'],sundayTypes:['STANDBY'],holidayTypes:['STANDBY']}:{nightTypes:['OBJECT','INCIDENT','OTHER'],sundayTypes:['OBJECT','INCIDENT','OTHER'],holidayTypes:['OBJECT','INCIDENT','OTHER']};Object.keys(preset).forEach(k=>form.querySelectorAll(`[name="${k}"]`).forEach(x=>x.checked=preset[k].includes(x.value)));say('Vorlage ausgewählt. Erst Speichern aktiviert sie.');return;}
