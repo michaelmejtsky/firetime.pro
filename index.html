@@ -125,8 +125,16 @@ async function load(){
   if(!ST.token){ST.h=null;auth();return;}
   const loadSeq=++FT_LOAD_SEQ, loadStart=performance.now();
   const requestedTab=ST.tab, requestedMonth=ST.month, requestedCid=ST.cid;
+  // Ein einziges signiertes home-Paket fuer die eigene Mitarbeiteroberflaeche.
+  // Daten bleiben nur im RAM, firmenspezifisch und maximal 30 s frisch.
+  // Administratoransichten ausserhalb des ersten Firmenaufrufs bleiben gezielt.
+  const bulkRead=Boolean(SLUG||requestedCid||ST.h?.company?.id)&&
+    (ST.h?.me?.role==='STAFF'||!ST.h)&&!['rules','reports'].includes(requestedTab);
   try{
-    const home=await api('home',{month:requestedMonth,companyId:requestedCid,view:requestedTab,reportsMode:requestedTab==='reports'?'selected':requestedTab==='dashboard'?'self':'none',userId:requestedTab==='reports'?ST.selected:''});
+    const home=await api('home',{month:requestedMonth,companyId:requestedCid,
+      view:bulkRead?'all':requestedTab,
+      reportsMode:bulkRead?'self':requestedTab==='reports'?'selected':requestedTab==='dashboard'?'self':'none',
+      userId:requestedTab==='reports'?ST.selected:''});
     if(loadSeq!==FT_LOAD_SEQ || requestedTab!==ST.tab || requestedMonth!==ST.month || requestedCid!==ST.cid)return;
     console.info('[FireTime Tempo]',requestedTab,Math.round(performance.now()-loadStart)+' ms API+Verbindung');
     if(!home||!home.me)throw Error('Sitzung oder Benutzerdaten ungültig.');
@@ -141,16 +149,29 @@ async function load(){
       availability:['availability','availSubmissions'],rules:[],settings:[],
       license:[],customers:[],profile:[]
     }[view]||[];
-    if(same){
+    if(same&&!bulkRead){
       if(!home.logo&&ST.h.logo)home.logo=ST.h.logo;
       for(const k of ['activities','availability','availSubmissions','shifts','segments','changes','sick','workShifts','leaves','months','reports']){
         if(!fresh.includes(k))home[k]=ST.h[k];
       }
-    } else {FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
+    } else if(!same){FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
     FT_LAST_CONTEXT=context;
     ST.h=home;
     FT_VIEWS_LOADED.add(context+'|'+view);
     FT_VIEW_FETCHED_AT.set(context+'|'+view,performance.now());
+    if(bulkRead){
+      const bundled=['dashboard','staff','time','leave','sick','work','standby',
+        'availability','profile','settings','customers','license'];
+      // Im Mitarbeiterbereich ist der eigene Monatsbericht im Paket enthalten.
+      // Bei Administratoren muss ein anderer Mitarbeiter gezielt geladen werden.
+      if(home.me?.role==='STAFF')bundled.push('reports');
+      const stamp=performance.now();
+      for(const tab of bundled){
+        FT_VIEWS_LOADED.add(context+'|'+tab);
+        FT_VIEW_FETCHED_AT.set(context+'|'+tab,stamp);
+      }
+      console.info('[FireTime Tempo] Alle Mitarbeiteransichten gebuendelt: '+bundled.length+' Menues.');
+    }
     ST.h.segments=ST.h.segments||[];ST.h.changes=ST.h.changes||[];ST.h.sick=ST.h.sick||[];
     if(me().role==='SYSADMIN'&&!ST.cid&&!['dashboard','customers','profile'].includes(ST.tab))ST.tab='dashboard';
     if(ST.tab==='rules'&&firm()){
