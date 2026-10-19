@@ -70,6 +70,8 @@ input[type=checkbox]{width:17px;min-height:0;accent-color:var(--accent)}input[ty
 const INVITE=new URLSearchParams(location.search).get('invite') || ''; 
 const SLUG=new URLSearchParams(location.search).get('firm') || localStorage.getItem('ft_last_firm_slug') || 'bsb3100'; // Standardkunde, bis eine andere Firma gewählt wurde
 const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:null,logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
+let FT_LOGIN_BUSY=false;
 const FT_VIEWS_LOADED=new Set();
 let FT_LAST_CONTEXT='';
 let FT_RULES_KEY='';
@@ -164,7 +166,7 @@ function hint(t){return `<div class="help">ℹ ${t}</div>`;}
 function monthPick(){return `<div class="actions"><label>Monat: <input type="month" id="monthPick" style="width:180px" value="${E(ST.month)}"></label></div>`;}
 function chk(name,label,checked,desc=''){return `<label class="cbox"><input type="checkbox" name="${E(name)}" ${checked?'checked':''}><span><b>${E(label)}</b>${desc?`<div class="muted small">${E(desc)}</div>`:''}</span></label>`;}
 function fields(form){const p=Object.fromEntries(new FormData(form).entries());form.querySelectorAll('input[type=checkbox]').forEach(x=>{if(!['module','nightTypes','sundayTypes','holidayTypes'].includes(x.name))p[x.name]=x.checked;});return p;}
-function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div>${ST.brand?`<p style="text-align:center">${ST.brand.logo?`<img class="logo" src="${ST.brand.logo}">`:''}<br><b>${E(ST.brand.name)}</b></p>`:''}<p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email','','email','required')}${input('Passwort','password','','password','required')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky</p></div></div>`;}
+function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div>${ST.brand?`<p style="text-align:center">${ST.brand.logo?`<img class="logo" src="${ST.brand.logo}">`:''}<br><b>${E(ST.brand.name)}</b></p>`:''}<p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky</p></div></div>`;}
 async function load(){
   if(!ST.token){ST.h=null;auth();return;}
   const loadSeq=++FT_LOAD_SEQ, loadStart=performance.now();
@@ -411,7 +413,26 @@ if(a==='calendarTest'){await run(async()=>{const c=await api('calendarTest',{com
 if(a==='copyUrl'){try{await navigator.clipboard.writeText(ST.h.loginUrl);say('Kundenlink kopiert.');}catch(e){say('Bitte Link im Firmenprofil markieren und kopieren.',true);}return;}
 }
 async function submit(form){const p=fields(form);
-if(form.getAttribute('id')==='loginForm')return run(async()=>{const result=await rpc('ft_login',p.email,p.password);FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';await load();},'Angemeldet.');
+if(form.getAttribute('id')==='loginForm'){
+ if(FT_LOGIN_BUSY)return;
+ FT_LOGIN_BUSY=true;
+ const button=form.querySelector('button[type="submit"],button.btn.primary');
+ if(button){button.disabled=true;button.textContent='Anmeldung läuft …';}
+ const email=String(p.email||'').trim().toLowerCase();
+ try{
+  const result=await rpc('ft_login',email,p.password);
+  try{localStorage.setItem(FT_SAVED_EMAIL_KEY,email);}catch(e){}
+  FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;
+  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';
+  await load();
+ }catch(err){
+  say(err.message||'Anmeldung fehlgeschlagen.',true);
+ }finally{
+  FT_LOGIN_BUSY=false;
+  if(button){button.disabled=false;button.textContent='Anmelden';}
+ }
+ return;
+}
 if(form.getAttribute('id')==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
 if(form.getAttribute('id')==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
 if(form.getAttribute('id')==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
