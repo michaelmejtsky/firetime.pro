@@ -361,8 +361,9 @@ async function ftLocalPdf(){
  if(logo.startsWith('data:image/')){
   try{
    const img=new Image();img.src=logo;
-   await Promise.race([new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;if(img.complete&&img.naturalWidth)resolve();}),new Promise((_,reject)=>setTimeout(()=>reject(Error('Logozeit')),1200))]);
-   if(img.naturalWidth){const scale=Math.min(88/img.naturalWidth,70/img.naturalHeight);ctx.drawImage(img,475,29,img.naturalWidth*scale,img.naturalHeight*scale);}
+   // Keine asynchrone Bildladung vor dem Download: iOS Safari verlangt
+   // fuer den Blob-Download die direkte Benutzeraktion.
+   if(img.complete&&img.naturalWidth){const scale=Math.min(88/img.naturalWidth,70/img.naturalHeight);ctx.drawImage(img,475,29,img.naturalWidth*scale,img.naturalHeight*scale);}
   }catch(e){}
  }
  ctx.fillStyle='#EDF3F8';ctx.fillRect(40,172,515,81);
