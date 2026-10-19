@@ -236,7 +236,42 @@ document.addEventListener('click',e=>{const b=e.target.closest('button[data-tab]
   }
   if(ST.h?.me)page();else load();
 }else action(b);return;}const zone=e.target.closest('[data-pick]');if(zone){const f=document.getElementById(zone.dataset.pick);if(f)f.click();}});
-document.addEventListener('submit',e=>{e.preventDefault();submit(e.target);});
+function staffValidationError(form){
+  const invalid=Array.from(form.elements).find(el=>el.willValidate&&!el.checkValidity());
+  if(!invalid)return false;
+  const label=invalid.closest('label')?.querySelector('span')?.textContent || invalid.name || 'Eingabe';
+  const message='Mitarbeiter nicht gespeichert: Bitte Feld „'+label+'“ prüfen. '+(invalid.validationMessage||'Ungültiger Wert.');
+  say(message,true);
+  invalid.scrollIntoView({block:'center',behavior:'smooth'});
+  invalid.focus({preventScroll:true});
+  invalid.reportValidity();
+  return true;
+}
+// Eingabefehler sichtbar zeigen, statt einen scheinbar funktionslosen Button zu haben.
+document.addEventListener('invalid',e=>{
+  if(e.target?.form?.id!=='staffForm')return;
+  const el=e.target;
+  const label=el.closest('label')?.querySelector('span')?.textContent || el.name || 'Eingabe';
+  say('Bitte „'+label+'“ korrigieren: '+(el.validationMessage||'Ungültige Eingabe.'),true);
+},true);
+// Speichern wird gezielt ausgeloest und jeder JavaScript-Fehler angezeigt.
+// click im Capture-Modus verhindert nicht, dass andere Menuebuttons funktionieren.
+document.addEventListener('click',async e=>{
+  const button=e.target.closest?.('#staffForm button.btn.primary');
+  if(!button)return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const form=button.closest('form');
+  if(!form||form.dataset.saving==='1')return;
+  if(staffValidationError(form))return;
+  try{await submit(form);}
+  catch(err){say('Mitarbeiter konnte nicht gespeichert werden: '+(err?.message||String(err)),true);}
+},true);
+document.addEventListener('submit',e=>{
+  e.preventDefault();
+  if(e.target.id==='staffForm'&&staffValidationError(e.target))return;
+  Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
+});
 document.addEventListener('change',e=>{const x=e.target;if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;page();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){const date=x.dataset.standby,old=ST.h.shifts.find(s=>s.day===date),available=has('AVAILABILITY')&&ST.h.availability.some(a=>a.userId===x.value&&Number(a.day)===Number(date.slice(-2))&&a.answer==='YES')&&ST.h.availSubmissions.some(a=>a.userId===x.value);if(x.value&&!available&&has('AVAILABILITY')&&!confirm('Keine bestätigte Verfügbarkeit. Trotzdem einteilen?')){load();return;}if(old?.status==='PUBLISHED'&&!confirm('Veröffentlichten Bereitschaftsdienst ändern?')){load();return;}run(async()=>{const r=await api('planAssign',{companyId:firm().id,month:ST.month,day:date,userId:x.value,confirmAvailability:!available,confirmChange:old?.status==='PUBLISHED'});await load();if(r.warning)say(r.warning,true);},'Bereitschaft eingeteilt.');}});
 document.addEventListener('dragover',e=>{if(e.target.closest('[data-pick]'))e.preventDefault();});
 document.addEventListener('drop',e=>{const zone=e.target.closest('[data-pick]');if(zone){e.preventDefault();const el=document.getElementById(zone.dataset.pick),file=e.dataTransfer.files[0];if(el&&file){const dt=new DataTransfer();dt.items.add(file);el.files=dt.files;run(()=>uploadFile(el));}}});
