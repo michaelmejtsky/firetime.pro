@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-ui-v2-mobile-speed"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-ui-v2-iphone-fields-hotfix"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -147,6 +147,29 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .grid{grid-template-columns:minmax(0,1fr)}
 }
 @media(prefers-reduced-motion:reduce){.btn{transition:none}}
+
+/* iPhone Safari form containment: native date/datetime controls have intrinsic width. */
+@media(max-width:800px){
+ .main,.content,.cols,.cols>.card,.grid,.grid>.card,.card,form,label.field{
+  min-width:0!important;max-width:100%!important;box-sizing:border-box!important
+ }
+ .cols{grid-template-columns:minmax(0,1fr)!important}
+ .cols>.card,.grid>.card{inline-size:100%!important}
+ .card form{display:block;inline-size:100%;min-inline-size:0;max-inline-size:100%}
+ .card label.field{display:block;inline-size:100%;min-inline-size:0;max-inline-size:100%;overflow:clip}
+ .card label.field>input,
+ .card label.field>select,
+ .card label.field>textarea,
+ .card form input:not([type=checkbox]):not([type=radio]):not([type=hidden]),
+ .card form select,.card form textarea{
+  display:block!important;box-sizing:border-box!important;inline-size:100%!important;
+  min-inline-size:0!important;max-inline-size:100%!important;
+  width:100%!important;min-width:0!important;max-width:100%!important;
+ }
+ .card input[type=date],.card input[type=datetime-local],.card input[type=time],.card input[type=month]{
+  min-inline-size:0!important;max-inline-size:100%!important;overflow:hidden;
+ }
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -403,6 +426,28 @@ function mobileNav(){
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
 function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();}
+// Date inputs in mobile Safari can exceed CSS width due to native control sizing.
+// Measure the real box and clamp only inputs that cross their card's inner edge.
+function ftFitFormControls(root){
+ if(!root||!root.isConnected)return;
+ for(const input of root.querySelectorAll('label.field > input, label.field > select, label.field > textarea')){
+  const card=input.closest('.card,.login,.ft-install-dialog');
+  if(!card)continue;
+  const rect=card.getBoundingClientRect(),style=getComputedStyle(card);
+  const rightLimit=rect.right-(parseFloat(style.paddingRight)||0);
+  const left=input.getBoundingClientRect().left;
+  const max=Math.floor(rightLimit-left-1);
+  if(max<72)continue;
+  const inputRect=input.getBoundingClientRect();
+  if(inputRect.right>rightLimit+1){
+   input.style.setProperty('box-sizing','border-box','important');
+   input.style.setProperty('min-width','0','important');
+   input.style.setProperty('width',max+'px','important');
+   input.style.setProperty('max-width',max+'px','important');
+   input.dataset.ftOverflowFix='1';
+  }
+ }
+}
 function page(){
  const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile};
  if(!ST.h?.me)return;
@@ -411,7 +456,11 @@ function page(){
    const active=b.dataset.tab===ST.tab;b.classList.toggle('on',active);
    if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
  });
- const el=document.getElementById('content');if(el)el.innerHTML=(views[ST.tab]||dashboard)();
+ const el=document.getElementById('content');
+ if(el){
+  el.innerHTML=(views[ST.tab]||dashboard)();
+  requestAnimationFrame(()=>{if(el.isConnected)ftFitFormControls(el);});
+ }
  if(ST.tab==='reports')ftResumePdfJob();
 }
 function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
