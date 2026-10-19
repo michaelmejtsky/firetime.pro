@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-at-pdf-times-archive-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-admin-combined-pdf-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -186,6 +186,15 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-pdf-archive-entry .actions{margin-bottom:0;gap:8px}
 .ft-pdf-archive-foot{padding:12px 2px}
 @media(max-width:500px){.ft-pdf-archive-entry .btn{flex:1 1 135px}}
+.ft-bulk-card{margin-top:22px}.ft-bulk-toolbar,.ft-bulk-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.ft-bulk-toolbar{padding:0 0 13px;border-bottom:1px solid #3c5267}.ft-bulk-toolbar .actions{margin:0}
+.ft-bulk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:9px;margin:16px 0}
+.ft-bulk-choice{display:flex;align-items:center;gap:11px;min-width:0;border-radius:12px;border:1px solid #3b5771;background:#12293d;padding:11px 14px;cursor:pointer}
+.ft-bulk-choice input{width:18px!important;height:18px;min-height:0;flex:none;accent-color:var(--accent)}
+.ft-bulk-choice span{font-weight:590;overflow-wrap:anywhere}.ft-bulk-footer{border-top:1px solid #3c5267;padding-top:14px}
+.ft-bulk-footer>span,.ft-bulk-status{font-size:13px;color:#bed0e0}.ft-bulk-status{margin-top:11px;min-height:20px}
+.ft-bulk-status.error{color:#ffbec6}
+@media(max-width:520px){.ft-bulk-grid{grid-template-columns:minmax(0,1fr)}.ft-bulk-footer .btn{width:100%}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -574,6 +583,32 @@ function ftResumePdfJob(){
  ftPdfMessage('PDF-Auftrag vorhanden. Status wird geprüft …');
  if(!FT_PDF_RUNNING_ID)ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
 }
+let FT_BULK_PDF_BUSY=false;
+function ftUpdateBulkCount(){
+ const checkboxes=[...document.querySelectorAll('[data-ft-bulk-employee]')];
+ const label=document.getElementById('ftBulkCount');
+ if(label)label.textContent=checkboxes.filter(x=>x.checked).length+' von '+checkboxes.length+' ausgewählt';
+}
+async function ftDownloadBulkPdf(){
+ if(!isAdmin()||FT_BULK_PDF_BUSY)return;
+ const ids=[...document.querySelectorAll('[data-ft-bulk-employee]:checked')].map(x=>x.value);
+ const allowed=new Set((ST.h?.users||[]).map(x=>String(x.id)));
+ if(!ids.length){say('Bitte mindestens einen Mitarbeiter auswählen.',true);return;}
+ if(ids.some(id=>!allowed.has(id))){say('Mitarbeiterauswahl ist ungültig.',true);return;}
+ FT_BULK_PDF_BUSY=true;
+ const btn=document.querySelector('[data-act="pdfBulk"]'),label=document.getElementById('ftPdfBulkStatus');
+ const progress=text=>{if(label){label.textContent=text;label.classList.remove('error');}};
+ try{
+  if(btn){btn.disabled=true;btn.textContent='Sammel-PDF wird erstellt …';}
+  progress('Monatsauszüge werden abgerufen …');
+  const result=await ftLocalPdf({download:true,bulk:true,userIds:ids,onProgress:progress});
+  progress('Fertig: '+result.staffCount+' Mitarbeiter, '+result.pages+' Seiten. PDF-Download wurde angeboten.');
+  say('Sammel-PDF steht zum Herunterladen bereit.');
+ }catch(e){
+  if(label){label.textContent='Fehler: '+String(e.message||e);label.classList.add('error');}
+  say('Sammel-PDF fehlgeschlagen: '+String(e.message||e),true);
+ }finally{FT_BULK_PDF_BUSY=false;if(btn){btn.disabled=false;btn.textContent='Sammel-PDF herunterladen';}}
+}
 let FT_PDF_SAVE_BUSY=false;
 async function ftSavePdf(){
  if(FT_PDF_SAVE_BUSY)return;
@@ -607,21 +642,34 @@ async function ftSavePdf(){
  finally{FT_PDF_SAVE_BUSY=false;if(button){button.disabled=false;button.textContent='PDF erstellen und speichern';}}
 }
 async function ftLocalPdf(options={download:true}){
- const c=firm(),id=ST.selected||me().id,month=ST.month;
- if(!c?.id||!id)throw Error('Firma oder Mitarbeiter fehlen.');
- ftPdfMessage('Aktuelle Stunden und Tätigkeiten werden aus FireTime Pro geladen …');
- // One authoritative, access-controlled snapshot: no stale view-cache activities.
- const snapshot=await api('report',{companyId:c.id,userId:id,month});
- if(firm()?.id!==c.id||ST.month!==month||(ST.selected||me().id)!==id)
-  throw Error('Firma, Monat oder Mitarbeiter haben sich geändert. Bitte Export erneut starten.');
- const u=snapshot?.user,r=snapshot?.report;
- if(!u||String(u.id)!==String(id)||!r||r.target===undefined||r.worked===undefined||!Array.isArray(snapshot.entries))
-  throw Error('Unvollständige Berichtsdaten. Das PDF wurde nicht gespeichert.');
- const entries=snapshot.entries.filter(a=>String(a.userId)===String(id)&&
-   String(a.companyId)===String(c.id)).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
- const status=(ST.h?.months||[]).find(x=>x.userId===id&&x.month===month)?.status||'OFFEN';
- const state={APPROVED:'FREIGEGEBEN',FINAL:'ABGESCHLOSSEN',SUBMITTED:'EINGEREICHT',RETURNED:'ZURÜCKGEGEBEN'}[status]||'VORLÄUFIG / OFFEN';
- const W=595,H=842,S=2,pages=[];let ctx,y;
+ const c=firm(),month=ST.month,batch=options.bulk===true;
+ if(!c?.id)throw Error('Keine Firma ausgewählt.');
+ if(batch&&!isAdmin())throw Error('Nur Administratoren dürfen Sammel-PDFs herunterladen.');
+ const rawIds=batch?options.userIds:[ST.selected||me().id];
+ if(!Array.isArray(rawIds)||!rawIds.length)throw Error('Bitte Mitarbeiter auswählen.');
+ const ids=[...new Set(rawIds.map(String).filter(Boolean))];
+ const progress=typeof options.onProgress==='function'?options.onProgress:ftPdfMessage;
+ const records=new Array(ids.length);
+ let cursor=0,completed=0;
+ await Promise.all(Array.from({length:Math.min(batch?2:1,ids.length)},async()=>{
+  while(cursor<ids.length){
+   const at=cursor++,id=ids[at];
+   const snapshot=await api('report',{companyId:c.id,userId:id,month});
+   if(firm()?.id!==c.id||ST.month!==month)throw Error('Monat oder Firma wurde während des Exports geändert.');
+   const person=snapshot?.user,report=snapshot?.report;
+   if(!person||String(person.id)!==id||!report||
+      report.target===undefined||report.worked===undefined||!Array.isArray(snapshot.entries))
+    throw Error('Bericht eines Mitarbeiters konnte nicht vollständig geladen werden: '+((ST.h?.users||[]).find(x=>String(x.id)===id)?.name||id));
+   const entries=snapshot.entries.filter(x=>String(x.userId)===id&&(!x.companyId||String(x.companyId)===String(c.id)))
+     .sort((x,y)=>String(x.start).localeCompare(String(y.start)));
+   const status=(ST.h?.months||[]).find(x=>String(x.userId)===id&&x.month===month)?.status||'OFFEN';
+   const state={APPROVED:'FREIGEGEBEN',FINAL:'ABGESCHLOSSEN',SUBMITTED:'EINGEREICHT',RETURNED:'ZURÜCKGEGEBEN'}[status]||'VORLÄUFIG / OFFEN';
+   records[at]={u:person,r:report,entries,state};
+   completed++;progress('Berichte geladen: '+completed+' von '+ids.length);
+  }
+ }));
+ let u,r,entries,state;
+ const W=595,H=842,S=batch?1.45:2,pages=[];let ctx,y;
  const fmt=n=>Number(n||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2})+' h';
  const euro=n=>Number(n||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
  function text(v,x,yy,size=11,bold=false,color='#243449'){
@@ -635,11 +683,15 @@ async function ftLocalPdf(options={download:true}){
   ctx.fillStyle='#14273D';ctx.fillRect(0,0,W,134);
   ctx.fillStyle=/^#[0-9a-fA-F]{6}$/.test(c.color||'')?c.color:'#2E9BD5';ctx.fillRect(0,0,9,134);
   text(c.name||'Firma',40,49,21,true,'#ffffff');
-  text('FIRETIME PRO  |  MONATSNACHWEIS',40,77,11,true,'#D5E6F4');
-  text(month+'  |  '+state,40,107,12,false,'#ffffff');
-  if(continuation)text('Tätigkeitsübersicht – Fortsetzung',40,169,15,true);
+  text('FIRETIME PRO  |  '+(batch?'SAMMELBERICHT':'MONATSNACHWEIS'),40,77,11,true,'#D5E6F4');
+  text(month+'  |  '+u.name+'  |  '+state,40,107,11,false,'#ffffff',505);
+  if(continuation)text('Tätigkeitsübersicht · '+u.name,40,169,15,true);
   y=continuation?203:165;pages.push(can);
  }
+
+ for(const record of records){
+ ({u,r,entries,state}=record);
+ progress('PDF wird aufgebaut: '+u.name);
  newPage(false);
  const logo=String(ST.h.logo||'');
  if(logo.startsWith('data:image/')){
@@ -685,6 +737,8 @@ async function ftLocalPdf(options={download:true}){
    y+=76;
   }
  }
+
+ }
  pages.forEach((p,i)=>{const cx=p.getContext('2d');cx.setTransform(S,0,0,S,0,0);cx.fillStyle='#64748B';cx.font='9px Arial';cx.fillText('FireTime Pro  ·  Developed by Michael Mejtsky',40,813);cx.fillText('Seite '+(i+1)+'/'+pages.length,492,813);});
  const encoder=new TextEncoder(),pieces=[],offsets=[0];let position=0;
  function write(v){const bytes=typeof v==='string'?encoder.encode(v):v;pieces.push(bytes);position+=bytes.length;}
@@ -694,7 +748,7 @@ async function ftLocalPdf(options={download:true}){
  obj(2,['<< /Type /Pages /Kids ['+pages.map((_,i)=>(3+i*3)+' 0 R').join(' ')+'] /Count '+pages.length+' >>']);
  pages.forEach((can,i)=>{
   const pageId=3+i*3,imgId=4+i*3,contentId=5+i*3;
-  const encoded=atob(can.toDataURL('image/jpeg',0.85).split(',')[1]);
+  const encoded=atob(can.toDataURL('image/jpeg',batch?0.78:0.85).split(',')[1]);
   const bytes=new Uint8Array(encoded.length);
   for(let j=0;j<encoded.length;j++)bytes[j]=encoded.charCodeAt(j);
   obj(pageId,['<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /P'+i+' '+imgId+' 0 R >> >> /Contents '+contentId+' 0 R >>']);
@@ -706,14 +760,14 @@ async function ftLocalPdf(options={download:true}){
  write('xref\n0 '+count+'\n0000000000 65535 f \n');
  for(let i=1;i<count;i++)write(String(offsets[i]).padStart(10,'0')+' 00000 n \n');
  write('trailer\n<< /Size '+count+' /Root 1 0 R >>\nstartxref\n'+start+'\n%%EOF');
- const blob=new Blob(pieces,{type:'application/pdf'}),name='FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_'+String(u.name||'Mitarbeiter').replace(/[^\p{L}\p{N}_-]+/gu,'_').slice(0,45)+'_Monatsbericht.pdf';
+ const blob=new Blob(pieces,{type:'application/pdf'}),name=batch?'FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_Stundenaufzeichnungen_'+ids.length+'_Mitarbeiter.pdf':'FireTimePro_'+String(c.slug||'Firma')+'_'+month+'_'+String(u.name||'Mitarbeiter').replace(/[^\p{L}\p{N}_-]+/gu,'_').slice(0,45)+'_Monatsbericht.pdf';
  if(options.download){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);
   try{a.click();}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);}
-  ftPdfMessage('PDF zum Download angeboten. Für eine dauerhafte Archivierung bitte „PDF erstellen und speichern“ verwenden.');
+  if(!batch)ftPdfMessage('PDF zum Download angeboten. Für eine dauerhafte Archivierung bitte „PDF erstellen und speichern“ verwenden.');
  }
- return {blob,name,size:blob.size,pages:pages.length,report:r,context:{companyId:c.id,userId:id,month}};
+ return {blob,name,size:blob.size,pages:pages.length,report:records[0].r,context:{companyId:c.id,userId:ids[0],month},staffCount:ids.length};
 }
 async function ftPdfDownload(record,view){
  const p={companyId:firm().id,userId:record.userId||ST.selected||me().id,month:record.month||ST.month,id:record.id};
@@ -742,7 +796,15 @@ async function ftPdfDownload(record,view){
    setTimeout(()=>URL.revokeObjectURL(url),120000);
  }
 }
-function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfSave">PDF erstellen und speichern</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button><button class="btn" data-act="pdfLocal">PDF nur herunterladen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>`;}
+function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfSave">PDF erstellen und speichern</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button><button class="btn" data-act="pdfLocal">PDF nur herunterladen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>${isAdmin()?ftBulkPanel(users):''}`;}
+function ftBulkPanel(users){
+ return `<section class="card ft-bulk-card" aria-label="Stundenaufzeichnungen Sammeldownload"><h2>Stundenaufzeichnungen aller Mitarbeiter</h2>
+ <p class="muted">Eine PDF-Datei mit vollständigem Monatsauszug je ausgewähltem Mitarbeiter – jeder beginnt auf einer neuen Seite. Kein ZIP.</p>
+ <div class="ft-bulk-toolbar"><b>Auswahl für ${E(ftPdfMonthLabel(ST.month))}</b><div class="actions"><button type="button" class="btn" data-act="bulkAll">Alle auswählen</button><button type="button" class="btn" data-act="bulkNone">Auswahl aufheben</button></div></div>
+ <div class="ft-bulk-grid">${users.map(u=>`<label class="ft-bulk-choice"><input type="checkbox" data-ft-bulk-employee="1" value="${E(u.id)}" checked><span>${E(u.name)}</span></label>`).join('')}</div>
+ <div class="ft-bulk-footer"><span id="ftBulkCount">${users.length} von ${users.length} ausgewählt</span><button type="button" class="btn primary" data-act="pdfBulk">Sammel-PDF herunterladen</button></div>
+ <div id="ftPdfBulkStatus" class="ft-bulk-status" role="status" aria-live="polite"></div></section>`;
+}
 function ftLeaveDate(v){
  const x=String(v||'');
  return /^\d{4}-\d{2}-\d{2}$/.test(x)?x.slice(8,10)+'.'+x.slice(5,7)+'.'+x.slice(0,4):x;
@@ -852,6 +914,12 @@ if(a==='leaveCancelApprove'||a==='leaveCancelReject'){if(!confirm(a==='leaveCanc
 if(a==='leaveApprove'||a==='leaveReject'){const approve=a==='leaveApprove',credit=approve?prompt('Zeitgutschrift für den Urlaub in Stunden (nach Stundenmodell):','0'):'0';if(credit===null)return;await run(async()=>{await api('leaveReview',{id,companyId:firm().id,status:approve?'APPROVED':'REJECTED',creditHours:Number(credit)});await load();},'Urlaub bearbeitet.');return;}
 if(a==='submitMonth'){if(confirm('Alle eigenen Stunden vollständig erfasst?'))await run(async()=>{await api('monthSubmit',{month:ST.month,userId:ST.selected||me().id,companyId:firm().id});await load();},'Monat eingereicht.');return;}
 if(a==='approveMonth'||a==='returnMonth'){const approved=a==='approveMonth',note=approved?'':prompt('Begründung für die Rückgabe','');if(note===null)return;await run(async()=>{await api('monthReview',{id,companyId:firm().id,status:approved?'APPROVED':'RETURNED',note});await load();},'Monat bearbeitet.');return;}
+if(a==='bulkAll'||a==='bulkNone'){
+ if(!isAdmin())return;
+ document.querySelectorAll('[data-ft-bulk-employee]').forEach(x=>x.checked=a==='bulkAll');
+ ftUpdateBulkCount();return;
+}
+if(a==='pdfBulk'){await ftDownloadBulkPdf();return;}
 if(a==='pdfSave'){await ftSavePdf();return;}
 if(a==='pdfLocal'){await run(()=>ftLocalPdf(),'PDF-Download angeboten.');return;}
 if(a==='pdf'){
@@ -1043,7 +1111,7 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
