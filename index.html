@@ -246,6 +246,12 @@ function ftViennaDateTime(value){
  const p=ftViennaParts(value);
  return p?p.day+'.'+p.month+'.'+p.year+', '+p.hour+':'+p.minute:'–';
 }
+function ftViennaZone(value){
+ const d=value instanceof Date?value:new Date(value);
+ if(!Number.isFinite(d.getTime()))return '';
+ const name=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,timeZoneName:'short'}).formatToParts(d).find(x=>x.type==='timeZoneName')?.value||'';
+ return /MESZ|CEST/i.test(name)?'MESZ':/MEZ|CET/i.test(name)?'MEZ':'';
+}
 const DT=ftViennaDateTime;
 function ftPdfMonthLabel(month){
  if(!/^20\d\d-(0[1-9]|1[012])$/.test(String(month||'')))return String(month||'Unbekannter Monat');
@@ -255,9 +261,9 @@ function ftPdfArchiveCard(item,userName,isNewest=false){
  const label=ftPdfMonthLabel(item.month||ST.month);
  const version=Math.max(1,Number(item.version)||1);
  const created=ftViennaDateTime(item.createdAt);
- const dateLabel=created==='–'?'Datum unbekannt':created+' Uhr';
+ const dateLabel=created==='–'?'Datum unbekannt':created+' Uhr'+(ftViennaZone(item.createdAt)?' '+ftViennaZone(item.createdAt):'');
  return '<article class="ft-pdf-archive-entry"><div class="ft-pdf-archive-top"><div><strong>'+E(label)+' · '+E(userName||'Mitarbeiter')+'</strong>'+
-   '<div class="ft-pdf-archive-details">Version '+E(version)+' · Erstellt am '+E(dateLabel)+' (Österreich)</div></div>'+
+   '<div class="ft-pdf-archive-details">Version '+E(version)+' · Erstellt am '+E(dateLabel)+'</div></div>'+
    (isNewest?'<span class="ft-pdf-archive-new">Neueste Version</span>':'<span class="ft-pdf-archive-old">Ältere Version</span>')+'</div>'+
    '<div class="ft-pdf-archive-file" title="'+E(item.name||'')+'">'+E(item.name||'Monatsbericht.pdf')+'</div>'+
    '<div class="actions"><button class="btn primary" data-act="pdfView" data-id="'+E(item.id)+'">PDF ansehen</button>'+
@@ -589,6 +595,11 @@ async function ftSavePdf(){
   const requestId='pdf_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,13);
   const result=await api('pdfStore',{companyId,userId,month,base64,requestId});
   if(!result?.id||!result?.name)throw Error('PDF-Speicherung wurde nicht bestätigt.');
+  if(ST.h&&ST.month===month&&firm()?.id===companyId){
+    ST.h.reports=ST.h.reports||{};
+    ST.h.reports[userId]=pdf.report;
+    if(ST.tab==='reports')page();
+  }
   const pane=document.getElementById('ftPdfArchive');
   if(pane)pane.innerHTML='<div class="ft-pdf-archive-head"><strong>PDF dauerhaft gespeichert</strong><span>Eine neue Archivversion wurde angelegt.</span></div>'+ftPdfArchiveCard({...result,month},(ST.h?.users||[]).find(u=>u.id===userId)?.name||me()?.name,true);
   say('PDF wurde im Firmenarchiv gespeichert.');
@@ -666,7 +677,7 @@ async function ftLocalPdf(options={download:true}){
    const title=(typ[a.type]||'Arbeitszeit')+(hrs===null?'':'  ·  '+fmt(hrs));
    ctx.fillStyle='#F2F6FA';ctx.fillRect(40,y-19,515,67);
    text(title,51,y,11,true,'#172D42');
-   text('Beginn: '+from+' Uhr   |   Ende: '+to+' Uhr',51,y+19,9,false,'#344960');
+   text('Beginn: '+from+' Uhr '+ftViennaZone(a.start)+'   |   Ende: '+to+' Uhr '+ftViennaZone(a.end),51,y+19,9,false,'#344960');
    const details=['Pause: '+pause+' min'];
    if(a.object)details.push('Objekt: '+String(a.object).slice(0,42));
    if(a.description)details.push(String(a.description).slice(0,55));
@@ -702,7 +713,7 @@ async function ftLocalPdf(options={download:true}){
   try{a.click();}finally{a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);}
   ftPdfMessage('PDF zum Download angeboten. Für eine dauerhafte Archivierung bitte „PDF erstellen und speichern“ verwenden.');
  }
- return {blob,name,size:blob.size,pages:pages.length};
+ return {blob,name,size:blob.size,pages:pages.length,report:r,context:{companyId:c.id,userId:id,month}};
 }
 async function ftPdfDownload(record,view){
  const p={companyId:firm().id,userId:record.userId||ST.selected||me().id,month:record.month||ST.month,id:record.id};
