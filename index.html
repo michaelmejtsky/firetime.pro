@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-standby-handover-sick-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-tempo-v1.6.1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -28,6 +28,9 @@ const SLUG=new URLSearchParams(location.search).get('firm') || '';
 const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:null,logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_VIEWS_LOADED=new Set();
 let FT_LAST_CONTEXT='';
+let FT_RULES_KEY='';
+const FT_VIEW_FETCHED_AT=new Map();
+let FT_LOAD_SEQ=0;
 const LABELS={sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
@@ -88,7 +91,24 @@ async function rpc(name,...args){
   if(!response.ok||!data.ok)throw Error(data.error||'Fehler beim Serveraufruf.');
   return data.data;
 }
-function api(action,p={}){return rpc('ft_api',ST.token,action,p);}
+function api(action,p={}){
+  const startedContext=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
+  const result=rpc('ft_api',ST.token,action,p);
+  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne']);
+  if(readOnly.has(action))return result;
+  return result.then(value=>{
+    // Nach Schreibzugriff dürfen zuvor geöffnete Ansichten nicht als frisch gelten.
+    // Der aktuelle Tab kann sofort lokal aktualisiert werden (z. B. Mitarbeiteranlage).
+    const context=(firm()?.id||'SYS')+'|'+ST.month;
+    const current=context+'|'+ST.tab;
+    FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
+    if(startedContext===current){FT_VIEWS_LOADED.add(current);FT_VIEW_FETCHED_AT.set(current,performance.now());}
+    if(action==='licenseSave'||action==='profileSave'||action==='companyUpdate'||action==='onboard'){
+      ST.rules=null;FT_RULES_KEY='';
+    }
+    return value;
+  });
+}
 async function run(cb,message){try{const x=await cb();if(message)say(message);return x;}catch(e){say(e.message,true);return null;}}
 const me=()=>ST.h?.me||null,firm=()=>ST.h?.company||null,has=m=>!!ST.h?.modules?.includes(m),isAdmin=()=>!!me()&&me().role!=='STAFF';
 const myUsers=()=>ST.h.users,who=id=>myUsers().find(x=>x.id===id)||(ST.h.directory||[]).find(x=>x.id===id)||{name:'Unbekannt'};
@@ -103,8 +123,12 @@ function fields(form){const p=Object.fromEntries(new FormData(form).entries());f
 function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div>${ST.brand?`<p style="text-align:center">${ST.brand.logo?`<img class="logo" src="${ST.brand.logo}">`:''}<br><b>${E(ST.brand.name)}</b></p>`:''}<p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email','','email','required')}${input('Passwort','password','','password','required')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky</p></div></div>`;}
 async function load(){
   if(!ST.token){ST.h=null;auth();return;}
+  const loadSeq=++FT_LOAD_SEQ, loadStart=performance.now();
+  const requestedTab=ST.tab, requestedMonth=ST.month, requestedCid=ST.cid;
   try{
-    const home=await api('home',{month:ST.month,companyId:ST.cid,view:ST.tab,reportsMode:ST.tab==='reports'?'all':ST.tab==='dashboard'?'self':'none'});
+    const home=await api('home',{month:requestedMonth,companyId:requestedCid,view:requestedTab,reportsMode:requestedTab==='reports'?'selected':requestedTab==='dashboard'?'self':'none',userId:requestedTab==='reports'?ST.selected:''});
+    if(loadSeq!==FT_LOAD_SEQ || requestedTab!==ST.tab || requestedMonth!==ST.month || requestedCid!==ST.cid)return;
+    console.info('[FireTime Tempo]',requestedTab,Math.round(performance.now()-loadStart)+' ms API+Verbindung');
     if(!home||!home.me)throw Error('Sitzung oder Benutzerdaten ungültig.');
     // Preserve sections already fetched in the same company/month, do not mix customer data.
     const context=(home.company?.id||'SYS')+'|'+home.month;
@@ -122,16 +146,25 @@ async function load(){
       for(const k of ['activities','availability','availSubmissions','shifts','segments','changes','sick','workShifts','leaves','months','reports']){
         if(!fresh.includes(k))home[k]=ST.h[k];
       }
-    } else FT_VIEWS_LOADED.clear();
+    } else {FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
     FT_LAST_CONTEXT=context;
     ST.h=home;
     FT_VIEWS_LOADED.add(context+'|'+view);
+    FT_VIEW_FETCHED_AT.set(context+'|'+view,performance.now());
     ST.h.segments=ST.h.segments||[];ST.h.changes=ST.h.changes||[];ST.h.sick=ST.h.sick||[];
     if(me().role==='SYSADMIN'&&!ST.cid&&!['dashboard','customers','profile'].includes(ST.tab))ST.tab='dashboard';
-    if(ST.tab==='rules'&&firm())ST.rules=await api('rulesGet',{companyId:firm().id,month:ST.month});
+    if(ST.tab==='rules'&&firm()){
+      const key=firm().id+'|'+ST.month;
+      if(!ST.rules||FT_RULES_KEY!==key){
+        ST.rules=await api('rulesGet',{companyId:firm().id,month:ST.month});
+        if(loadSeq!==FT_LOAD_SEQ)return;
+        FT_RULES_KEY=key;
+      }
+    }
     theme(firm()?.color||ST.brand?.color||'#f37850',ST.h.profile?.secondaryColor||ST.brand?.secondaryColor||'#172c44');
     render();
   }catch(err){
+    if(loadSeq!==FT_LOAD_SEQ)return;
     const message=String(err?.message||'Unbekannter Fehler.');
     if(/Sitzung abgelaufen|Bitte anmelden|Zugang nicht aktiv|Sitzung oder Benutzerdaten ungültig/i.test(message)){
       ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();
@@ -195,9 +228,9 @@ function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return
 function profile(){return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;}
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
 if(a==='normalLogin'){ST.invite=false;auth();return;}
-if(a==='logout'){const old=ST.token;ST.token='';sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
-if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;await load();return;}
-if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.rules=null;await load();return;}
+if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
+if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';await load();return;}
+if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';await load();return;}
 if(a==='cancelEdit'){ST.edit='';page();return;}
 if(a==='editStaff'||a==='editTime'){ST.edit=id;page();window.scrollTo(0,0);return;}
 if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>api('userInvite',{id}),'Einladung verschickt.');return;}
@@ -236,7 +269,7 @@ if(a==='calendarTest'){await run(async()=>{const c=await api('calendarTest',{com
 if(a==='copyUrl'){try{await navigator.clipboard.writeText(ST.h.loginUrl);say('Kundenlink kopiert.');}catch(e){say('Bitte Link im Firmenprofil markieren und kopieren.',true);}return;}
 }
 async function submit(form){const p=fields(form);
-if(form.getAttribute('id')==='loginForm')return run(async()=>{const result=await rpc('ft_login',p.email,p.password);ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';await load();},'Angemeldet.');
+if(form.getAttribute('id')==='loginForm')return run(async()=>{const result=await rpc('ft_login',p.email,p.password);FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';await load();},'Angemeldet.');
 if(form.getAttribute('id')==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
 if(form.getAttribute('id')==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
 if(form.getAttribute('id')==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
@@ -290,26 +323,32 @@ if(form.getAttribute('id')==='leaveForm')return run(async()=>{await api('leaveRe
 if(form.getAttribute('id')==='workForm')return run(async()=>{await api('workSave',{...p,companyId:firm().id});await load();},'Dienst als Entwurf gespeichert.');
 if(form.getAttribute('id')==='settingsForm')return run(async()=>{await api('companyUpdate',{...p,id:firm().id});await load();},'Firmeneinstellungen gespeichert.');
 if(form.getAttribute('id')==='profileForm')return run(async()=>{await api('profileSave',{...p,companyId:firm().id});await load();},'Arbeitsmodell gespeichert.');
-if(form.getAttribute('id')==='rulesForm')return run(async()=>{const types={};['nightTypes','sundayTypes','holidayTypes'].forEach(k=>types[k]=[...form.querySelectorAll(`[name="${k}"]:checked`)].map(x=>x.value));await api('rulesSave',{...p,...types,companyId:firm().id});ST.month=p.effectiveMonth;await load();},'Neue Zuschlagsregel gespeichert.');
+if(form.getAttribute('id')==='rulesForm')return run(async()=>{const types={};['nightTypes','sundayTypes','holidayTypes'].forEach(k=>types[k]=[...form.querySelectorAll(`[name="${k}"]:checked`)].map(x=>x.value));await api('rulesSave',{...p,...types,companyId:firm().id});ST.rules=null;FT_RULES_KEY='';ST.month=p.effectiveMonth;await load();},'Neue Zuschlagsregel gespeichert.');
 if(form.getAttribute('id')==='passwordForm')return run(async()=>{await rpc('ft_changePassword',ST.token,p.current,p.next);ST.token='';sessionStorage.removeItem('ft_token');auth();},'Passwort geändert. Bitte neu anmelden.');
 }
 async function fileAsData(file){if(!file)return null;if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){say('Logo: PNG/JPG/WEBP maximal 2 MB.',true);return null;}return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error('Datei nicht lesbar.'));reader.readAsDataURL(file);});}
 async function uploadFile(input){const str=await fileAsData(input.files[0]);if(!str)return;if(input.id==='newLogo'){ST.logoNew=str;const el=document.getElementById('newLogoLabel');if(el)el.textContent='Ausgewählt: '+input.files[0].name;}else if(input.id==='existingLogo')await run(async()=>{await api('logoUpload',{companyId:firm().id,data:str});await load();},'Firmenlogo gespeichert.');}
 document.addEventListener('click',e=>{const b=e.target.closest('button[data-tab],button[data-act]');if(b){if(b.dataset.tab){
+  ++FT_LOAD_SEQ; // Ein älterer Serveraufruf darf den neu gewählten Tab nicht überschreiben.
   ST.tab=b.dataset.tab;ST.edit='';
   if(['standby','availability'].includes(ST.tab)){
     const target=nextMonth(monthOf(new Date()));
     if(ST.month!==target){ST.month=target;ST.availMonth='';load();return;}
   }
   if(ST.tab==='rules'&&firm()){
+    const companyId=firm().id, month=ST.month, key=companyId+'|'+month;
+    if(ST.rules&&FT_RULES_KEY===key){page();return;}
     ST.rules=null;page();
-    api('rulesGet',{companyId:firm().id,month:ST.month})
-      .then(r=>{ST.rules=r;page();}).catch(err=>say(err.message,true));
+    api('rulesGet',{companyId,month})
+      .then(r=>{
+        if(ST.tab!=='rules'||firm()?.id!==companyId||ST.month!==month)return;
+        ST.rules=r;FT_RULES_KEY=key;page();
+      }).catch(err=>say(err.message,true));
     return;
   }
   // First visit to a view only loads its own data; subsequent navigation is instant.
   const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
-  if(!ST.h?.me||!FT_VIEWS_LOADED.has(key)){
+  if(!ST.h?.me||!FT_VIEWS_LOADED.has(key)||performance.now()-(FT_VIEW_FETCHED_AT.get(key)||0)>30000){
     const pane=document.getElementById('content');
     if(pane)pane.innerHTML='<div class="card">Ansicht wird geladen …</div>';
     load();return;
@@ -352,7 +391,7 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;page();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
