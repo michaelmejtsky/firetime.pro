@@ -68,7 +68,7 @@ input[type=checkbox]{width:17px;min-height:0;accent-color:var(--accent)}input[ty
 </div>
 <button type="button" class="ft-install-shortcut" id="ft-install-open" aria-label="FireTime Pro installieren">↧ App installieren</button><script>
 const INVITE=new URLSearchParams(location.search).get('invite') || ''; 
-const SLUG=new URLSearchParams(location.search).get('firm') || ''; 
+const SLUG=new URLSearchParams(location.search).get('firm') || localStorage.getItem('ft_last_firm_slug') || 'bsb3100'; // Standardkunde, bis eine andere Firma gewählt wurde
 const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:null,logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_VIEWS_LOADED=new Set();
 let FT_LAST_CONTEXT='';
@@ -226,6 +226,7 @@ async function load(){
         FT_RULES_KEY=key;
       }
     }
+    if(firm()?.slug)try{localStorage.setItem('ft_last_firm_slug',firm().slug);}catch(_){} 
     theme(firm()?.color||ST.brand?.color||'#f37850',ST.h.profile?.secondaryColor||ST.brand?.secondaryColor||'#172c44');
     render();
   }catch(err){
@@ -536,7 +537,7 @@ document.addEventListener('change',e=>{const x=e.target;if(x.id==='handoverShift
 }});
 document.addEventListener('dragover',e=>{if(e.target.closest('[data-pick]'))e.preventDefault();});
 document.addEventListener('drop',e=>{const zone=e.target.closest('[data-pick]');if(zone){e.preventDefault();const el=document.getElementById(zone.dataset.pick),file=e.dataTransfer.files[0];if(el&&file){const dt=new DataTransfer();dt.items.add(file);el.files=dt.files;run(()=>uploadFile(el));}}});
-if(SLUG)rpc('ft_brandForLogin',SLUG).then(b=>{ST.brand=b;if(b)theme(b.color,b.secondaryColor);if(!ST.token)auth();}).catch(()=>{});
+if(SLUG)rpc('ft_brandForLogin',SLUG).then(b=>{if(!b)return;ST.brand=b;theme(b.color,b.secondaryColor);if(!ST.token)auth();}).catch(err=>console.warn('Firmenlogo beim Anmelden derzeit nicht ladbar:',err.message));
 load();
 // PWA-Installation: Eigener Dialog + systemeigene Bestätigung (nur bei unterstützten Browsern).
 // Einladungstoken bleiben ausschließlich in der geöffneten Webseite; die App-Start-URL ist immer /.
