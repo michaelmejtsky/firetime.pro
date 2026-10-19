@@ -129,11 +129,21 @@ async function rpc(name,...args){
     case 'ft_api':request={type:'api',token:args[0],action:args[1],data:args[2]||{}};break;
     default:throw Error('Nicht freigegebener API-Aufruf: '+name);
   }
-  const response=await fetch(endpoint,{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(request),cache:'no-store',credentials:'omit'
-  });
-  let data;try{data=await response.json();}catch(e){throw Error('Die API liefert keine gültige Antwort.');}
+  const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk'].includes(request.action);
+  const deadline=pdfAction?(request.action==='pdfPrepare'?25000:20000):65000;
+  const abort=new AbortController();
+  const timeout=setTimeout(()=>abort.abort(),deadline);
+  let response;
+  try{
+    response=await fetch(endpoint,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(request),cache:'no-store',credentials:'omit',signal:abort.signal
+    });
+  }catch(err){
+    if(err?.name==='AbortError')throw Error(pdfAction?'PDF-Server antwortet nicht innerhalb von '+Math.round(deadline/1000)+' Sekunden. Der Auftrag kann trotzdem bei Google laufen. Bitte nicht mehrfach starten.':'Verbindung zum Server hat zu lange gedauert.');
+    throw Error('Server nicht erreichbar: '+String(err.message||err));
+  }finally{clearTimeout(timeout);}
+  let data;try{data=await response.json();}catch(e){throw Error('Die API liefert keine gültige Antwort (HTTP '+response.status+').');}
   if(!response.ok||!data.ok)throw Error(data.error||'Fehler beim Serveraufruf.');
   return data.data;
 }
@@ -274,6 +284,7 @@ function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edi
 function time(){const a=ST.h.activities.filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month),edit=a.find(x=>x.id===ST.edit);return hint('Hier werden nur tatsächliche Arbeitsstunden erfasst. Ein Objekt ist ein Freitextfeld – keine Objektlisten oder Objektzuweisung. BSB3100: Objektkontrollen zählen zum Soll und dürfen parallel zur Bereitschaft laufen. Störungseinsätze zählen zum Soll und unterbrechen die Bereitschaft von Alarm bis Rückkehr.')+monthPick()+`<div class="card"><h2>${edit?'Arbeitszeit bearbeiten':'Arbeitszeit erfassen'}</h2><form id="timeForm"><input type="hidden" name="id" value="${E(edit?.id||'')}"><div class="cols">${isAdmin()?optionsUsers('userId',edit?.userId||me().id):''}${select('type','Art der Tätigkeit',[['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz (Anruf bis Rückkehr)'],['OTHER','Sonstige Arbeitszeit']],edit?.type||'OBJECT')}${input('Beginn','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')}${input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')}${input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')}${input('Objekt (optional)','object',edit?.object||'')}</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">${E(edit?.description||'')}</textarea></label><button class="btn primary">Arbeitszeit speichern</button>${edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt</th><th></th></tr>${a.map(x=>`<tr><td>${DT(x.start)} – ${DT(x.end)}</td><td>${E(who(x.userId).name)}</td><td>${E(x.type)}</td><td>${E(x.object)}</td><td><button class="btn" data-act="editTime" data-id="${x.id}">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="${x.id}">Löschen</button></td></tr>`).join('')}</table></div></div>`;}
 const FT_PDF_JOB_STORE='ft_pdf_pending_job_v2';
 let FT_PDF_RUNNING_ID='';
+let FT_PDF_PREPARE_BUSY=false;
 function ftPdfMessage(message,bad=false){
  const pane=document.getElementById('ftPdfArchive');
  if(pane){pane.textContent=message;pane.style.whiteSpace='normal';}
@@ -443,17 +454,28 @@ if(a==='leaveCancelApprove'||a==='leaveCancelReject'){if(!confirm(a==='leaveCanc
 if(a==='leaveApprove'||a==='leaveReject'){const approve=a==='leaveApprove',credit=approve?prompt('Zeitgutschrift für den Urlaub in Stunden (nach Stundenmodell):','0'):'0';if(credit===null)return;await run(async()=>{await api('leaveReview',{id,companyId:firm().id,status:approve?'APPROVED':'REJECTED',creditHours:Number(credit)});await load();},'Urlaub bearbeitet.');return;}
 if(a==='submitMonth'){if(confirm('Alle eigenen Stunden vollständig erfasst?'))await run(async()=>{await api('monthSubmit',{month:ST.month,userId:ST.selected||me().id,companyId:firm().id});await load();},'Monat eingereicht.');return;}
 if(a==='approveMonth'||a==='returnMonth'){const approved=a==='approveMonth',note=approved?'':prompt('Begründung für die Rückgabe','');if(note===null)return;await run(async()=>{await api('monthReview',{id,companyId:firm().id,status:approved?'APPROVED':'RETURNED',note});await load();},'Monat bearbeitet.');return;}
-if(a==='pdf'){await run(async()=>{
+if(a==='pdf'){
+ if(FT_PDF_PREPARE_BUSY)return;
+ FT_PDF_PREPARE_BUSY=true;
+ const btn=document.querySelector('button[data-act="pdf"]');
+ if(btn){btn.disabled=true;btn.textContent='PDF-Auftrag wird gestartet …';}
  const context={month:ST.month,userId:ST.selected||me().id,companyId:firm().id};
- ftPdfMessage('PDF-Auftrag wird gestartet …');
- const r=await api('pdfPrepare',context);
- if(r.status==='READY'){await ftPdfDownload(r,false);ftPdfMessage('PDF erfolgreich heruntergeladen.');return;}
- if(!r.id||!['QUEUED','RUNNING'].includes(r.status))throw Error('PDF-Auftrag nicht gestartet: '+(r.error||r.status||'Keine Antwort'));
- const job={id:r.id,...context};
- try{sessionStorage.setItem(FT_PDF_JOB_STORE,JSON.stringify(job));}catch(e){}
- ftPdfMessage('PDF-Auftrag angelegt. Google erstellt den Bericht; der Status wird weiter geprüft …');
- ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
- });return;}
+ try{
+   ftPdfMessage('PDF-Auftrag wird gestartet …');
+   const r=await api('pdfPrepare',context);
+   if(r.status==='READY'){await ftPdfDownload({...r,...context},false);ftPdfMessage('PDF erfolgreich heruntergeladen.');return;}
+   if(!r.id||!['QUEUED','RUNNING'].includes(r.status))throw Error('PDF-Auftrag nicht gestartet: '+(r.error||r.status||'Keine Antwort'));
+   const job={id:r.id,...context};
+   try{sessionStorage.setItem(FT_PDF_JOB_STORE,JSON.stringify(job));}catch(e){}
+   ftPdfMessage('PDF-Auftrag angelegt. Google erstellt den Bericht; der Status wird weiter geprüft …');
+   ftPollPdfJob(job).catch(err=>ftPdfMessage('PDF-Statusfehler: '+err.message,true));
+ }catch(err){
+   ftPdfMessage('PDF-Auftrag konnte nicht bestätigt werden: '+String(err.message||err),true);
+ }finally{
+   FT_PDF_PREPARE_BUSY=false;
+   if(btn){btn.disabled=false;btn.textContent='PDF erzeugen';}
+ }
+ return;}
  if(a==='pdfArchive'){
  ftPdfMessage('PDF-Archiv wird geladen …');
  try{
