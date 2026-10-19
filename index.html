@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-instant-company-logo-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-leave-history-dashboard-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -207,6 +207,25 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-login-logo{width:auto;height:auto;max-width:min(80vw,245px);max-height:98px;object-fit:contain;display:block}
 .ft-login-brand-empty{min-height:20px}
 @media(max-width:480px){.ft-login-logo{max-height:80px;max-width:min(80vw,215px)}}
+
+/* Vacation account & multi-year history; display only, no hidden recalculations */
+.ft-vacation-home{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:17px;margin-top:15px;border-color:#487388;background:linear-gradient(120deg,#1c3b50,#173044)}
+.ft-vacation-kicker{text-transform:uppercase;letter-spacing:.085em;font-size:11px;font-weight:780;color:#aad6e7}
+.ft-vacation-total{font-size:clamp(30px,4vw,39px);font-weight:800;letter-spacing:-.04em;margin:4px 0}
+.ft-vacation-total span{font-size:clamp(15px,2.2vw,19px);font-weight:590;letter-spacing:normal}
+.ft-vacation-home>div{flex:1 1 260px}
+.ft-leave-account{border-color:#48718c}
+.ft-leave-account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:13px 0 10px}
+.ft-leave-stat{background:#11283a;border:1px solid #355871;border-radius:13px;padding:14px;min-width:0}
+.ft-leave-stat strong{font-weight:770;font-size:clamp(20px,3vw,27px);display:block;margin-top:8px;letter-spacing:-.025em}
+.ft-leave-account-note,.ft-leave-history-foot{color:#a8c4d8;font-size:12px;line-height:1.6;margin:12px 0 0}
+.ft-leave-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:10px}
+.ft-leave-filter{margin:6px 0 12px!important}
+.ft-leave-history-count{padding:10px 0;color:#adcade;font-size:12px;border-bottom:1px solid #36516a}
+.ft-leave-group-title{color:#c4e0f2;font-size:14px;margin:19px 0 9px;letter-spacing:-.012em}
+.ft-leave-group-title+.ft-leave-item{border-top:0}
+.ft-leave-history-foot{border-top:1px solid #36516a;padding-top:13px;margin-top:16px}
+@media(max-width:480px){.ft-leave-account-grid{grid-template-columns:minmax(0,1fr)}.ft-vacation-home>.btn{width:100%}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -310,7 +329,7 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -638,7 +657,7 @@ function page(){
 function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
   '<div class="ft-loading-dashboard" role="status" aria-live="polite"><div class="ft-loader-ring"></div><div><b>Arbeitsbereich bereit</b><div class="muted small">Sollstunden, Iststunden und Bereitschaft werden geladen …</div></div></div>'+
   '<div class="grid">'+Array.from({length:4},()=>'<div class="card ft-loading-card"><div class="ft-loading-line"></div><div class="ft-loading-line ft-loading-line-short"></div></div>').join('')+'</div>';
-const r=ST.h.reports[me().id]||{};return hint('Übersicht für '+E(ST.month)+'. Die Planung des Folgemonats wird separat angezeigt. Geplante Dienste sind keine geleistete Arbeitszeit.')+`<div class="grid">${[['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']].map(([k,v])=>`<div class="card"><div class="muted small">${E(k)}</div><div class="metric">${E(v)}</div></div>`).join('')}</div>${has('WORKPLAN')?`<div class="card"><h3>Meine veröffentlichten Arbeitsdienste</h3>${ST.h.workShifts.filter(s=>s.userId===me().id||isAdmin()).slice(0,12).map(s=>`<div>${E(s.title)} · ${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine Dienste'}</div>`:''}${has('STANDBY')?`<div class="card"><h3>Bereitschaftsübersicht</h3>${ST.h.shifts.filter(s=>s.status==='PUBLISHED').map(s=>`<div>${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine veröffentlichten Dienste'}</div>`:''}`;}
+const r=ST.h.reports[me().id]||{};return hint('Übersicht für '+E(ST.month)+'. Die Planung des Folgemonats wird separat angezeigt. Geplante Dienste sind keine geleistete Arbeitszeit.')+`<div class="grid">${[['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']].map(([k,v])=>`<div class="card"><div class="muted small">${E(k)}</div><div class="metric">${E(v)}</div></div>`).join('')}</div>${has('LEAVE')?`<section class="card ft-vacation-home" aria-label="Urlaubskonto"><div><div class="ft-vacation-kicker">Mein Urlaubskonto</div><div class="ft-vacation-total">${E(N(me().leaveBalance))} <span>Tage Resturlaub</span></div><div class="muted small">Aktueller Gesamtrest · jährlicher Anspruch laut Stammdaten: ${E(N(me().leaveEntitlement))} Tage. Die Aufteilung nach Anspruchsjahren folgt mit dem Urlaubskonto.</div></div><button class="btn primary" data-tab="leave">Alle Urlaube ansehen →</button></section>`:''}${has('WORKPLAN')?`<div class="card"><h3>Meine veröffentlichten Arbeitsdienste</h3>${ST.h.workShifts.filter(s=>s.userId===me().id||isAdmin()).slice(0,12).map(s=>`<div>${E(s.title)} · ${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine Dienste'}</div>`:''}${has('STANDBY')?`<div class="card"><h3>Bereitschaftsübersicht</h3>${ST.h.shifts.filter(s=>s.status==='PUBLISHED').map(s=>`<div>${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine veröffentlichten Dienste'}</div>`:''}`;}
 function profileFields(p){return `<div class="cols">${select('workModel','Arbeitszeitmodell',[['OFFICE','Büro / fixe Wochenzeiten'],['SHIFT12','12-Stunden-Schicht'],['SHIFT24','24-Stunden-Schicht'],['FLEX','Flexible Arbeitszeit']],p.workModel)}${input('Üblicher Beginn','workStart',p.workStart||'08:00','time','required')}${input('Übliche Stunden je Dienst','workHours',p.workHours||8,'number','min="0.25" max="24" step="0.25" required')}${input('Übliche Wochentage (Mo=1, So=7)','workdays',p.workdays||'1,2,3,4,5')}${input('Bereitschaftsbeginn (wenn gebucht)','standbyStart',p.standbyStart||'07:00','time','required')}${input('Bereitschaftsdauer in Stunden','standbyHours',p.standbyHours||24,'number','min="1" max="48" required')}${input('Zweite Firmenfarbe','secondaryColor',p.secondaryColor||'#19354d','color')}</div>${input('Begrüßung auf der Login-Seite (optional)','welcomeText',p.welcomeText||'')}`;}
 function modulesForm(enabled,scope){return `<div class="cols">${MODULES.map(([key,title,desc])=>`<label class="cbox"><input name="module" type="checkbox" value="${key}" ${enabled.includes(key)?'checked':''}><span><b>${E(title)}</b><div class="muted small">${E(desc)}</div></span></label>`).join('')}</div><p class="muted small">${scope==='sale'?'Nur du als FireTime-Pro-Systemadministrator bestimmst, welche Funktionen gekauft/freigeschaltet sind.':'Die Firmenadministration kann ihre freigeschalteten Module nicht selbst erweitern.'}</p>`;}
 function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue Firma erhält ein eigenes Logo, eigene Farben, ein eigenes Arbeitsmodell und nur die Module, die du verkaufst. BSB3100 ist bereits angelegt.')+`<div class="card"><h2>Bestehende Kunden</h2>${ST.h.companies.map(c=>`<div class="row between"><b>${E(c.name)}</b><button class="btn" data-act="openFirm" data-id="${c.id}">Öffnen</button></div>`).join('')}</div><div class="card"><h2>Neuen Kunden samt Administrator anlegen</h2><form id="onboardForm"><div class="cols">${input('Firmenname','name','','text','required')}${input('Firmenkürzel / Link','slug','','text','required')}${input('Primärfarbe','color','#f37850','color')}${input('Name des ersten Firmenadministrators','adminName','','text','required')}${input('E-Mail des Firmenadministrators','adminEmail','','email','required')}</div><h3>Firmenlogo</h3><div class="drop" data-pick="newLogo">Logo anklicken oder hineinziehen (PNG/JPG/WEBP, max. 2 MB)<input type="file" id="newLogo" accept="image/png,image/jpeg,image/webp"></div><div id="newLogoLabel" class="muted small"></div><h3 style="margin-top:20px">Arbeitsmodell</h3>${profileFields({workModel:'OFFICE',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24})}<h3>Welche Module hat die Firma gekauft?</h3>${modulesForm(['TIME','REPORTS','LEAVE'],'sale')}<button class="btn primary">Kunden erstellen und Admin einladen</button></form></div>`;}
@@ -1011,29 +1030,74 @@ function ftLeaveDate(v){
  const x=String(v||'');
  return /^\d{4}-\d{2}-\d{2}$/.test(x)?x.slice(8,10)+'.'+x.slice(5,7)+'.'+x.slice(0,4):x;
 }
+
+function ftVacationToday(){
+ const p=ftViennaParts(new Date());
+ return p?p.year+'-'+p.month+'-'+p.day:'';
+}
+function ftVacationYearMatches(item,year){
+ if(year==='all')return true;
+ const from=String(item.from||''),to=String(item.to||'');
+ return from.slice(0,4)<=year&&to.slice(0,4)>=year;
+}
+function ftVacationItem(row,statuses,cssStatus,today){
+ const past=(row.status==='APPROVED'||row.status==='CANCEL_PENDING')&&String(row.to||'')<today;
+ const upcoming=row.status==='APPROVED'&&String(row.to||'')>=today;
+ const badge=past?'Genommen':upcoming?'Genehmigt / geplant':statuses[row.status]||row.status;
+ const actions=(row.userId===me().id&&row.status==='PENDING'?'<button class="btn" data-act="leaveEdit" data-id="'+E(row.id)+'">Bearbeiten</button><button class="btn danger" data-act="leaveWithdraw" data-id="'+E(row.id)+'">Zurückziehen</button>':'')+
+ (row.userId===me().id&&row.status==='APPROVED'?'<button class="btn danger" data-act="leaveWithdraw" data-id="'+E(row.id)+'">Stornierung beantragen</button>':'')+
+ (isAdmin()&&row.status==='PENDING'?'<button class="btn" data-act="leaveApprove" data-id="'+E(row.id)+'">Genehmigen</button><button class="btn danger" data-act="leaveReject" data-id="'+E(row.id)+'">Ablehnen</button>':'')+
+ (isAdmin()&&row.status==='CANCEL_PENDING'?'<button class="btn" data-act="leaveCancelApprove" data-id="'+E(row.id)+'">Stornierung bestätigen</button><button class="btn danger" data-act="leaveCancelReject" data-id="'+E(row.id)+'">Stornierung ablehnen</button>':'');
+ return '<article class="ft-leave-item"><div class="ft-leave-head"><strong>'+E(who(row.userId).name)+'</strong>'+
+ '<span class="ft-leave-status '+cssStatus(row.status)+'">'+E(badge)+'</span></div>'+
+ '<div class="ft-leave-meta"><b>'+E(ftLeaveDate(row.from))+' bis '+E(ftLeaveDate(row.to))+'</b> · '+E(N(row.days))+' '+(Number(row.days)===1?'Tag':'Tage')+'</div>'+
+ (row.reason?'<div class="ft-leave-meta">'+E(row.reason)+'</div>':'')+
+ (actions?'<div class="actions">'+actions+'</div>':'')+'</article>';
+}
 function leave(){
  const mine=ST.h.leaves||[];
- const statuses={PENDING:'Offen',APPROVED:'Genehmigt',REJECTED:'Abgelehnt',WITHDRAWN:'Zurückgezogen',CANCEL_PENDING:'Stornierung beantragt',CANCELLED:'Storniert'};
+ const statuses={PENDING:'Offen',APPROVED:'Genehmigt',REJECTED:'Abgelehnt',
+  WITHDRAWN:'Zurückgezogen',CANCEL_PENDING:'Stornierung beantragt',CANCELLED:'Storniert'};
  const edit=mine.find(x=>x.id===ST.edit&&x.status==='PENDING');
  const cssStatus=s=>s==='APPROVED'?'approved':s==='PENDING'||s==='CANCEL_PENDING'?'pending':'rejected';
- return '<div class="ft-leave-intro"><span class="ft-leave-icon" aria-hidden="true">i</span><span><b>Urlaub verwalten.</b> Offene Anträge kannst du bearbeiten oder zurückziehen. Bereits genehmigte Anträge müssen vom Administrator storniert werden.</span></div>'+
- '<div class="cols"><section class="card"><h2>'+(edit?'Urlaubsantrag bearbeiten':'Urlaub beantragen')+'</h2><p class="ft-leave-balance">Verfügbarer Resturlaub <strong>'+E(N(me().leaveBalance))+' Tage</strong></p>'+
+ const today=ftVacationToday(),year=ST.leaveYear||today.slice(0,4);
+ const years=[...new Set([today.slice(0,4),...mine.flatMap(l=>[String(l.from||'').slice(0,4),String(l.to||'').slice(0,4)])
+   .filter(y=>/^\d{4}$/.test(y))])].sort((a,b)=>b.localeCompare(a));
+ const userFilter=isAdmin()?ST.leaveUserFilter||'':'';
+ const subset=mine.filter(l=>ftVacationYearMatches(l,year)&&(!userFilter||String(l.userId)===userFilter));
+ const ordered=subset.slice().sort((a,b)=>String(b.from).localeCompare(String(a.from)));
+ const taken=ordered.filter(l=>(l.status==='APPROVED'||l.status==='CANCEL_PENDING')&&String(l.to||'')<today);
+ const planned=ordered.filter(l=>l.status==='APPROVED'&&String(l.to||'')>=today);
+ const other=ordered.filter(l=>!taken.includes(l)&&!planned.includes(l));
+ const annualEntitlement=Number(me().leaveEntitlement)||0,rest=Number(me().leaveBalance)||0;
+ const yearOptions='<option value="all" '+(year==='all'?'selected':'')+'>Alle Jahre</option>'+
+   years.map(y=>'<option value="'+E(y)+'" '+(year===y?'selected':'')+'>'+E(y)+'</option>').join('');
+ const userOptions=isAdmin()?'<label class="field ft-leave-filter"><span>Mitarbeiter</span><select id="ftLeaveUserFilter">'+
+  '<option value="">Alle Mitarbeiter</option>'+myUsers().map(u=>'<option value="'+E(u.id)+'" '+(String(userFilter)===String(u.id)?'selected':'')+'>'+E(u.name)+'</option>').join('')+'</select></label>':'';
+ const entries=(rows,empty)=>rows.length?rows.map(l=>ftVacationItem(l,statuses,cssStatus,today)).join(''):
+   '<div class="ft-leave-empty">'+empty+'</div>';
+ return '<div class="ft-leave-intro"><span class="ft-leave-icon" aria-hidden="true">i</span>'+
+ '<span><b>Mein Urlaub auf einen Blick.</b> Genehmigte und vergangene Urlaube bleiben in der Historie sichtbar. Offene Anträge kannst du bearbeiten oder zurückziehen.</span></div>'+
+ '<section class="card ft-leave-account"><h2>Urlaubskonto</h2><div class="ft-leave-account-grid">'+
+ '<div class="ft-leave-stat"><div class="muted small">Aktueller Resturlaub insgesamt</div><strong>'+E(N(rest))+' Tage</strong></div>'+
+ '<div class="ft-leave-stat"><div class="muted small">Jährlicher Anspruch laut Stammdaten</div><strong>'+E(N(annualEntitlement))+' Tage</strong></div></div>'+
+ '<p class="ft-leave-account-note">Der Resturlaub enthält den aktuell gespeicherten Gesamtsaldo. Neuer Jahresanspruch und Übertrag aus früheren Urlaubsjahren werden erst mit der geplanten Jahreskontoführung getrennt ausgewiesen. Die Jahresauswahl unten filtert Anträge, nicht den Gesamtsaldo.</p></section>'+
+ '<div class="cols"><section class="card"><h2>'+(edit?'Urlaubsantrag bearbeiten':'Urlaub beantragen')+'</h2>'+
  '<form id="leaveForm" class="ft-leave-form"><input type="hidden" name="id" value="'+E(edit?.id||'')+'">'+
- input('Von','from',edit?.from||'','date','required')+
- input('Bis','to',edit?.to||'','date','required')+
+ input('Von','from',edit?.from||'','date','required')+input('Bis','to',edit?.to||'','date','required')+
  input('Grund (optional)','reason',edit?.reason||'')+
  '<button class="btn primary" type="submit">'+(edit?'Änderung speichern':'Urlaub beantragen')+'</button></form>'+
  (edit?'<button class="btn" type="button" data-act="leaveEditCancel">Bearbeitung abbrechen</button>':'')+
- '</section><section class="card"><h2>Anträge</h2>'+
- (mine.length?mine.map(l=>'<article class="ft-leave-item"><div class="ft-leave-head"><strong>'+E(who(l.userId).name)+'</strong><span class="ft-leave-status '+cssStatus(l.status)+'">'+E(statuses[l.status]||l.status)+'</span></div>'+
- '<div class="ft-leave-meta">'+E(ftLeaveDate(l.from))+' bis '+E(ftLeaveDate(l.to))+' · '+E(N(l.days))+' '+(Number(l.days)===1?'Tag':'Tage')+'</div>'+
- (l.reason?'<div class="ft-leave-meta">'+E(l.reason)+'</div>':'')+
- '<div class="actions">'+
- (l.userId===me().id&&l.status==='PENDING'?'<button class="btn" data-act="leaveEdit" data-id="'+E(l.id)+'">Bearbeiten</button><button class="btn danger" data-act="leaveWithdraw" data-id="'+E(l.id)+'">Zurückziehen</button>':'')+
- (l.userId===me().id&&l.status==='APPROVED'?'<button class="btn danger" data-act="leaveWithdraw" data-id="'+E(l.id)+'">Stornierung beantragen</button>':'')+
- (isAdmin()&&l.status==='PENDING'?'<button class="btn" data-act="leaveApprove" data-id="'+E(l.id)+'">Genehmigen</button><button class="btn danger" data-act="leaveReject" data-id="'+E(l.id)+'">Ablehnen</button>':'')+
- (isAdmin()&&l.status==='CANCEL_PENDING'?'<button class="btn" data-act="leaveCancelApprove" data-id="'+E(l.id)+'">Stornierung bestätigen</button><button class="btn danger" data-act="leaveCancelReject" data-id="'+E(l.id)+'">Stornierung ablehnen</button>':'')+
- '</div></article>').join(''):'<div class="ft-leave-empty">Noch keine Urlaubsanträge vorhanden.</div>')+
+ '</section><section class="card"><h2>Urlaubshistorie</h2>'+
+ '<div class="ft-leave-filters"><label class="field ft-leave-filter"><span>Kalenderjahr</span><select id="ftLeaveYearFilter">'+yearOptions+'</select></label>'+userOptions+'</div>'+
+ '<div class="ft-leave-history-count">'+E(subset.length)+' Anträge im gewählten Zeitraum · '+E(taken.length)+' bereits vergangen und genehmigt</div>'+
+ '<h3 class="ft-leave-group-title">Vergangene genehmigte Urlaube</h3>'+
+ entries(taken,'Keine vergangenen genehmigten Urlaube für diese Auswahl.')+
+ '<h3 class="ft-leave-group-title">Genehmigte zukünftige Urlaube</h3>'+
+ entries(planned,'Keine weiteren genehmigten Urlaube geplant.')+
+ '<h3 class="ft-leave-group-title">Offene und sonstige Anträge</h3>'+
+ entries(other,'Keine weiteren Anträge vorhanden.')+
+ '<div class="ft-leave-history-foot">Jahresübergreifende Anträge erscheinen in beiden betroffenen Jahren. Die zugeordneten Urlaubstage werden derzeit noch nicht jahresweise aufgeteilt.</div>'+
  '</section></div>';
 }
 function work(){const list=ST.h.workShifts,sel=isAdmin(),p=ST.h.profile;const workBegin=ST.month+'-01T'+validClock(p.workStart);return hint('Arbeitsdienstplan für fixe Zeiten, 12-/24-Stunden-Schichten oder freie Dienste. Der Dienstplan ist eine Planung und erzeugt keine Ist-Arbeitsstunden. Beim Veröffentlichen erhalten Mitarbeiter eine E-Mail oder eine Google-Kalendereinladung.')+monthPick()+`${sel?`<div class="card"><h2>Arbeitsdienst eintragen</h2><form id="workForm"><div class="cols">${optionsUsers()}${input('Bezeichnung','title','Arbeitsdienst')}${input('Beginn','start',workBegin,'datetime-local','required')}${input('Ende','end',shiftedEnd(workBegin,p.workHours||8),'datetime-local','required')}</div><button class="btn primary">Entwurf speichern</button></form><button class="btn" data-act="workPublish">Alle Entwürfe dieses Monats veröffentlichen & einladen</button></div>`:''}<div class="card"><h2>Arbeitsdienste</h2><div class="table"><table><tr><th>Mitarbeiter</th><th>Beginn</th><th>Ende</th><th>Tätigkeit</th><th>Status</th><th></th></tr>${list.map(x=>`<tr><td>${E(who(x.userId).name)}</td><td>${DT(x.start)}</td><td>${DT(x.end)}</td><td>${E(x.title)}</td><td>${E(x.status)}</td><td>${sel&&x.status==='DRAFT'?`<button class="btn danger" data-act="workDelete" data-id="${x.id}">Löschen</button>`:''}</td></tr>`).join('')}</table></div></div>`;}
@@ -1329,7 +1393,7 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
