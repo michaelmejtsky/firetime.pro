@@ -319,6 +319,7 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 /* Compact collective accounting monthly report. */
 .ft-payroll-panel{border-color:#4b6e88}
 .ft-payroll-status{padding:12px 14px;background:#15374b;border:1px solid #46708b;border-radius:12px;color:#d3e4f1;font-size:12px;line-height:1.65;margin:13px 0}
+.ft-payroll-download-ready{display:block;margin-top:10px}
 .ft-payroll-table{margin-top:13px;overflow-x:auto}
 .ft-payroll-table table{min-width:900px}
 .ft-payroll-table th,.ft-payroll-table td{font-size:11px;padding:8px 7px;white-space:nowrap}
@@ -1107,6 +1108,7 @@ const FT_PAYROLL_COLS=[
  ['worked','Arbeit ges.'],['sunday','Arbeit So.'],['holiday','Arbeit Ft.'],['night','Arbeit Nacht']
 ];
 let FT_PAYROLL_BUSY=false;
+let FT_PAYROLL_READY=null;
 function ftPayrollFmt_(value){return Number(value||0).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function ftPayrollPanel_(){
  if(!isAdmin()||!firm()?.id)return '';
@@ -1200,6 +1202,7 @@ async function ftPayrollGenerate_(){
  const status=document.getElementById('ftPayrollStatus'),preview=document.getElementById('ftPayrollPreview');
  if(!companyId)return;
  const progress=value=>{if(status&&status.isConnected)status.textContent=value;};
+ FT_PAYROLL_READY=null;
  FT_PAYROLL_BUSY=true;if(button){button.disabled=true;button.textContent='Buchhaltungs-PDF wird erstellt …';}
  try{
   progress('Prüfe Firmenkalender und Monatsfreigaben …');
@@ -1247,11 +1250,19 @@ async function ftPayrollGenerate_(){
     base64:await ftPdfEncodeBase64_(pdf.blob),requestId:'LOHNBUCH_'+ftPdfRequestId_('payroll')});
    archived=!!saved?.id;if(!archived)throw Error('Keine positive Archivbestätigung.');
   }catch(e){problem=String(e.message||e);}
+  FT_PAYROLL_READY={pdf,companyId,month};
   ftPdfOfferDownload_(pdf);
   progress((archived?'Im PDF-Sammelarchiv gespeichert und als Download angeboten.':
    'PDF zum Download angeboten, aber NICHT archiviert: '+problem)+
    (approved<rows.length?' ACHTUNG: '+approved+'/'+rows.length+' Monate freigegeben (VORLÄUFIG).':'')+
    ' · '+pdf.pages+' Seite(n).');
+  // Real user click fallback for iOS Safari after asynchronous Google calls.
+  if(status&&status.isConnected){
+   const manual=document.createElement('button');
+   manual.type='button';manual.className='btn primary ft-payroll-download-ready';
+   manual.dataset.act='payrollDownloadReady';manual.textContent='PDF herunterladen';
+   status.appendChild(manual);
+  }
   if(archived)ftPayrollArchive_().catch(err=>console.warn('Buchhaltungsarchiv:',err));
  }catch(e){
   progress('Buchhaltungs-PDF fehlgeschlagen: '+String(e.message||e));
@@ -1980,6 +1991,12 @@ if(a==='bulkAll'||a==='bulkNone'){
  if(!isAdmin())return;
  document.querySelectorAll('[data-ft-bulk-employee]').forEach(x=>x.checked=a==='bulkAll');
  ftUpdateBulkCount();return;
+}
+if(a==='payrollDownloadReady'){
+ const ready=FT_PAYROLL_READY;
+ if(ready&&firm()?.id===ready.companyId&&ST.month===ready.month)ftPdfOfferDownload_(ready.pdf);
+ else say('Bitte den Buchhaltungsbogen für die aktuell ausgewählte Firma und den Monat neu erstellen.',true);
+ return;
 }
 if(a==='payrollPdf'){await ftPayrollGenerate_();return;}
 if(a==='payrollArchive'){await ftPayrollArchive_();return;}
