@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.2-bsb3100-standby-flat-rate-20261020';
+const FT_VERSION='1.8.3-opening-balance-cutover-20261020';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -201,7 +201,7 @@ function ft_datetime_(s){if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(s||''
 
 function ft_audit_(u,action,entity,id,before,after){ft_add_('Audit',{id:ft_uuid_(),at:ft_now_(),actorId:u?u.id:'SYSTEM',companyId:(after&&after.companyId)||(before&&before.companyId)||(u&&u.companyId)||'',action,entity,entityId:id,previous:JSON.stringify(before||{}).slice(0,25000),next:JSON.stringify(after||{}).slice(0,25000)});}
 
-function ft_safe_(u){return {id:u.id,companyId:u.companyId,role:u.role,name:u.name,email:u.email,monthlyHours:Number(u.monthlyHours)||0,hourlyRate:Number(u.hourlyRate)||0,leaveEntitlement:Number(u.leaveEntitlement)||0,leaveBalance:Number(u.leaveBalance)||0,openingHours:Number(u.openingHours)||0,startDate:u.startDate,workdays:u.workdays||'1,2,3,4,5',status:u.status,mustChange:ft_bool_(u.mustChange),...ft_leaveStaffPublic_(u)};}
+function ft_safe_(u){return {id:u.id,companyId:u.companyId,role:u.role,name:u.name,email:u.email,monthlyHours:Number(u.monthlyHours)||0,hourlyRate:Number(u.hourlyRate)||0,leaveEntitlement:Number(u.leaveEntitlement)||0,leaveBalance:Number(u.leaveBalance)||0,openingHours:Number(u.openingHours)||0,startDate:u.startDate,workdays:u.workdays||'1,2,3,4,5',status:u.status,mustChange:ft_bool_(u.mustChange),hoursStartMonth:ft_balanceStartMonth_(u),...ft_leaveStaffPublic_(u)};}
 
 function ft_allowed_(u,roles){if(!roles.includes(u.role))throw Error('Keine Berechtigung für diese Funktion.');}
 
@@ -302,16 +302,71 @@ function ft_logoData_(c){if(!c||!c.logoId)return '';try{const blob=DriveApp.getF
 
 function ft_publicBrand(slug){return ft_brandForLogin(slug);}
 
+
+/** Übernommenes Stundenkonto: Der Anfangssaldo gilt VOR dem ersten
+ * abzurechnenden FireTime-Monat, nicht seit dem Beschäftigungsbeginn.
+ * Historische Users-Zeilen, Months-Snapshots und PDFs bleiben unverändert.
+ */
+const FT_BALANCE_START_COLS_=['id','companyId','userId','startMonth','updatedBy','updatedAt'];
+function ft_balanceStartRows_(){
+ const key='FT_BALANCE_START';
+ if(FT_REQUEST_CACHE&&FT_REQUEST_CACHE.tables[key])return FT_REQUEST_CACHE.tables[key];
+ const rows=ft_absenceRows_('TimeBalanceStarts',FT_BALANCE_START_COLS_,false);
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[key]=rows;
+ return rows;
+}
+function ft_balanceStartMonth_(user){
+ if(/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(user.hoursStartMonth||'')))
+  return String(user.hoursStartMonth);
+ const found=ft_balanceStartRows_().find(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ if(found){
+  const raw=String(found.startMonth||'');
+  if(/^20\d{2}-(0[1-9]|1[0-2])/.test(raw))return raw.slice(0,7);
+  throw Error('Der Abrechnungsbeginn des Stundenkontos ist ungültig.');
+ }
+ const created=String(user.createdAt||''),hired=String(user.startDate||'');
+ const c=/^20\d{2}-(0[1-9]|1[0-2])/.test(created)?created.slice(0,7):'';
+ const h=/^20\d{2}-(0[1-9]|1[0-2])/.test(hired)?hired.slice(0,7):'';
+ if(c&&h)return c>h?c:h;
+ if(c||h)return c||h;
+ return ft_localMonth_(new Date());
+}
+function ft_balanceStartSave_(actor,user,month){
+ const start=ft_month_(String(month||''));
+ if(user.startDate&&start<String(user.startDate).slice(0,7))
+  throw Error('Stundenabrechnung kann nicht vor dem Beschäftigungsbeginn starten.');
+ const rows=ft_balanceStartRows_();
+ const original=rows.find(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ const before=ft_balanceStartMonth_(user);
+ if(before===start)return start;
+ const record=original||{id:ft_uuid_(),companyId:user.companyId,userId:user.id};
+ Object.assign(record,{startMonth:start,updatedBy:actor.id,updatedAt:ft_now_()});
+ const sheet=ft_absenceSheet_('TimeBalanceStarts',FT_BALANCE_START_COLS_,true);
+ sheet.getRange('D:D').setNumberFormat('@');
+ if(original)ft_absenceSave_('TimeBalanceStarts',FT_BALANCE_START_COLS_,record);
+ else ft_absenceAdd_('TimeBalanceStarts',FT_BALANCE_START_COLS_,record);
+ if(FT_REQUEST_CACHE)delete FT_REQUEST_CACHE.tables.FT_BALANCE_START;
+ ft_audit_(actor,'BALANCE_START','Users',user.id,{hoursStartMonth:before},
+  {companyId:user.companyId,hoursStartMonth:start});
+ return start;
+}
+
 // -----------------------------------------------------------------
 // 04_Mitarbeiter
 // -----------------------------------------------------------------
 /** FireTime Pro 1.1 | Developed by Michael Mejtsky | 04_Mitarbeiter.gs */
 function ft_userCreate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId),role=String(p.role||'STAFF');if(!['STAFF','ADMIN'].includes(role))throw Error('Ungültige Rolle');const email=ft_email_(p.email),name=ft_str_(p.name,100);if(!name)throw Error('Name fehlt');if(ft_get_('Users').some(x=>x.email===email))throw Error('E-Mail ist bereits im System vergeben');const u={id:ft_uuid_(),companyId:c.id,role,name,email,passwordHash:'',salt:'',status:'INVITED',monthlyHours:ft_number_(p.monthlyHours||0,0,300,'Monatssoll'),hourlyRate:ft_number_(p.hourlyRate||0,0,10000,'Stundensatz'),leaveEntitlement:ft_number_(p.leaveEntitlement||0,0,366,'Urlaubsanspruch'),leaveBalance:ft_number_(p.leaveBalance||0,0,1000,'Resturlaub'),openingHours:ft_number_(p.openingHours||0,-10000,10000,'Startsaldo'),startDate:p.startDate||ft_localDate_(new Date()),workdays:ft_str_(p.workdays||'1,2,3,4,5',30),mustChange:false,createdAt:ft_now_()};ft_date_(u.startDate);
+ if(p.hoursStartMonth!==undefined){
+  ft_month_(String(p.hoursStartMonth));
+  if(String(p.hoursStartMonth)<String(u.startDate).slice(0,7))
+   throw Error('Beginn der FireTime-Abrechnung darf nicht vor dem Beschäftigungsbeginn liegen.');
+ }
  const hasLeaveRule=p.leaveYearMode!==undefined||p.leaveRuleType!==undefined;
  const leaveRule=hasLeaveRule?ft_leaveStaffCheck_(p,u,false):null;
  const flexRule=p.leaveWorkModel!==undefined?ft_leaveFlexValidate_(p,u,false):null;
  if(leaveRule)ft_absenceSheet_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,true);
  ft_add_('Users',u);
+ if(p.hoursStartMonth!==undefined)ft_balanceStartSave_(actor,u,p.hoursStartMonth);
  if(leaveRule)ft_leaveStaffSave_(actor,u,leaveRule);
  if(flexRule)ft_leaveFlexSave_(actor,u,flexRule);
  ft_audit_(actor,'CREATE','Users',u.id,{},ft_safe_(u));
@@ -326,11 +381,17 @@ function ft_userUpdate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u
  if(p.startDate!==undefined&&p.startDate!==u.startDate&&ft_leaveLedgerRows_(false).some(x=>x.companyId===u.companyId&&x.userId===u.id&&x.kind==='GRANT')&&before.leaveYearMode==='ANNIVERSARY')
   throw Error('Das Eintrittsdatum nach bereits verbuchten Jahresgutschriften bitte nicht ohne kontrollierte Urlaubsjahr-Umstellung ändern.');
  if(p.leaveBalance!==undefined&&Number(p.leaveBalance)!==Number(u.leaveBalance))ft_leaveEnsureOpening_(u,actor);const fields=['name','monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours','startDate','workdays','status'];fields.forEach(k=>{if(p[k]===undefined)return;if(['monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours'].includes(k))u[k]=ft_number_(p[k],k==='openingHours'?-10000:0,k==='openingHours'?10000:k==='monthlyHours'?300:k==='hourlyRate'?10000:1000,k);else u[k]=ft_str_(p[k],100);});if(p.role&&['ADMIN','STAFF'].includes(p.role))u.role=p.role;if(!['ACTIVE','DISABLED','INVITED'].includes(u.status))throw Error('Ungültiger Status');if(!/^[1-7](,[1-7])*$/.test(u.workdays)||new Set(u.workdays.split(',')).size!==u.workdays.split(',').length)throw Error('Arbeitstage im Format 1,2,3,4,5 eingeben, ohne Duplikate.');if(u.startDate)ft_date_(u.startDate);
+ if(p.hoursStartMonth!==undefined){
+  ft_month_(String(p.hoursStartMonth));
+  if(u.startDate&&String(p.hoursStartMonth)<String(u.startDate).slice(0,7))
+   throw Error('Beginn der FireTime-Abrechnung darf nicht vor dem Beschäftigungsbeginn liegen.');
+ }
  const hasLeaveRule=p.leaveYearMode!==undefined||p.leaveRuleType!==undefined;
  const leaveRule=hasLeaveRule?ft_leaveStaffCheck_(p,u,true):null;
  const flexRule=p.leaveWorkModel!==undefined?ft_leaveFlexValidate_(p,u,true):null;
  if(leaveRule)ft_absenceSheet_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,true);
  ft_save_('Users',u);
+ if(p.hoursStartMonth!==undefined)ft_balanceStartSave_(actor,u,p.hoursStartMonth);
  if(leaveRule)ft_leaveStaffSave_(actor,u,leaveRule);if(flexRule)ft_leaveFlexSave_(actor,u,flexRule);if(p.leaveBalance!==undefined&&Number(p.leaveBalance)!==Number(before.leaveBalance))ft_leaveLedgerRecord_(actor,u,'ADJUST',Number(u.leaveBalance)-Number(before.leaveBalance),'USER_UPDATE_'+ft_uuid_(),'Administrator-Korrektur des Urlaubssaldos');ft_audit_(actor,'UPDATE','Users',u.id,before,ft_safe_(u));return ft_safe_(u);}
 
 // -----------------------------------------------------------------
@@ -599,15 +660,24 @@ function ft_report_(c,u,month,skipCumulative,source){
   // damit bereits vollständig berechnet wäre.
   t.needsHolidayPayReview=t.statutoryHolidayWorkHours>0;
   if(!skipCumulative){
-    let cur=ft_month_(u.startDate?u.startDate.slice(0,7):month);
+    let cur=ft_balanceStartMonth_(u);
     let balance=t.opening,n=0;
-    while(cur<=month && n++<60){
-      balance+=cur===month?t.saldo:ft_report_(c,u,cur,true,source).saldo;
+    t.balanceStartMonth=cur;
+    t.balanceBreakdown=[];
+    while(cur<=month&&n<60){
+      const current=cur===month?t:ft_report_(c,u,cur,true,source);
+      const delta=Number(current.saldo)||0;
+      balance+=delta;
+      t.balanceBreakdown.push({month:cur,target:Number(current.target)||0,
+        worked:Number(current.worked)||0,leaveCredit:Number(current.leaveCredit)||0,
+        sickCredit:Number(current.sickCredit)||0,saldo:ft_2_(delta)});
+      n++;
       const [y,m]=cur.split('-').map(Number);
       cur=Utilities.formatDate(new Date(y,m,1,12),FT_TZ,'yyyy-MM');
     }
     t.runningBalance=balance;
-    t.balanceLimited=n>=60;
+    t.balanceLimited=cur<=month;
+    t.balanceBeforeStart=t.balanceStartMonth>month;
   }
   for(const k of Object.keys(t))if(typeof t[k]==='number')t[k]=ft_2_(t[k]);
   return t;
@@ -1778,6 +1848,7 @@ function ft_home_(u,p){
   availSubmissions,shifts,workShifts,leaves,months,reports,...extra,
   standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
   workflowReady:Boolean(c&&ft_db_().getSheetByName('ActivityTimers')&&ft_db_().getSheetByName('ActivityTypes')&&ft_db_().getSheetByName('PlanMonths')),
+  balanceCutoverSupported:true,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
