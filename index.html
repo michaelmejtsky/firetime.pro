@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-flexible-monthly-leave-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-flexible-monthly-leave-v1b"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -741,7 +741,11 @@ function ftStaffFlexFields_(user){
   user?.leaveFlexReferenceDays??0,'number','min="0" max="6" step="1"')+
  input('Dokumentierte Berechnungsgrundlage (AK/Lohnverrechnung/Vereinbarung)',
   'leaveFlexBasis',user?.leaveFlexBasis||'','text','maxlength="300"')+
- '<p class="ft-flex-warning">Solange keine nachvollziehbare Grundlage und Referenz festgelegt sind, bleiben automatische Urlaubsabbuchungen und Jahresgutschriften für dieses flexible Modell gesperrt. Bestehende Resturlaube werden nicht verändert.</p></div></div>';
+ select('leaveFlexBalanceReviewed','Bisherigen Resturlaub nach neuer Grundlage geprüft?',[
+  ['NO','Noch nicht geprüft – automatische Buchungen und Freigaben gesperrt'],
+  ['YES','Ja – bestehender Resturlaub und Anspruch wurden geprüft']
+ ],user?.leaveFlexBalanceReviewed?'YES':'NO')+
+ '<p class="ft-flex-warning">Automatische Jahresgutschriften und Urlaubsfreigaben bleiben gesperrt, bis Referenz, dokumentierte Bewertungsgrundlage und bisheriger Resturlaub ausdrücklich geprüft wurden. Bestehende Salden bleiben unverändert.</p></div></div>';
 }
 
 function ftStaffVacationSupported_(){
@@ -1564,7 +1568,7 @@ if(a==='leaveApprove'||a==='leaveReject'){
  let payload={id,companyId:firm().id,status:approve?'APPROVED':'REJECTED',creditHours:0};
  if(approve&&isFlex){
   if(!staff.leaveFlexConfigured){
-   say('Flex-Urlaub: Bitte zuerst beim Mitarbeiter rechnerische Urlaubstage/Woche und dokumentierte Berechnungsgrundlage hinterlegen.',true);return;
+   say('Flex-Urlaub: Bitte zuerst Referenz, Bewertungsgrundlage und bisherigen Urlaubssaldo beim Mitarbeiter prüfen und bestätigen.',true);return;
   }
   const daysText=prompt('Flexible Urlaubstage ausdrücklich bewerten: Wie viele ganze vereinbarte Urlaubstage werden für '+l.from+' bis '+l.to+' verbraucht? (Kein automatischer Tagesabzug.)','');
   if(daysText===null)return;
