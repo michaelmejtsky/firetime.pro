@@ -1,0 +1,30 @@
+name: FireTime Pro Dashboard Regression
+on:
+  pull_request:
+    paths:
+      - 'index.html'
+      - 'tests/dashboard.test.cjs'
+      - '.github/workflows/dashboard-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'tests/dashboard.test.cjs'
+      - '.github/workflows/dashboard-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+      - name: Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dashboard-Regressionstest
+        run: node --test tests/dashboard.test.cjs
