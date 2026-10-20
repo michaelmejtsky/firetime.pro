@@ -405,6 +405,7 @@ function ft_hours_(a,b){return Math.max(0,(new Date(b)-new Date(a))/3600000);}
 function ft_overlap_(a,b,c,d){return Math.max(0,Math.min(+new Date(b),+new Date(d))-Math.max(+new Date(a),+new Date(c)))/3600000;}
 
 function ft_2_(v){return Math.round((Number(v)||0)*100)/100;}
+function ft_hourRound_(v){return Math.round((Number(v)||0)*1e8)/1e8;}
 
 function ft_easter_(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k+7)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),day=(h+l-7*m+114)%31+1;return new Date(year,mo-1,day,12);}
 
@@ -673,7 +674,7 @@ function ft_report_(c,u,month,skipCumulative,source){
       balance+=delta;
       t.balanceBreakdown.push({month:cur,target:Number(current.target)||0,
         worked:Number(current.worked)||0,leaveCredit:Number(current.leaveCredit)||0,
-        sickCredit:Number(current.sickCredit)||0,saldo:ft_2_(delta)});
+        sickCredit:Number(current.sickCredit)||0,saldo:ft_hourRound_(delta)});
       n++;
       const [y,m]=cur.split('-').map(Number);
       cur=Utilities.formatDate(new Date(y,m,1,12),FT_TZ,'yyyy-MM');
@@ -682,7 +683,14 @@ function ft_report_(c,u,month,skipCumulative,source){
     t.balanceLimited=cur<=month;
     t.balanceBeforeStart=t.balanceStartMonth>month;
   }
-  for(const k of Object.keys(t))if(typeof t[k]==='number')t[k]=ft_2_(t[k]);
+  for(const k of Object.keys(t))if(typeof t[k]==='number'){
+   const isHour=['worked','object','incident','other','breaks','night','sunday','holiday',
+    'standby','standbyNight','standbySunday','standbyHoliday','objectSunday','objectHoliday',
+    'incidentSunday','incidentHoliday','sundayPremiumHours','holidayPremiumHours','nightPremiumHours',
+    'statutoryHolidayWorkHours','leaveCredit','sickCredit','sickStandbyCredit','target','opening','saldo',
+    'runningBalance'].includes(k);
+   t[k]=isHour?ft_hourRound_(t[k]):ft_2_(t[k]);
+  }
   return t;
 }
 
@@ -1631,11 +1639,11 @@ function ft_timerAutoNotice_(company,user,activity){
  const url=ft_clientUrl_(company)||ft_publicGithubUrl_();
  return ft_notification_(company,user,'TIMER_AUTO_CLOSE',activity.id,
   'FireTime Pro – Arbeitszeit automatisch um 19:00 Uhr beendet',
-  'Hallo '+user.name+'!\\n\\nDeine Arbeitszeit vom '+stamp+
+  'Hallo '+user.name+'!\n\nDeine Arbeitszeit vom '+stamp+
   ' Uhr wurde automatisch mit 19:00 Uhr beendet, weil kein manuelles Arbeitsende erfasst wurde.'+
-  '\\n\\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
-  '\\nDie automatische Endzeit und eine Pause von 0 Minuten sind nur vorläufige Werte – es wurde keine Pause erfunden.'+
-  '\\n\\n'+url+'\\n\\n'+company.name);
+  '\n\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
+  '\nDie automatische Endzeit und eine Pause von 0 Minuten sind nur vorläufige Werte – es wurde keine Pause erfunden.'+
+  '\n\n'+url+'\n\n'+company.name);
 }
 function ft_timerRetryNotices_(){
  let retried=0;
