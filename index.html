@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-accounting-summary-all-staff-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-standby-assignment-editable-v2"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -314,6 +314,8 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-standby-details div{padding:5px 0;line-height:1.5;overflow-wrap:anywhere}
 .ft-standby-assign{min-width:205px;max-width:100%;width:100%;box-sizing:border-box}
 .ft-standby-unsafe{font-size:11px;color:#ffcb91;line-height:1.5;margin-top:8px}
+.ft-standby-current{font-size:12px;color:#d1e5f1;line-height:1.5;margin-top:7px;overflow-wrap:anywhere}
+.ft-standby-current strong{color:#eaf9ff}
 @media(max-width:700px){.ft-standby-plan-table{overflow-x:auto}.ft-standby-plan-table table{min-width:620px}}
 
 /* Compact collective accounting monthly report. */
@@ -1835,6 +1837,11 @@ function ftStandbyDailyAvailability_(date,staff){
  }
  return {yes,no,open,submitted:staff.filter(x=>sent.has(String(x.id))),enabled:true};
 }
+function ftStandbyStatusText_(value){
+ const status=String(value||'OFFEN').toUpperCase();
+ return ({DRAFT:'Entwurf',ENTWURF:'Entwurf',OFFEN:'Offen',PUBLISHED:'Veröffentlicht',
+   FINAL:'Abgeschlossen',DONE:'Geleistet',CONFIRMED:'Bestätigt',ASSIGNED:'Eingeteilt'})[status]||String(value||'Offen');
+}
 function ftStandbyDayRow_(date,shift,split,staff){
  const result=ftStandbyDailyAvailability_(date,staff);
  const candidates=result.yes,selected=String(shift?.userId||'');
@@ -1856,9 +1863,13 @@ function ftStandbyDayRow_(date,shift,split,staff){
   (result.open.length?'<div>◷ Noch nicht abgegeben/offen: '+result.open.map(x=>E(x.name)).join(', ')+'</div>':'')+
   '</details>':'';
  const warning=result.enabled&&selected&&!allowed?'<div class="ft-standby-unsafe">⚠ Vorhandene Einteilung ohne bestätigte Verfügbarkeit – bitte prüfen.</div>':'';
+ const selectedName=selected?assigned?.name||who(selected).name:'';
+ const assignedLine=!split&&selected?
+  '<div class="ft-standby-current">Eingeteilt: <strong>'+E(selectedName)+'</strong></div>':'';
  return '<tr><td><strong>'+E(date)+'</strong></td>'+
   '<td class="ft-standby-avail-cell">'+availNames+details+'</td>'+
-  '<td>'+selectHtml+warning+'</td><td>'+E(shift?.status||'OFFEN')+'</td></tr>';
+  '<td>'+selectHtml+assignedLine+warning+'</td>'+
+  '<td data-standby-status="1">'+E(ftStandbyStatusText_(shift?.status))+'</td></tr>';
 }
 
 function standby(){
@@ -2244,8 +2255,10 @@ document.addEventListener('change',e=>{const x=e.target;if(x.form?.id==='staffFo
   if(previous?.status==='PUBLISHED'&&!confirm('Veröffentlichten Bereitschaftsdienst ändern?')){
     x.value=formerUserId;return;
   }
-  const cell=x.closest('tr')?.cells[2];
-  if(cell)cell.textContent='Speichert …';
+  // Do NOT replace the 'Einteilung' cell: its <select> must survive saving.
+  // There are now four columns: date, availability, selection, status.
+  const tr=x.closest('tr'),statusCell=tr?.querySelector('[data-standby-status]');
+  if(statusCell)statusCell.textContent='Speichert …';
   x.disabled=true;
   (async()=>{
     try{
@@ -2255,21 +2268,30 @@ document.addEventListener('change',e=>{const x=e.target;if(x.form?.id==='staffFo
         confirmChange:previous?.status==='PUBLISHED'
       });
       if(!result?.row?.id)throw Error('Google hat die Bereitschaft nicht bestätigt.');
-      // Datensatz gezielt aktualisieren. Kein kompletter home()-Abruf mehr.
+      // Keep the canonical saved assignment in memory and re-render only this row.
+      // The select remains editable; the selected name is shown separately.
       if(ST.h?.company?.id===companyId&&ST.month===month){
+        const saved={...(previous||{}),...result.row,
+          day:result.row.day||date,
+          userId:result.row.userId??newUserId};
         const idx=ST.h.shifts.findIndex(s=>s.day===date);
-        if(idx<0)ST.h.shifts.push(result.row);
-        else ST.h.shifts[idx]=result.row;
-        if(cell)cell.textContent=result.row.status||'ENTWURF';
-        // Die Dashboard-Daten sind nach der Änderung veraltet.
+        if(idx<0)ST.h.shifts.push(saved);
+        else ST.h.shifts[idx]=saved;
+        if(tr?.isConnected&&ST.tab==='standby'){
+          const split=(ST.h.segments||[]).some(seg=>seg.shiftId===saved.id);
+          tr.outerHTML=ftStandbyDayRow_(date,saved,split,
+            (ST.h.directory||[]).map(u=>({...u,status:'ACTIVE'})).filter(u=>u.id));
+        }
         FT_VIEWS_LOADED.delete(companyId+'|'+month+'|dashboard');
+        FT_VIEWS_LOADED.delete(companyId+'|'+month+'|standby');
       }
-      say(result.warning||'Bereitschaft gespeichert.',Boolean(result.warning));
+      say(result.warning||'Bereitschaft gespeichert – Einteilung kann weiter geändert werden.',Boolean(result.warning));
     }catch(err){
       x.value=formerUserId;
-      if(cell)cell.textContent=formerStatus;
+      if(statusCell?.isConnected)statusCell.textContent=ftStandbyStatusText_(formerStatus);
       say('Bereitschaft nicht gespeichert: '+String(err?.message||err),true);
     }finally{
+      // In case the row was not re-rendered, always release the original select.
       x.disabled=false;
     }
   })();
