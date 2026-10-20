@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-mobile-dashboard-compact-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-mobile-dashboard-staff-only-hours-v1a"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -659,7 +659,13 @@ const myUsers=()=>ST.h.users,who=id=>myUsers().find(x=>x.id===id)||(ST.h.directo
 function theme(color,second){if(/^#[0-9a-f]{6}$/i.test(color||''))document.documentElement.style.setProperty('--accent',color);if(/^#[0-9a-f]{6}$/i.test(second||''))document.documentElement.style.setProperty('--secondary',second);}
 function input(text,name,value='',type='text',extra=''){return `<label class="field"><span>${E(text)}</span><input name="${E(name)}" value="${E(value)}" type="${type}" ${extra}></label>`;}
 function select(name,label,options,value){return `<label class="field"><span>${E(label)}</span><select name="${E(name)}">${options.map(o=>`<option value="${E(o[0])}" ${String(value)===String(o[0])?'selected':''}>${E(o[1])}</option>`).join('')}</select></label>`;}
-function optionsUsers(name='userId',selected=''){return select(name,'Mitarbeiter',myUsers().filter(u=>u.status==='ACTIVE').map(u=>[u.id,u.name]),selected||me().id);}
+function optionsUsers(name='userId',selected=''){
+ const staff=myUsers().filter(u=>u.role==='STAFF'&&u.status==='ACTIVE');
+ const fallback=staff.find(u=>String(u.id)===String(selected))?.id||staff[0]?.id||'';
+ return staff.length?
+  select(name,'Mitarbeiter',staff.map(u=>[u.id,u.name]),fallback):
+  '<p class="ft-plan-message ft-plan-warning">Noch kein aktiver Mitarbeiter mit Stundenkonto vorhanden. Bitte erst Mitarbeiter anlegen.</p>';
+}
 function hint(t){return `<div class="help">ℹ ${t}</div>`;}
 function monthPick(){return `<div class="actions"><label>Monat: <input type="month" id="monthPick" style="width:180px" value="${E(ST.month)}"></label></div>`;}
 function chk(name,label,checked,desc=''){return `<label class="cbox"><input type="checkbox" name="${E(name)}" ${checked?'checked':''}><span><b>${E(label)}</b>${desc?`<div class="muted small">${E(desc)}</div>`:''}</span></label>`;}
@@ -898,29 +904,29 @@ function dashboard(){
  if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
   '<div class="ft-loading-dashboard" role="status" aria-live="polite"><div class="ft-loader-ring"></div><div><b>Arbeitsbereich bereit</b><div class="muted small">Sollstunden, Iststunden und Bereitschaft werden geladen …</div></div></div>'+
   '<div class="grid">'+Array.from({length:4},()=>'<div class="card ft-loading-card"><div class="ft-loading-line"></div><div class="ft-loading-line ft-loading-line-short"></div></div>').join('')+'</div>';
- const sysadmin=me().role==='SYSADMIN',r=ST.h?.reports?.[me().id]||{};
- const metrics=sysadmin?
-  [['Mitarbeiter',String((ST.h.users||[]).length)],
+ const adminAccount=me().role!=='STAFF',r=ST.h?.reports?.[me().id]||{};
+ const metrics=adminAccount?
+  [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF').length)],
    ['Bereitschaften im Monat',String(ftHomePublishedCount_(ST.h.shifts))],
    ['Arbeitsdienste im Monat',String(ftHomePublishedCount_(ST.h.workShifts))]]:
   [['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],
    ['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']];
- const intro=sysadmin?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Kennzahlen des Systemkontos werden nicht als Mitarbeiterstunden angezeigt.':
+ const intro=adminAccount?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Nur Mitarbeiter haben ein persönliches Stundenkonto.':
   'Meine Übersicht für '+ftPdfMonthLabel(ST.month)+'. Geplante Dienste sind keine geleisteten Stunden.';
  let html='<div class="ft-home-intro">'+E(intro)+'</div>'+
  '<div class="grid ft-home-metrics">'+metrics.map(([k,v])=>'<div class="card"><span class="muted small">'+E(k)+'</span><div class="metric">'+E(v)+'</div></div>').join('')+'</div>';
  if(has('STANDBY'))html+=ftHomeSchedule_('STANDBY');
  if(has('WORKPLAN'))html+=ftHomeSchedule_('WORK');
  if(has('LEAVE')){
-  const leave=sysadmin?
+  const leave=adminAccount?
    '<div class="ft-vacation-kicker">Urlaubsverwaltung · '+E(firm()?.name||'')+'</div>'+
-   '<div class="ft-vacation-total">'+E((ST.h.users||[]).length)+' <span>Mitarbeiterkonten</span></div>'+
+   '<div class="ft-vacation-total">'+E((ST.h.users||[]).filter(u=>u.role==='STAFF').length)+' <span>Mitarbeiterkonten</span></div>'+
    '<div class="muted small">Ansprüche und Resturlaub in der Mitarbeiterübersicht prüfen.</div>':
    '<div class="ft-vacation-kicker">Mein Urlaubskonto</div>'+
    '<div class="ft-vacation-total">'+E(N(me().leaveBalance))+' <span>Tage Resturlaub</span></div>'+
    '<div class="muted small">Jährlicher Anspruch: '+E(N(me().leaveEntitlement))+' Tage · Details und Anträge im Urlaubskonto.</div>';
   html+='<section class="card ft-vacation-home" aria-label="Urlaubskonto"><div>'+leave+'</div>'+
-   '<button class="btn" data-tab="leave">Urlaubskonto öffnen →</button></section>';
+   '<button class="btn" data-tab="leave">'+(adminAccount?'Urlaub verwalten →':'Urlaubskonto öffnen →')+'</button></section>';
  }
  html+=ftHomeQuickLinks_();
  return html;
@@ -1144,8 +1150,8 @@ function ftTimeLabel_(row){
  return E(subtype?.label||base);
 }
 function ftTimerPanel_(){
- if(me()?.role==='SYSADMIN')return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
-  '<p class="muted">Die Stempeluhr ist für Mitarbeiterkonten der Firma vorgesehen. Als Systemadministrator kannst du Arbeitszeit-Einträge über das manuelle Formular beim jeweiligen Mitarbeiter erfassen.</p></section>';
+ if(me()?.role!=='STAFF')return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
+  '<p class="muted">Die Stempeluhr ist für Mitarbeiterkonten vorgesehen. Als Administrator kannst du Arbeitszeiten nur für Mitarbeiter über das manuelle Formular erfassen.</p></section>';
  if(ST.h?.workflowReady!==true)return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
  '<p class="ft-plan-message ft-plan-warning">Die Stempeluhr wird nach dem Apps-Script-Update und dem einmaligen Ausführen von ft_workflowUpgrade freigeschaltet. Manuelle Arbeitszeiterfassung funktioniert weiterhin.</p></section>';
  const running=ST.h?.runningTimer;
@@ -1172,7 +1178,7 @@ function time(){
  ftTimerPanel_()+
  '<div class="card"><h2>'+(edit?'Arbeitszeit bearbeiten':'Arbeitszeit manuell erfassen')+'</h2>'+
  '<form id="timeForm"><input type="hidden" name="id" value="'+E(edit?.id||'')+'"><div class="cols">'+
- (isAdmin()?optionsUsers('userId',edit?.userId||me().id):'')+
+ (isAdmin()?optionsUsers('userId',edit?.userId||ST.selected||''):'')+
  select('type','Art der Tätigkeit',ftTimeTypeOptions_(),edit?.type||'OBJECT')+
  ftTimeChoiceField_(edit?.type||'OBJECT',edit?.activityOptionId||'')+
  input('Beginn / tatsächliche Abfahrt','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')+
@@ -1465,7 +1471,7 @@ async function ftPayrollGenerate_(){
   if(rules?.current?.holidayCalendar!=='AT')throw Error('Der Firmen-Feiertagskalender ist nicht Österreich. Bitte die Zuschlagsregeln prüfen, bevor Feiertagsstunden für die Buchhaltung ausgewiesen werden.');
   if((c.nightStart!==undefined&&Number(c.nightStart)!==22)||(c.nightEnd!==undefined&&Number(c.nightEnd)!==6))
    throw Error('Die konfigurierte Firmennachtzeit entspricht nicht 22:00–06:00 Uhr. Der Buchhaltungsbogen benötigt dafür eine eigene Auswertung.');
-  const people=(home.users||[]).filter(u=>String(u.companyId)===String(companyId))
+  const people=(home.users||[]).filter(u=>String(u.companyId)===String(companyId)&&u.role==='STAFF')
     .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'de-AT'));
   if(!people.length)throw Error('Keine Mitarbeiter für diese Firma gefunden.');
   const states=new Map((home.months||[]).map(x=>[String(x.userId),String(x.status)]));
@@ -1728,7 +1734,7 @@ async function ftPdfDownload(record,view,batch=false){
    setTimeout(()=>URL.revokeObjectURL(url),120000);
  }
 }
-function reports(){const users=isAdmin()?myUsers():[me()],u=users.find(x=>x.id===ST.selected)||users[0]||me(),r=ST.h.reports[u.id]||{},status=ST.h.months.find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfSave">PDF erstellen und speichern</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button><button class="btn" data-act="pdfLocal">PDF nur herunterladen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>${isAdmin()?ftPayrollPanel_()+ftBulkPanel(users):''}`;}
+function reports(){const users=isAdmin()?myUsers().filter(x=>x.role==='STAFF'):[me()];if(!users.length)return '<section class="card"><h2>Monatsberichte</h2><p class="muted">In dieser Firma gibt es noch keine Mitarbeiter mit Stundenkonto. Administratoren haben kein persönliches Stundenkonto.</p></section>';const u=users.find(x=>x.id===ST.selected)||users[0],r=ST.h.reports?.[u.id]||{},status=(ST.h.months||[]).find(x=>x.userId===u.id&&x.month===ST.month);ST.selected=u.id;return hint('Du kannst jederzeit ältere Monate über die Monatsauswahl aufrufen, deinen Stundensaldo sehen und PDF-Monatszettel herunterladen. Bereitschaft zählt nur separat, nicht zum regulären Monatssoll.')+monthPick()+`<div class="card">${isAdmin()?select('reportUser','Mitarbeiter',users.map(x=>[x.id,x.name]),u.id):''}<h2>${E(u.name)} · ${E(ST.month)}</h2><div class="grid">${[['Soll',r.target],['Ist',r.worked],['Objektkontrollen',r.object],['Einsätze',r.incident],['Bereitschaft netto',r.standby],['Monatssaldo',r.saldo],['Laufender Saldo',r.runningBalance],['Feiertagsarbeit',r.holiday]].map(([k,v])=>`<div class="card"><span class="muted small">${E(k)}</span><div class="metric">${N(v)} h</div></div>`).join('')}</div>${has('PAY_PREVIEW')?`<h3>Unverbindliche Bruttovorschau: ${EUR(r.estimatedGross)}</h3>`:''}${r.needsHolidayPayReview?hint('Feiertagsarbeit festgestellt: gesetzliche und kollektivvertragliche Entgeltansprüche separat prüfen.') :''}<div>Status: <b>${E(status?.status||'OFFEN')}</b></div><div class="actions">${!status||status.status==='RETURNED'?'<button class="btn primary" data-act="submitMonth">Monat einreichen</button>':''}${isAdmin()&&status?.status==='SUBMITTED'?`<button class="btn" data-act="approveMonth" data-id="${status.id}">Freigeben</button><button class="btn danger" data-act="returnMonth" data-id="${status.id}">Zurückgeben</button>`:''}<button class="btn primary" data-act="pdfSave">PDF erstellen und speichern</button><button class="btn" data-act="pdfArchive">PDF-Archiv anzeigen</button><button class="btn" data-act="pdfLocal">PDF nur herunterladen</button></div><div id="ftPdfArchive" class="card small" aria-live="polite">Gespeicherte PDFs für diesen Monat über „PDF-Archiv anzeigen“ laden.</div></div>${isAdmin()?ftPayrollPanel_()+ftBulkPanel(users):''}`;}
 function ftBulkPanel(users){
  return `<section class="card ft-bulk-card" aria-label="Stundenaufzeichnungen Sammeldownload"><h2>Stundenaufzeichnungen aller Mitarbeiter</h2>
  <p class="muted">Eine PDF-Datei mit vollständigem Monatsauszug je ausgewähltem Mitarbeiter – jeder beginnt auf einer neuen Seite. Kein ZIP.</p>
@@ -2570,6 +2576,9 @@ if(form.getAttribute('id')==='ftActivityTypeForm'){
 }
 if(form.getAttribute('id')==='timeForm'){
  if(!ftTimePauseCheckForm_(form))return;
+ if(isAdmin()&&!myUsers().some(u=>u.role==='STAFF'&&u.status==='ACTIVE'&&String(u.id)===String(p.userId))){
+  say('Bitte einen aktiven Mitarbeiter auswählen. Administratoren haben kein eigenes Stundenkonto.',true);return;
+ }
  return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
 }
 if(form.getAttribute('id')==='leaveForm')return run(async()=>{
