@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-object-6h-break-30min-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-mobile-dashboard-compact-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -372,6 +372,34 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-timer-break{background:#173b36;padding:9px;border:1px solid #558874;border-radius:10px}
 .ft-timer-break small{display:block;font-size:11px;line-height:1.5;color:#bce3d5;margin-top:5px}
 
+
+/* Mobile-first dashboard: never put the entire monthly plan into the home feed. */
+.ft-home-intro{margin:3px 0 15px;color:#b8cede;font-size:12px;line-height:1.55}
+.ft-home-metrics{margin-bottom:15px}
+.ft-home-metrics .card{padding:14px 15px;margin-bottom:0;min-width:0}
+.ft-home-metrics .metric{font-size:clamp(18px,4vw,25px);line-height:1.4;margin-top:5px;overflow-wrap:anywhere}
+.ft-home-schedule{padding:17px 18px}
+.ft-home-schedule-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.ft-home-schedule-head h2{font-size:clamp(17px,3vw,20px);line-height:1.35;margin:0}
+.ft-home-schedule-meta{font-size:11px;color:#acc8d8;margin:5px 0 0}
+.ft-home-open-plan{width:auto;min-width:128px;max-width:100%;background:#294d68;border:1px solid #5a8298}
+.ft-home-shift-list{display:grid;gap:0}
+.ft-home-shift-row{display:flex;gap:13px;align-items:flex-start;padding:12px 0;border-bottom:1px solid #34516a;min-width:0}
+.ft-home-shift-row:last-child{border-bottom:0}
+.ft-home-shift-icon{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;color:#b8e1ef;background:#2c5267}
+.ft-home-shift-details{min-width:0;flex:1 1 auto}
+.ft-home-shift-details strong{font-size:13px;line-height:1.45;display:block;overflow-wrap:anywhere}
+.ft-home-shift-sub{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin-top:5px;color:#adcadb;font-size:12px;line-height:1.4}
+.ft-home-shift-name{overflow-wrap:anywhere}
+.ft-home-live{color:#a7f1c4;font-weight:750}
+.ft-home-empty{color:#c1d3e2;font-size:12px;line-height:1.6;margin:14px 0}
+.ft-home-schedule-footnote{color:#96b2c5;font-size:11px;line-height:1.5;margin:12px 0 0}
+.ft-home-quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 4px}
+.ft-home-quick-link{background:#1a3a52;border:1px solid #456b83;border-radius:10px;padding:10px 14px;color:#d1e8f4;font-weight:650;font-size:12px;cursor:pointer;min-height:44px}
+.ft-vacation-home{padding:15px 18px;margin-top:12px;gap:11px}
+.ft-vacation-home .ft-vacation-total{font-size:clamp(22px,3vw,29px)}
+.ft-vacation-home .btn{background:#294d68;color:#fff;border:1px solid #5a8298}
+@media(max-width:560px){.ft-home-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.ft-home-open-plan{width:100%}.ft-home-schedule-head{align-items:stretch}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -804,10 +832,99 @@ function page(){
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
 }
-function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
+
+function ftHomeDate_(stamp){
+ const p=ftViennaParts(stamp);
+ return p?p.day+'.'+p.month+'. '+p.hour+':'+p.minute:'Zeit unbekannt';
+}
+function ftHomeShiftRange_(shift){
+ return ftHomeDate_(shift.start)+' – '+ftHomeDate_(shift.end);
+}
+function ftHomeUpcoming_(data,kind,limit=3){
+ const now=Date.now(),own=me()?.id,admin=isAdmin();
+ return (data||[])
+  .filter(x=>x&&x.status==='PUBLISHED'&&(admin||String(x.userId)===String(own)))
+  .filter(x=>{const a=Date.parse(x.start),b=Date.parse(x.end);return Number.isFinite(a)&&Number.isFinite(b)&&b>now;})
+  .sort((a,b)=>Date.parse(a.start)-Date.parse(b.start))
+  .slice(0,limit);
+}
+function ftHomePublishedCount_(data){
+ const own=me()?.id,admin=isAdmin();
+ return (data||[]).filter(x=>x&&x.status==='PUBLISHED'&&(admin||String(x.userId)===String(own))).length;
+}
+function ftHomeSchedule_(kind){
+ const standby=kind==='STANDBY',source=standby?ST.h?.shifts:ST.h?.workShifts;
+ const records=(source||[]),upcoming=ftHomeUpcoming_(records,kind,3),all=ftHomePublishedCount_(records);
+ const admin=isAdmin(),name=standby?'Bereitschaft':'Arbeitsdienst';
+ const title=admin?'Nächste '+(standby?'Bereitschaften':'Arbeitsdienste')+' der Firma':
+  'Meine nächsten '+(standby?'Bereitschaften':'Arbeitsdienste');
+ const action=standby?'homeOpenStandby':'homeOpenWork';
+ const rows=upcoming.map(s=>{
+  const ongoing=Date.parse(s.start)<=Date.now()&&Date.parse(s.end)>Date.now();
+  const person=admin?'<span class="ft-home-shift-name">'+E(who(s.userId).name)+'</span>':'';
+  const label=!standby&&s.title?'<span class="ft-home-shift-name">'+E(s.title)+'</span>':'';
+  return '<div class="ft-home-shift-row">'+
+   '<span class="ft-home-shift-icon" aria-hidden="true">'+(standby?'◷':'▣')+'</span>'+
+   '<div class="ft-home-shift-details"><strong>'+E(ftHomeShiftRange_(s))+'</strong>'+
+   '<div class="ft-home-shift-sub">'+person+label+(ongoing?'<span class="ft-home-live">Läuft gerade</span>':'')+'</div></div></div>';
+ }).join('');
+ const empty=all?
+  'Keine weiteren bevorstehenden '+(standby?'Bereitschaften':'Arbeitsdienste')+' in diesem Monat. Frühere Termine findest du im vollständigen Plan.':
+  'Für diesen Monat sind noch keine '+(standby?'Bereitschaften':'Arbeitsdienste')+' veröffentlicht.';
+ return '<section class="card ft-home-schedule" aria-label="'+E(name)+'sübersicht">'+
+ '<div class="ft-home-schedule-head"><div><h2>'+E(title)+'</h2>'+
+ '<p class="ft-home-schedule-meta">'+E(ftPdfMonthLabel(ST.month))+' · '+all+
+ ' veröffentlicht'+(all===1?'er Dienst':'e Dienste')+'</p></div>'+
+ '<button type="button" class="btn ft-home-open-plan" data-act="'+action+'">Plan öffnen →</button></div>'+
+ (upcoming.length?'<div class="ft-home-shift-list">'+rows+'</div>':'<p class="ft-home-empty">'+E(empty)+'</p>')+
+ '<p class="ft-home-schedule-footnote">Maximal die nächsten 3 Termine. Alle anderen und frühere Dienste stehen im Plan.</p></section>';
+}
+function ftHomeQuickLinks_(){
+ const links=[];
+ if(has('TIME'))links.push(['time','Zeiterfassung','clock']);
+ if(has('REPORTS'))links.push(['reports','Monatsberichte','file-text']);
+ if(has('LEAVE'))links.push(['leave','Urlaub','calendar-days']);
+ return links.length?'<section class="ft-home-quick-actions" aria-label="Schnellzugriff">'+
+  links.map(([tab,label,icon])=>'<button class="ft-home-quick-link" data-tab="'+tab+'">'+E(label)+' →</button>').join('')+
+  '</section>':'';
+}
+function dashboard(){
+ if(me().role==='SYSADMIN'&&!firm())
+  return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+
+   '<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">'+ST.h.companies.length+'</div></div>'+
+   '<div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">'+ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length+'</div></div></div>'+
+   '<div class="card"><h2>Meine Kunden</h2>'+ST.h.companies.map(c=>'<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>'+E(c.name)+'</b><div class="muted small">'+E(c.slug)+'</div></div><button class="btn primary" data-act="openFirm" data-id="'+E(c.id)+'">Verwalten →</button></div>').join('')+
+   '<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>';
+ if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
   '<div class="ft-loading-dashboard" role="status" aria-live="polite"><div class="ft-loader-ring"></div><div><b>Arbeitsbereich bereit</b><div class="muted small">Sollstunden, Iststunden und Bereitschaft werden geladen …</div></div></div>'+
   '<div class="grid">'+Array.from({length:4},()=>'<div class="card ft-loading-card"><div class="ft-loading-line"></div><div class="ft-loading-line ft-loading-line-short"></div></div>').join('')+'</div>';
-const r=ST.h.reports[me().id]||{};return hint('Übersicht für '+E(ST.month)+'. Die Planung des Folgemonats wird separat angezeigt. Geplante Dienste sind keine geleistete Arbeitszeit.')+`<div class="grid">${[['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']].map(([k,v])=>`<div class="card"><div class="muted small">${E(k)}</div><div class="metric">${E(v)}</div></div>`).join('')}</div>${has('LEAVE')?`<section class="card ft-vacation-home" aria-label="Urlaubskonto"><div>${me().role==='SYSADMIN'?`<div class="ft-vacation-kicker">Urlaubskonten · ${E(firm().name)}</div><div class="ft-vacation-total">${E((ST.h.users||[]).length)} <span>Mitarbeiterkonten</span></div><div class="muted small">Resturlaub und Jahresbuchungen pro Mitarbeiter im Menü Urlaub ansehen. Dein Systemadministratorkonto hat keinen Firmen-Urlaubssaldo.</div>`:`<div class="ft-vacation-kicker">Mein Urlaubskonto</div><div class="ft-vacation-total">${E(N(me().leaveBalance))} <span>Tage Resturlaub</span></div><div class="muted small">Aktueller Gesamtrest · jährlicher Anspruch laut Stammdaten: ${E(N(me().leaveEntitlement))} Tage. Details zu Jahresgutschriften und Übertrag im Urlaubskonto.</div>`}</div><button class="btn primary" data-tab="leave">Urlaubskonto öffnen →</button></section>`:''}${has('WORKPLAN')?`<div class="card"><h3>Meine veröffentlichten Arbeitsdienste</h3>${ST.h.workShifts.filter(s=>s.userId===me().id||isAdmin()).slice(0,12).map(s=>`<div>${E(s.title)} · ${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine Dienste'}</div>`:''}${has('STANDBY')?`<div class="card"><h3>Bereitschaftsübersicht</h3>${ST.h.shifts.filter(s=>s.status==='PUBLISHED').map(s=>`<div>${DT(s.start)} – ${DT(s.end)} · ${E(who(s.userId).name)}</div>`).join('')||'Noch keine veröffentlichten Dienste'}</div>`:''}`;}
+ const sysadmin=me().role==='SYSADMIN',r=ST.h?.reports?.[me().id]||{};
+ const metrics=sysadmin?
+  [['Mitarbeiter',String((ST.h.users||[]).length)],
+   ['Bereitschaften im Monat',String(ftHomePublishedCount_(ST.h.shifts))],
+   ['Arbeitsdienste im Monat',String(ftHomePublishedCount_(ST.h.workShifts))]]:
+  [['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],
+   ['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']];
+ const intro=sysadmin?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Kennzahlen des Systemkontos werden nicht als Mitarbeiterstunden angezeigt.':
+  'Meine Übersicht für '+ftPdfMonthLabel(ST.month)+'. Geplante Dienste sind keine geleisteten Stunden.';
+ let html='<div class="ft-home-intro">'+E(intro)+'</div>'+
+ '<div class="grid ft-home-metrics">'+metrics.map(([k,v])=>'<div class="card"><span class="muted small">'+E(k)+'</span><div class="metric">'+E(v)+'</div></div>').join('')+'</div>';
+ if(has('STANDBY'))html+=ftHomeSchedule_('STANDBY');
+ if(has('WORKPLAN'))html+=ftHomeSchedule_('WORK');
+ if(has('LEAVE')){
+  const leave=sysadmin?
+   '<div class="ft-vacation-kicker">Urlaubsverwaltung · '+E(firm()?.name||'')+'</div>'+
+   '<div class="ft-vacation-total">'+E((ST.h.users||[]).length)+' <span>Mitarbeiterkonten</span></div>'+
+   '<div class="muted small">Ansprüche und Resturlaub in der Mitarbeiterübersicht prüfen.</div>':
+   '<div class="ft-vacation-kicker">Mein Urlaubskonto</div>'+
+   '<div class="ft-vacation-total">'+E(N(me().leaveBalance))+' <span>Tage Resturlaub</span></div>'+
+   '<div class="muted small">Jährlicher Anspruch: '+E(N(me().leaveEntitlement))+' Tage · Details und Anträge im Urlaubskonto.</div>';
+  html+='<section class="card ft-vacation-home" aria-label="Urlaubskonto"><div>'+leave+'</div>'+
+   '<button class="btn" data-tab="leave">Urlaubskonto öffnen →</button></section>';
+ }
+ html+=ftHomeQuickLinks_();
+ return html;
+}
 function profileFields(p){return `<div class="cols">${select('workModel','Arbeitszeitmodell',[['OFFICE','Büro / fixe Wochenzeiten'],['SHIFT12','12-Stunden-Schicht'],['SHIFT24','24-Stunden-Schicht'],['FLEX','Flexible Arbeitszeit']],p.workModel)}${input('Üblicher Beginn','workStart',p.workStart||'08:00','time','required')}${input('Übliche Stunden je Dienst','workHours',p.workHours||8,'number','min="0.25" max="24" step="0.25" required')}${input('Übliche Wochentage (Mo=1, So=7)','workdays',p.workdays||'1,2,3,4,5')}${input('Bereitschaftsbeginn (wenn gebucht)','standbyStart',p.standbyStart||'07:00','time','required')}${input('Bereitschaftsdauer in Stunden','standbyHours',p.standbyHours||24,'number','min="1" max="48" required')}${input('Zweite Firmenfarbe','secondaryColor',p.secondaryColor||'#19354d','color')}</div>${input('Begrüßung auf der Login-Seite (optional)','welcomeText',p.welcomeText||'')}`;}
 function modulesForm(enabled,scope){return `<div class="cols">${MODULES.map(([key,title,desc])=>`<label class="cbox"><input name="module" type="checkbox" value="${key}" ${enabled.includes(key)?'checked':''}><span><b>${E(title)}</b><div class="muted small">${E(desc)}</div></span></label>`).join('')}</div><p class="muted small">${scope==='sale'?'Nur du als FireTime-Pro-Systemadministrator bestimmst, welche Funktionen gekauft/freigeschaltet sind.':'Die Firmenadministration kann ihre freigeschalteten Module nicht selbst erweitern.'}</p>`;}
 function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue Firma erhält ein eigenes Logo, eigene Farben, ein eigenes Arbeitsmodell und nur die Module, die du verkaufst. BSB3100 ist bereits angelegt.')+`<div class="card"><h2>Bestehende Kunden</h2>${ST.h.companies.map(c=>`<div class="row between"><b>${E(c.name)}</b><button class="btn" data-act="openFirm" data-id="${c.id}">Öffnen</button></div>`).join('')}</div><div class="card"><h2>Neuen Kunden samt Administrator anlegen</h2><form id="onboardForm"><div class="cols">${input('Firmenname','name','','text','required')}${input('Firmenkürzel / Link','slug','','text','required')}${input('Primärfarbe','color','#f37850','color')}${input('Name des ersten Firmenadministrators','adminName','','text','required')}${input('E-Mail des Firmenadministrators','adminEmail','','email','required')}</div><h3>Firmenlogo</h3><div class="drop" data-pick="newLogo">Logo anklicken oder hineinziehen (PNG/JPG/WEBP, max. 2 MB)<input type="file" id="newLogo" accept="image/png,image/jpeg,image/webp"></div><div id="newLogoLabel" class="muted small"></div><h3 style="margin-top:20px">Arbeitsmodell</h3>${profileFields({workModel:'OFFICE',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24})}<h3>Welche Module hat die Firma gekauft?</h3>${modulesForm(['TIME','REPORTS','LEAVE'],'sale')}<button class="btn primary">Kunden erstellen und Admin einladen</button></form></div>`;}
@@ -2165,6 +2282,15 @@ if(a==='normalLogin'){ST.invite=false;auth();return;}
 if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
 if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
+if(a==='homeOpenStandby'||a==='homeOpenWork'){
+ const next=a==='homeOpenStandby'?'standby':'work';
+ FT_TAB_MONTHS[next]=ST.month;
+ ++FT_LOAD_SEQ;
+ ftChooseTabMonth(next);
+ ST.edit='';
+ await load();
+ return;
+}
 if(a==='cancelEdit'){ST.edit='';page();return;}
 if(a==='editStaff'||a==='editTime'){ST.edit=id;page();window.scrollTo(0,0);return;}
 if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>api('userInvite',{id}),'Einladung verschickt.');return;}
