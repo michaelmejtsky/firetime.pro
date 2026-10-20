@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.1-objektkontrolle-pause-20261020';
+const FT_VERSION='1.8.2-bsb3100-standby-flat-rate-20261020';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -555,7 +555,7 @@ function ft_report_(c,u,month,skipCumulative,source){
   for(const k of ['night','sunday','holiday']){
     t[k]=hoursByType.OBJECT[k]+hoursByType.INCIDENT[k]+hoursByType.OTHER[k];
     t['standby'+k[0].toUpperCase()+k.slice(1)]=hoursByType.STANDBY[k];
-    const included=rule[k+'Types'];
+    const included=ft_rulePremiumTypes_(c,rule[k+'Types']);
     t[k+'PremiumHours']=included.reduce((sum,type)=>sum+hoursByType[type][k],0);
   }
   t.objectSunday=hoursByType.OBJECT.sunday;
@@ -585,7 +585,7 @@ function ft_report_(c,u,month,skipCumulative,source){
   // Zuschlagsbasis ist bei Bereitschaft der Bereitschaftssatz,
   // bei Tätigkeiten der Mitarbeiter-Stundensatz.
   for(const k of ['night','sunday','holiday']){
-    const types=rule[k+'Types'];
+    const types=ft_rulePremiumTypes_(c,rule[k+'Types']);
     const base=types.reduce((sum,type)=>sum+
       hoursByType[type][k]*(type==='STANDBY'?rate:wage),0);
     t[k+'Pay']=base*(Number(rule[k+'Pct'])||0)/100;
@@ -2063,6 +2063,16 @@ function ft_ruleTypeArray_(val,def) {
   if(a.some(x=>!FT_RULE_TYPES_.includes(x))) throw Error('Unbekannte Tätigkeitsart in der Zuschlagsregel.');
   return a;
 }
+/** BSB3100: Bereitschaft hat immer denselben Stundensatz, auch nachts, sonn- und feiertags.
+ * Alte CompanyRules-Datensätze bleiben unangetastet; ihre STANDBY-Auswahl ist für
+ * die Berechnung ab diesem Code-Stand jedoch nicht mehr zuschlagsberechtigt.
+ * Andere Mandanten behalten ihre frei konfigurierbaren Zuschlagsarten.
+ */
+function ft_rulePremiumTypes_(c,types){
+ const items=Array.isArray(types)?types:[];
+ return String(c?.slug||'').toLowerCase()==='bsb3100'
+  ?items.filter(x=>x!=='STANDBY'):items;
+}
 function ft_ruleDefault_(c) {
   // BSB3100: freiwillige Objektkontrolle erhält keinen freiwilligen Sonn-/Feiertagszuschlag.
   // Gesetzliche/KV-Zahlungen werden dadurch NICHT aufgehoben.
@@ -2070,14 +2080,14 @@ function ft_ruleDefault_(c) {
   return {
     companyId:c.id,effectiveMonth:'2026-01',
     nightTypes:['OBJECT','INCIDENT','OTHER'],
-    sundayTypes:bsb?['STANDBY']:['STANDBY','OBJECT','INCIDENT','OTHER'],
-    holidayTypes:bsb?['STANDBY']:['STANDBY','OBJECT','INCIDENT','OTHER'],
+    sundayTypes:bsb?['INCIDENT','OTHER']:['STANDBY','OBJECT','INCIDENT','OTHER'],
+    holidayTypes:bsb?['INCIDENT','OTHER']:['STANDBY','OBJECT','INCIDENT','OTHER'],
     nightPct:Number(c.nightPct)||0,
     sundayPct:Number(c.sundayPct)||0,
     holidayPct:Number(c.holidayPct)||0,
     standbyRate:Number(c.standbyRate)||0,
     holidayCalendar:'AT',extraHolidays:[],
-    note:bsb?'BSB3100: firmeneigene Sonn-/Feiertagszuschläge nur für Bereitschaft. Gesetzliche Feiertagsarbeit gesondert prüfen.':'Firmenregel bitte mit Vertrag und Kollektivvertrag abgleichen.',
+    note:bsb?'BSB3100: Bereitschaft ohne Nacht-, Sonn- oder Feiertagszuschlag. Firmeneigene Zuschläge nur für ausgewählte aktive Arbeitszeiten; gesetzliche/KV-Ansprüche separat prüfen.':'Firmenregel bitte mit Vertrag und Kollektivvertrag abgleichen.',
     source:'STANDARD'
   };
 }
@@ -2091,9 +2101,9 @@ function ft_rulesFor_(c,month) {
   try {extra=JSON.parse(String(r.extraHolidays||'[]'));} catch(e){extra=[];}
   return {
     companyId:c.id,effectiveMonth:String(r.effectiveMonth),
-    nightTypes:ft_ruleTypeArray_(r.nightTypes,[]),
-    sundayTypes:ft_ruleTypeArray_(r.sundayTypes,[]),
-    holidayTypes:ft_ruleTypeArray_(r.holidayTypes,[]),
+    nightTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.nightTypes,[])),
+    sundayTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.sundayTypes,[])),
+    holidayTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.holidayTypes,[])),
     nightPct:Number(r.nightPct)||0,sundayPct:Number(r.sundayPct)||0,
     holidayPct:Number(r.holidayPct)||0,standbyRate:Number(r.standbyRate)||0,
     holidayCalendar:String(r.holidayCalendar||'AT'),
@@ -2107,11 +2117,16 @@ function ft_ruleValidate_(c,p,u){
   extra.forEach(x=>ft_date_(x));
   const holidayCalendar=String(p.holidayCalendar||'AT').toUpperCase();
   if(!['AT','NONE'].includes(holidayCalendar))throw Error('Derzeit sind AT und NONE unterstützt.');
+  const selected={night:ft_ruleTypeArray_(p.nightTypes,[]),
+    sunday:ft_ruleTypeArray_(p.sundayTypes,[]),holiday:ft_ruleTypeArray_(p.holidayTypes,[])};
+  if(String(c.slug||'').toLowerCase()==='bsb3100'&&
+     Object.values(selected).some(types=>types.includes('STANDBY')))
+   throw Error('BSB3100: Bereitschaft wird ohne Nacht-, Sonn- und Feiertagszuschlag bezahlt. Bitte nur aktive Arbeit auswählen.');
   return {
     id:ft_uuid_(),companyId:c.id,effectiveMonth,
-    nightTypes:ft_ruleTypeArray_(p.nightTypes,[]).join(','),
-    sundayTypes:ft_ruleTypeArray_(p.sundayTypes,[]).join(','),
-    holidayTypes:ft_ruleTypeArray_(p.holidayTypes,[]).join(','),
+    nightTypes:selected.night.join(','),
+    sundayTypes:selected.sunday.join(','),
+    holidayTypes:selected.holiday.join(','),
     nightPct:ft_number_(p.nightPct,0,1000,'Nachtzuschlag'),
     sundayPct:ft_number_(p.sundayPct,0,1000,'Sonntagszuschlag'),
     holidayPct:ft_number_(p.holidayPct,0,1000,'Feiertagszuschlag'),
