@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-standby-3step-audit-payroll-simplified-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-workflow-timer-types-payroll-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -350,6 +350,21 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-plan-warning{border-color:#b48444;background:#483a2d;color:#ffe2bc}
 .ft-plan-audit{font-size:11px;line-height:1.6;color:#b8d2e1;margin:9px 0 2px}
 @media(max-width:650px){.ft-plan-flow-grid{grid-template-columns:1fr}.ft-plan-actions>.btn{flex:1 1 100%}}
+
+/* Server-based punch clock and administrator-defined time-tracking labels. */
+.ft-timer-card{border-color:#527f91}
+.ft-timer-card h2{margin-bottom:12px}
+.ft-timer-card .btn.primary{min-width:180px}
+.ft-timer-active{padding:14px 15px;border:1px solid #4e967c;border-radius:14px;background:#153e37;margin-bottom:12px;display:grid;gap:10px}
+.ft-timer-active strong{font-size:16px;color:#c7ffe1}
+.ft-timer-active div{font-size:12px;line-height:1.5;color:#d5e9e2}
+.ft-timer-help{color:#b7d2e0;font-size:12px;line-height:1.6;margin:12px 0 0}
+.ft-activity-admin{border-top:1px solid #3b5d74;margin-top:16px;padding-top:15px}
+.ft-activity-admin-list{display:grid;gap:8px;margin-top:13px}
+.ft-activity-admin-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#17364c;border:1px solid #45657c;border-radius:10px;padding:11px}
+.ft-activity-admin-row strong{flex:1 1 155px;font-size:13px}
+.ft-activity-admin-row span{flex:1 1 170px;color:#aec7d6;font-size:11px}
+@media(max-width:560px){.ft-activity-admin-row .btn{flex:1 1 100%}.ft-timer-card .btn.primary{width:100%}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -955,7 +970,65 @@ function ftStaffVacationSync_(){
 }
 
 function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${ftStaffDecimalField_('Monatssoll / Anstellungsstunden je Monat', 'monthlyHours',ftStaffFormatDecimal_(u?.monthlyHours??25),'0 bis 300 Stunden · Komma und Punkt möglich, z. B. 25,10')}${ftStaffDecimalField_('Stundensatz (€)', 'hourlyRate',ftStaffFormatDecimal_(u?.hourlyRate??0),'Auch Centbeträge mit Komma möglich, z. B. 14,75')}${ftStaffDecimalField_('Bisheriger Resturlaub / Startsaldo (Tage)', 'leaveBalance',ftStaffFormatDecimal_(u?.leaveBalance??0),'Bereits bestehender Urlaubsstand; kein automatisch berechneter Jahresanspruch')}${ftStaffDecimalField_('Stunden-Startsaldo (+ / −)', 'openingHours',ftStaffFormatDecimal_(u?.openingHours??0),'Auch negative und beliebige Dezimalwerte, z. B. −7,35')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div>${ftStaffVacationFields_(u)}<p class="ft-staff-leave-opening-note">Wichtig: Dieser Resturlaub ist der <strong>bisherige belegte Startsaldo</strong>, nicht automatisch der volle Jahresanspruch. Bei Neuanlage ist 0 nur ein Platzhalter, <strong>nicht der gesetzliche Urlaubsanspruch</strong>. Den tatsächlich bereits entstandenen (gegebenenfalls aliquoten) Urlaubsanspruch bitte vor der ersten Verwendung mit den Beschäftigungsunterlagen oder der Lohnverrechnung feststellen und hier eintragen. Bestehende Mitarbeiterstände bleiben unverändert.</p><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
-function time(){const a=ST.h.activities.filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month),edit=a.find(x=>x.id===ST.edit);return hint('Hier werden nur tatsächliche Arbeitsstunden erfasst. Ein Objekt ist ein Freitextfeld – keine Objektlisten oder Objektzuweisung. BSB3100: Objektkontrollen zählen zum Soll und dürfen parallel zur Bereitschaft laufen. Störungseinsätze zählen zum Soll und unterbrechen die Bereitschaft von Alarm bis Rückkehr.')+monthPick()+`<div class="card"><h2>${edit?'Arbeitszeit bearbeiten':'Arbeitszeit erfassen'}</h2><form id="timeForm"><input type="hidden" name="id" value="${E(edit?.id||'')}"><div class="cols">${isAdmin()?optionsUsers('userId',edit?.userId||me().id):''}${select('type','Art der Tätigkeit',[['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz (Anruf bis Rückkehr)'],['OTHER','Sonstige Arbeitszeit']],edit?.type||'OBJECT')}${input('Beginn','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')}${input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')}${input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')}${input('Objekt (optional)','object',edit?.object||'')}</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">${E(edit?.description||'')}</textarea></label><button class="btn primary">Arbeitszeit speichern</button>${edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt</th><th></th></tr>${a.map(x=>`<tr><td>${DT(x.start)} – ${DT(x.end)}</td><td>${E(who(x.userId).name)}</td><td>${E(x.type)}</td><td>${E(x.object)}</td><td><button class="btn" data-act="editTime" data-id="${x.id}">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="${x.id}">Löschen</button></td></tr>`).join('')}</table></div></div>`;}
+
+function ftTimeTypeOptions_(){
+ return [['OBJECT','Objektkontrolle / Begehung'],['INCIDENT','BMA / Störung – ab Abfahrt bis Ende'],['OTHER','Sonstige Arbeitszeit']];
+}
+function ftTimeChoiceOptions_(type,selected){
+ const rows=(ST.h?.activityTypes||[]).filter(x=>x.type===type);
+ const selectedKnown=rows.some(x=>String(x.id)===String(selected));
+ return '<option value="">– Ohne nähere Bezeichnung –</option>'+
+ rows.map(x=>'<option value="'+E(x.id)+'"'+(String(x.id)===String(selected)?' selected':'')+'>'+E(x.label)+'</option>').join('')+
+ (selected&&!selectedKnown?'<option value="'+E(selected)+'" selected>Frühere Auswahl (nicht mehr aktiv)</option>':'');
+}
+function ftTimeChoiceField_(type,selected,fieldName='activityOptionId'){
+ return '<label class="field"><span>Genaue Tätigkeit (vom Administrator verwaltet)</span>'+
+  '<select name="'+E(fieldName)+'" data-time-choice="1">'+ftTimeChoiceOptions_(type,selected)+'</select></label>';
+}
+function ftTimeLabel_(row){
+ const base=ftTimeTypeOptions_().find(x=>x[0]===row.type)?.[1]||row.type;
+ const subtype=(ST.h.activityTypes||[]).find(x=>x.id===row.activityOptionId);
+ return E(subtype?.label||base);
+}
+function ftTimerPanel_(){
+ if(ST.h?.workflowReady!==true)return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
+ '<p class="ft-plan-message ft-plan-warning">Die Stempeluhr wird nach dem Apps-Script-Update und dem einmaligen Ausführen von ft_workflowUpgrade freigeschaltet. Manuelle Arbeitszeiterfassung funktioniert weiterhin.</p></section>';
+ const running=ST.h?.runningTimer;
+ const live=running?
+ '<div class="ft-timer-active"><strong>Arbeitszeit läuft seit '+E(ftViennaDateTime(running.start))+' Uhr</strong>'+
+ '<div>Die Endzeit wird beim Beenden übernommen. Ohne Stopp endet der Eintrag am selben Tag um 19:00 Uhr.</div>'+
+ '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button></div>':
+ '<form id="ftTimerForm"><div class="cols">'+
+ select('timerType','Welche Arbeit beginnst du?',ftTimeTypeOptions_(),'OBJECT')+
+ ftTimeChoiceField_('OBJECT','','timerOptionId')+
+ input('Objekt / Einsatzort (optional)','timerObject','')+
+ '</div><label class="field"><span>Bemerkung (optional)</span><textarea name="timerDescription" rows="2"></textarea></label>'+
+ '<button type="button" class="btn primary" data-act="timerStart">Arbeit beginnen</button></form>';
+ return '<section class="card ft-timer-card"><h2>Arbeitszeit mit einem Knopfdruck</h2>'+live+
+ '<p class="ft-timer-help">Der Start zählt ab dem tatsächlichen Arbeitsbeginn bzw. bei Einsätzen ab Abfahrt. Einsätze unterbrechen eine zeitgleich laufende Bereitschaft. Objektkontrollen zählen gleichzeitig als Arbeitszeit und Bereitschaft. Später als 19:00 Uhr beginnende Arbeit bitte manuell erfassen.</p></section>';
+}
+function time(){
+ const a=(ST.h.activities||[]).filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month);
+ const edit=a.find(x=>x.id===ST.edit);
+ return hint('Tatsächliche Arbeitszeiten werden erfasst, unabhängig davon, ob du in Bereitschaft bist. Einsatz ab Abfahrt bis Ende/Rückkehr – NICHT ab Anruf. Nur Einsätze unterbrechen eine zeitgleich bestehende Bereitschaft; Objektkontrollen laufen parallel.')+monthPick()+
+ ftTimerPanel_()+
+ '<div class="card"><h2>'+(edit?'Arbeitszeit bearbeiten':'Arbeitszeit manuell erfassen')+'</h2>'+
+ '<form id="timeForm"><input type="hidden" name="id" value="'+E(edit?.id||'')+'"><div class="cols">'+
+ (isAdmin()?optionsUsers('userId',edit?.userId||me().id):'')+
+ select('type','Art der Tätigkeit',ftTimeTypeOptions_(),edit?.type||'OBJECT')+
+ ftTimeChoiceField_(edit?.type||'OBJECT',edit?.activityOptionId||'')+
+ input('Beginn / tatsächliche Abfahrt','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')+
+ input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')+
+ input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')+
+ input('Objekt / Einsatzort (optional)','object',edit?.object||'')+
+ '</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">'+E(edit?.description||'')+'</textarea></label>'+
+ '<button class="btn primary">Arbeitszeit speichern</button>'+
+ (edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':'')+'</form></div>'+
+ '<div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt / Einsatzort</th><th></th></tr>'+
+ a.map(x=>'<tr><td>'+E(DT(x.start))+' – '+E(DT(x.end))+'</td><td>'+E(who(x.userId).name)+'</td><td>'+ftTimeLabel_(x)+'</td><td>'+E(x.object)+'</td>'+
+ '<td><button class="btn" data-act="editTime" data-id="'+E(x.id)+'">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="'+E(x.id)+'">Löschen</button></td></tr>').join('')+
+ '</table></div></div>';
+}
 const FT_PDF_JOB_STORE='ft_pdf_pending_job_v2';
 let FT_PDF_RUNNING_ID='';
 let FT_PDF_PREPARE_BUSY=false;
@@ -1962,9 +2035,71 @@ const RULE_TYPES=[['STANDBY','Bereitschaft (ohne aktiven Einsatz)'],['OBJECT','O
 function rules(){if(!isAdmin())return '';if(!ST.rules)return hint('Firmenregeln werden geladen …');const r=ST.rules.current;const group=(key,title,desc)=>`<div class="card"><h3>${E(title)}</h3><p class="muted">${E(desc)}</p>${RULE_TYPES.map(([k,label])=>`<label class="cbox"><input type="checkbox" name="${key}" value="${k}" ${r[key].includes(k)?'checked':''}><span>${E(label)}</span></label>`).join('')}</div>`;
 return hint('<b>Was ist ein firmeneigener Zuschlag?</b> Das ist ein zusätzlicher Betrag, den die Firma nach ihrem Vertrag, Kollektivvertrag oder ihrer internen Vergütungsregel für bestimmte Zeiten bezahlt. Beispiel: 20 % Sonntagszuschlag bedeutet bei einer zuschlagsberechtigten Stunde 20 % zusätzlich auf den jeweiligen Stundensatz. Die Einstellungen ersetzen keine gesetzlichen oder kollektivvertraglichen Ansprüche.')+`<div class="card"><h2>Zuschläge · ${E(firm().name)}</h2><p class="muted">Aktive Regel seit ${E(r.effectiveMonth)}. Änderungen gelten ab dem gewählten Monat; bereits freigegebene Berichte bleiben gespeichert.</p><div class="actions"><button class="btn" data-act="preset" data-id="bsb">Vorlage: BSB3100</button><button class="btn" data-act="preset" data-id="work">Vorlage: Arbeitszeiten</button></div><form id="rulesForm"><div class="cols">${input('Gültig ab Monat','effectiveMonth',ST.month,'month','required')}${select('holidayCalendar','Feiertagskalender',[['AT','Österreichische gesetzliche Feiertage'],['NONE','Kein automatischer Feiertagskalender']],r.holidayCalendar)}</div>${group('nightTypes','1. Nachtzuschlag','Ein zusätzliches Entgelt für Tätigkeiten in der festgelegten Nachtzeit, zum Beispiel 22:00 bis 06:00 Uhr. Wähle aus, für welche Arten die Firma diesen Zuschlag zahlt. Nachtzeiten werden automatisch erkannt.')}${group('sundayTypes','2. Sonntagszuschlag','Ein zusätzlicher Betrag für Zeiten, die wirklich auf einen Sonntag fallen. Bei BSB3100 wählen wir nur Bereitschaft: Eine freiwillige Objektkontrolle erhält dadurch keinen zusätzlichen firmeneigenen Sonntagsbonus.')}${group('holidayTypes','3. Feiertagszuschlag','Ein zusätzlicher Betrag für Zeiten an erkannten Feiertagen. Bei BSB3100 nur für Bereitschaft. Tatsächliche Arbeit an einem gesetzlichen Feiertag muss unabhängig davon auf gesetzliche und kollektivvertragliche Entgeltansprüche geprüft werden.')}
 <div class="card"><h3>4. Höhe der zusätzlichen Zahlungen</h3><div class="cols">${input('Bereitschaftsgrundbetrag (€ pro Stunde)','standbyRate',r.standbyRate,'number','step="0.01" min="0" required')}${input('Nachtzuschlag (%)','nightPct',r.nightPct,'number','step="0.01" min="0" required')}${input('Sonntagszuschlag (%)','sundayPct',r.sundayPct,'number','step="0.01" min="0" required')}${input('Feiertagszuschlag (%)','holidayPct',r.holidayPct,'number','step="0.01" min="0" required')}</div><p class="muted small">Beispiel: 10 € Bereitschaft je Stunde und 50 % Sonntagszuschlag auf Bereitschaft = 5 € zusätzlich pro zuschlagsberechtigter Sonntagsstunde. Bei aktiver Arbeit wird für den Firmenzuschlag stattdessen der individuelle Arbeitsstundensatz verwendet. 0 % bedeutet kein zusätzlicher Zuschlag nach dieser Firmenregel.</p></div><div class="card"><h3>5. Sondertage und Dokumentation</h3>${input('Weitere firmeneigene Sondertage (JJJJ-MM-TT, getrennt durch Kommas)','extraHolidays',r.extraHolidays.join(', '))}<label class="field"><span>Notiz / Vertrags- oder KV-Grundlage</span><textarea name="note" rows="3">${E(r.note)}</textarea></label><button class="btn primary">Neue Regelversion speichern</button></div></form></div><div class="card"><h3>Frühere Regelversionen</h3>${ST.rules.history.map(x=>`<div>${E(x.effectiveMonth)} – ${DT(x.createdAt)}</div>`).join('')||'Noch keine gespeichert.'}</div>`;}
-function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return hint('Der Firmenadministrator kann Name, Logo, Farben, Arbeitszeitmodell und Kalender pflegen. Gekaufte Module kann nur der FireTime-Pro-Systemadministrator freischalten. Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.')+`<div class="cols"><div class="card"><h2>Firmendesign</h2>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}<div class="drop" data-pick="existingLogo">Firmenlogo hochladen oder ersetzen<input type="file" id="existingLogo" accept="image/png,image/jpeg,image/webp"></div><div class="muted small" id="existingLogoLabel"></div><form id="settingsForm">${input('Firmenname','name',c.name,'text','required')}${input('Primärfarbe','color',c.color,'color')}${input('Google-Kalender-ID','calendarId',c.calendarId||'')}${chk('calendarOn','Google-Kalender aktivieren',c.calendarOn===true||c.calendarOn==='TRUE','Nur verfügbar, wenn du das Kalendermodul gekauft/freigeschaltet hast.')}${chk('remindHours','Monatsabschluss erinnern',c.remindHours===true||c.remindHours==='TRUE')}${chk('remindAvailability','Verfügbarkeit erinnern',c.remindAvailability===true||c.remindAvailability==='TRUE')}${chk('remindShift','Bereitschaft erinnern',c.remindShift===true||c.remindShift==='TRUE')}${input('Stichtag der Verfügbarkeit (Tag im Monat)','availabilityDay',c.availabilityDay||20,'number','min="1" max="28"')}${input('Nachtbeginn (0–23 Uhr)','nightStart',c.nightStart??22,'number','min="0" max="23"')}${input('Nachtende (0–23 Uhr)','nightEnd',c.nightEnd??6,'number','min="0" max="23"')}<button class="btn primary">Firmenangaben speichern</button>${has('CALENDAR')?'<button class="btn" type="button" data-act="calendarTest">Kalender testen</button>':''}</form></div><div class="card"><h2>Arbeitszeitmodell</h2><form id="profileForm">${profileFields(p)}<button class="btn primary">Arbeitszeitmodell speichern</button></form><hr><h3>Kundenlink</h3><p class="small muted" style="word-break:break-word">${E(ST.h.loginUrl)}</p><button class="btn" data-act="copyUrl">Link kopieren</button></div></div>`;}
+
+function ftActivityTypesAdminPanel_(){
+ if(!has('TIME'))return '';
+ if(!ST.h?.workflowReady)return '<div class="ft-activity-admin"><h3>Tätigkeits-Dropdowns</h3>'+
+  '<p class="ft-plan-message ft-plan-warning">Nach Veröffentlichung der Code.gs einmal ft_workflowUpgrade ausführen. Anschließend können hier eigene Einträge angelegt werden.</p></div>';
+ const types=ST.h.activityTypes||[];
+ return '<div class="ft-activity-admin"><h3>Tätigkeits-Dropdowns verwalten</h3>'+
+ '<p class="muted small">Eigene Bezeichnungen wie „BMA-Auslösung“, „Technische Störung“, „Objektbegehung“ pflegen. Die Zuordnung zu Einsatz, Objektkontrolle oder sonstiger Arbeit steuert unverändert die Abrechnung.</p>'+
+ '<form id="ftActivityTypeForm"><input type="hidden" name="id" value="">'+
+ select('type','Abrechnungsart',ftTimeTypeOptions_(),'INCIDENT')+
+ input('Bezeichnung im Dropdown','label','','text','required maxlength="75" minlength="2"')+
+ '<button class="btn primary">Bezeichnung speichern</button>'+
+ '<button type="button" class="btn" data-act="activityTypeCancel">Eingabe zurücksetzen</button></form>'+
+ '<div class="ft-activity-admin-list">'+
+ types.map(x=>'<div class="ft-activity-admin-row"><strong>'+E(x.label)+'</strong><span>'+E(ftTimeTypeOptions_().find(y=>y[0]===x.type)?.[1]||x.type)+'</span>'+
+ '<button type="button" class="btn" data-act="activityTypeEdit" data-id="'+E(x.id)+'">Bearbeiten</button>'+
+ '<button type="button" class="btn danger" data-act="activityTypeDisable" data-id="'+E(x.id)+'">Deaktivieren</button></div>').join('')+
+ '</div></div>';
+}
+
+function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return hint('Der Firmenadministrator kann Name, Logo, Farben, Arbeitszeitmodell und Kalender pflegen. Gekaufte Module kann nur der FireTime-Pro-Systemadministrator freischalten. Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.')+`<div class="cols"><div class="card"><h2>Firmendesign</h2>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}<div class="drop" data-pick="existingLogo">Firmenlogo hochladen oder ersetzen<input type="file" id="existingLogo" accept="image/png,image/jpeg,image/webp"></div><div class="muted small" id="existingLogoLabel"></div><form id="settingsForm">${input('Firmenname','name',c.name,'text','required')}${input('Primärfarbe','color',c.color,'color')}${input('Google-Kalender-ID','calendarId',c.calendarId||'')}${chk('calendarOn','Google-Kalender aktivieren',c.calendarOn===true||c.calendarOn==='TRUE','Nur verfügbar, wenn du das Kalendermodul gekauft/freigeschaltet hast.')}${chk('remindHours','Monatsabschluss erinnern',c.remindHours===true||c.remindHours==='TRUE')}${chk('remindAvailability','Verfügbarkeit erinnern',c.remindAvailability===true||c.remindAvailability==='TRUE')}${chk('remindShift','Bereitschaft erinnern',c.remindShift===true||c.remindShift==='TRUE')}${input('Stichtag der Verfügbarkeit (Tag im Monat)','availabilityDay',c.availabilityDay||20,'number','min="1" max="28"')}${input('Nachtbeginn (0–23 Uhr)','nightStart',c.nightStart??22,'number','min="0" max="23"')}${input('Nachtende (0–23 Uhr)','nightEnd',c.nightEnd??6,'number','min="0" max="23"')}<button class="btn primary">Firmenangaben speichern</button>${has('CALENDAR')?'<button class="btn" type="button" data-act="calendarTest">Kalender testen</button>':''}</form></div><div class="card"><h2>Arbeitszeitmodell</h2><form id="profileForm">${profileFields(p)}<button class="btn primary">Arbeitszeitmodell speichern</button></form>${ftActivityTypesAdminPanel_()}<hr><h3>Kundenlink</h3><p class="small muted" style="word-break:break-word">${E(ST.h.loginUrl)}</p><button class="btn" data-act="copyUrl">Link kopieren</button></div></div>`;}
 function profile(){return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;}
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
+
+if(a==='timerStart'){
+ if(!ST.h?.workflowReady){say('Bitte zuerst die neue Code.gs installieren und ft_workflowUpgrade ausführen.',true);return;}
+ const f=document.getElementById('ftTimerForm');if(!f)return;
+ const input=Object.fromEntries(new FormData(f).entries());
+ if(!confirm('Arbeit jetzt beginnen? Startzeit ist die aktuelle Serverzeit.'))return;
+ btn.disabled=true;
+ try{
+  await api('timerStart',{companyId:firm().id,type:input.timerType,activityOptionId:input.timerOptionId,
+   object:input.timerObject,description:input.timerDescription});
+  await load();say('Arbeitsbeginn gespeichert.');
+ }catch(err){say('Arbeitsbeginn fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}
+ return;
+}
+if(a==='timerStop'){
+ if(!confirm('Arbeitszeit jetzt beenden? Falls du über 19:00 Uhr gearbeitet hast, kannst du den Eintrag anschließend korrigieren.'))return;
+ btn.disabled=true;
+ try{
+  const result=await api('timerStop',{companyId:firm().id});
+  await load();say('Arbeitszeit gespeichert bis '+ftViennaDateTime(result.closedAt)+' Uhr.');
+ }catch(err){say('Arbeitsende fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}
+ return;
+}
+if(a==='activityTypeCancel'){document.getElementById('ftActivityTypeForm')?.reset();return;}
+if(a==='activityTypeEdit'){
+ if(!isAdmin())return;
+ const x=(ST.h.activityTypes||[]).find(x=>x.id===id),form=document.getElementById('ftActivityTypeForm');
+ if(!x||!form)return;
+ form.elements.namedItem('id').value=x.id;
+ form.elements.namedItem('type').value=x.type;
+ form.elements.namedItem('label').value=x.label;
+ form.scrollIntoView({block:'center',behavior:'smooth'});return;
+}
+if(a==='activityTypeDisable'){
+ if(!isAdmin()||!confirm('Diese Tätigkeitsbezeichnung für neue Einträge deaktivieren? Alte Arbeitszeiteinträge bleiben erhalten.'))return;
+ const x=(ST.h.activityTypes||[]).find(x=>x.id===id);
+ if(!x)return;
+ await run(async()=>{await api('activityTypesSave',{companyId:firm().id,id,type:x.type,label:x.label,active:false});await load();},'Dropdown-Bezeichnung deaktiviert.');
+ return;
+}
 if(a==='toggleOpeningSign'){
  const input=btn.closest('form')?.querySelector('[name="openingHours"]');
  if(input){const current=input.value.trim();input.value=current.startsWith('-')||current.startsWith('−')?current.slice(1):'-'+(current||'0');input.focus();}
@@ -2247,6 +2382,10 @@ if(form.getAttribute('id')==='sickForm')return run(async()=>{
  const result=await api('sickReport',{...p,companyId:firm().id});await load();
  say((result.message||'Krankenstand gemeldet.')+(result.warning?' '+result.warning:''),!!result.warning);
  },'Krankenstand gespeichert.');
+if(form.getAttribute('id')==='ftActivityTypeForm'){
+ if(!isAdmin())return say('Keine Administratorberechtigung.',true);
+ return run(async()=>{await api('activityTypesSave',{...p,companyId:firm().id,active:true});await load();},'Tätigkeitsauswahl gespeichert.');
+}
 if(form.getAttribute('id')==='timeForm')return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
 if(form.getAttribute('id')==='leaveForm')return run(async()=>{
  const valid=isAdmin()?ftAbsenceSelectableUsers_().some(u=>String(u.id)===String(p.userId)):String(me().id)===String(p.userId||me().id);
@@ -2325,7 +2464,12 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.form?.id==='staffForm'&&x.name==='leaveRuleSource'){return;}if(x.form?.id==='staffForm'&&['leaveYearMode','leaveRuleType','workdays','leaveWorkModel','leaveFlexReferenceDays'].includes(x.name)){ftStaffVacationSync_();return;}if(x.id==='ftAbsenceFromYear'){ST.absenceFromYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceToYear'){ST.absenceToYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceEmployee'){ST.absenceUserId=x.value;FT_ABSENCE_SEQ++;ST.edit='';page();return;}if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.name==='type'&&x.form?.id==='timeForm'||x.name==='timerType'&&x.form?.id==='ftTimerForm'){
+ const dst=x.form.querySelector('[data-time-choice]');
+ if(dst)dst.innerHTML=ftTimeChoiceOptions_(x.value,'');
+ return;
+}
+if(x.form?.id==='staffForm'&&x.name==='leaveRuleSource'){return;}if(x.form?.id==='staffForm'&&['leaveYearMode','leaveRuleType','workdays','leaveWorkModel','leaveFlexReferenceDays'].includes(x.name)){ftStaffVacationSync_();return;}if(x.id==='ftAbsenceFromYear'){ST.absenceFromYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceToYear'){ST.absenceToYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceEmployee'){ST.absenceUserId=x.value;FT_ABSENCE_SEQ++;ST.edit='';page();return;}if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
