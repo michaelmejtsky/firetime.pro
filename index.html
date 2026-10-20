@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-flexible-monthly-leave-v1b"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-absence-admin-company-context-fix"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -1203,11 +1203,20 @@ function ftLeaveDate(v){
 
 const FT_ABSENCE_CACHE=new Map();
 let FT_ABSENCE_SEQ=0,FT_ABSENCE_PDF_BUSY=false,FT_ABSENCE_POLICY_BUSY=false;
+function ftAbsenceSelectableUsers_(){
+ const companyId=String(firm()?.id||'');
+ if(!companyId)return [];
+ // Never send SYSADMIN's system account instead of the selected company's employee.
+ return (myUsers()||[]).filter(u=>u?.id&&String(u.companyId)===companyId);
+}
 function ftAbsenceContext_(){
  if(!ST.h?.me||!firm()?.id||!has('LEAVE'))return null;
- const companyId=String(firm().id),self=String(me().id);
- const allowed=isAdmin()?myUsers().some(u=>String(u.id)===String(ST.absenceUserId)):false;
- const userId=allowed?String(ST.absenceUserId):self;
+ const companyId=String(firm().id),users=ftAbsenceSelectableUsers_();
+ const preferred=isAdmin()?String(ST.absenceUserId||''):String(me().id);
+ const chosen=users.find(u=>String(u.id)===preferred)||
+  users.find(u=>String(u.id)===String(me().id))||users[0];
+ if(!chosen)return null;
+ const userId=String(chosen.id);
  const fromYear=Number(ST.absenceFromYear||new Date().getFullYear());
  const toYear=Number(ST.absenceToYear||fromYear);
  return {companyId,userId,fromYear,toYear};
@@ -1225,9 +1234,10 @@ function ftAbsenceYearsOptions_(year){
 function ftAbsencePanel_(){
  if(!has('LEAVE')||!firm())return '';
  const c=ftAbsenceContext_();
- if(!c)return '';
+ if(!c)return '<section class="card ft-absences"><h2>Urlaubskonto und Abwesenheitsauszüge</h2>'+
+  '<div class="ft-absence-status warn">Für diese Firma ist noch kein Mitarbeiterkonto verfügbar. Bitte zuerst einen Mitarbeiter anlegen.</div></section>';
  const employee=isAdmin()?'<label class="field ft-absence-employee"><span>Mitarbeiter</span><select id="ftAbsenceEmployee">'+
-   myUsers().map(u=>'<option value="'+E(u.id)+'"'+(String(u.id)===c.userId?' selected':'')+'>'+E(u.name)+'</option>').join('')+
+   ftAbsenceSelectableUsers_().map(u=>'<option value="'+E(u.id)+'"'+(String(u.id)===c.userId?' selected':'')+'>'+E(u.name)+'</option>').join('')+
    '</select></label>':'';
  const cache=FT_ABSENCE_CACHE.get(ftAbsenceKey_(c));
  const current=cache&&Date.now()-cache.at<120000?cache.data:null;
