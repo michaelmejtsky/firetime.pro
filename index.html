@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-hours-balance-cutover-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-roster-timer-types-date-polish-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -984,7 +984,7 @@ function dashboard(){
  html+=ftHomeQuickLinks_();
  return html;
 }
-function profileFields(p){return `<div class="cols">${select('workModel','Arbeitszeitmodell',[['OFFICE','Büro / fixe Wochenzeiten'],['SHIFT12','12-Stunden-Schicht'],['SHIFT24','24-Stunden-Schicht'],['FLEX','Flexible Arbeitszeit']],p.workModel)}${input('Üblicher Beginn','workStart',p.workStart||'08:00','time','required')}${input('Übliche Stunden je Dienst','workHours',p.workHours||8,'number','min="0.25" max="24" step="0.25" required')}${input('Übliche Wochentage (Mo=1, So=7)','workdays',p.workdays||'1,2,3,4,5')}${input('Bereitschaftsbeginn (wenn gebucht)','standbyStart',p.standbyStart||'07:00','time','required')}${input('Bereitschaftsdauer in Stunden','standbyHours',p.standbyHours||24,'number','min="1" max="48" required')}${input('Zweite Firmenfarbe','secondaryColor',p.secondaryColor||'#19354d','color')}</div>${input('Begrüßung auf der Login-Seite (optional)','welcomeText',p.welcomeText||'')}`;}
+function profileFields(p){return `<div class="cols">${select('workModel','Arbeitszeitmodell',[['OFFICE','Büro / fixe Wochenzeiten'],['SHIFT12','12-Stunden-Schicht'],['SHIFT24','24-Stunden-Schicht'],['FLEX','Flexible Arbeitszeit']],p.workModel)}${input('Üblicher Beginn','workStart',p.workStart||'08:00','time','required')}${input('Übliche Stunden je Dienst','workHours',p.workHours||8,'number','min="0.25" max="24" step="any" required')}${input('Übliche Wochentage (Mo=1, So=7)','workdays',p.workdays||'1,2,3,4,5')}${input('Bereitschaftsbeginn (wenn gebucht)','standbyStart',p.standbyStart||'07:00','time','required')}${input('Bereitschaftsdauer in Stunden','standbyHours',p.standbyHours||24,'number','min="1" max="48" required')}${input('Zweite Firmenfarbe','secondaryColor',p.secondaryColor||'#19354d','color')}</div>${input('Begrüßung auf der Login-Seite (optional)','welcomeText',p.welcomeText||'')}`;}
 function modulesForm(enabled,scope){return `<div class="cols">${MODULES.map(([key,title,desc])=>`<label class="cbox"><input name="module" type="checkbox" value="${key}" ${enabled.includes(key)?'checked':''}><span><b>${E(title)}</b><div class="muted small">${E(desc)}</div></span></label>`).join('')}</div><p class="muted small">${scope==='sale'?'Nur du als FireTime-Pro-Systemadministrator bestimmst, welche Funktionen gekauft/freigeschaltet sind.':'Die Firmenadministration kann ihre freigeschalteten Module nicht selbst erweitern.'}</p>`;}
 function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue Firma erhält ein eigenes Logo, eigene Farben, ein eigenes Arbeitsmodell und nur die Module, die du verkaufst. BSB3100 ist bereits angelegt.')+`<div class="card"><h2>Bestehende Kunden</h2>${ST.h.companies.map(c=>`<div class="row between"><b>${E(c.name)}</b><button class="btn" data-act="openFirm" data-id="${c.id}">Öffnen</button></div>`).join('')}</div><div class="card"><h2>Neuen Kunden samt Administrator anlegen</h2><form id="onboardForm"><div class="cols">${input('Firmenname','name','','text','required')}${input('Firmenkürzel / Link','slug','','text','required')}${input('Primärfarbe','color','#f37850','color')}${input('Name des ersten Firmenadministrators','adminName','','text','required')}${input('E-Mail des Firmenadministrators','adminEmail','','email','required')}</div><h3>Firmenlogo</h3><div class="drop" data-pick="newLogo">Logo anklicken oder hineinziehen (PNG/JPG/WEBP, max. 2 MB)<input type="file" id="newLogo" accept="image/png,image/jpeg,image/webp"></div><div id="newLogoLabel" class="muted small"></div><h3 style="margin-top:20px">Arbeitsmodell</h3>${profileFields({workModel:'OFFICE',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24})}<h3>Welche Module hat die Firma gekauft?</h3>${modulesForm(['TIME','REPORTS','LEAVE'],'sale')}<button class="btn primary">Kunden erstellen und Admin einladen</button></form></div>`;}
 function license(){if(me().role!=='SYSADMIN'||!firm())return '';return hint('Nur du schaltest die gekauften Funktionen frei. Der Firmenadministrator kann keine Module dazukaufen oder selbst aktivieren.')+`<div class="card"><h2>Modulfreigabe · ${E(firm().name)}</h2><form id="licenseForm">${modulesForm(ST.h.modules,'sale')}<button class="btn primary">Modulfreigabe speichern</button></form></div>`;}
@@ -1032,7 +1032,7 @@ function ftStaffDecimalField_(label,name,value,hint=''){
 }
 function ftStaffParseDecimal_(value,label,min,max){
  const raw=String(value??'').trim().replace(/\u2212/g,'-').replace(/[\u00a0\s]/g,'');
- if(!/^[+-]?(?:\d+(?:[.,]\d{1,4})?|[.,]\d{1,4})$/.test(raw))
+ if(!/^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(raw))
   throw Error(label+': Bitte eine gültige Zahl eingeben, z. B. 25,10 oder -7,35. Keine Tausendertrennzeichen.');
  const n=Number(raw.replace(',','.'));
  if(!Number.isFinite(n)||n<min||n>max)
@@ -1164,7 +1164,7 @@ function ftTimePauseRequired_(kind,start,end){
 }
 function ftTimePauseCheckForm_(f){
  if(!f||f.id!=='timeForm')return true;
- const kind=f.querySelector('[name="type"]')?.value;
+ const kind=f.querySelector('[name="activitySelection"]')?.value?.split('|')[0]||f.querySelector('[name="type"]')?.value;
  const start=f.querySelector('[name="start"]')?.value;
  const end=f.querySelector('[name="end"]')?.value;
  const minutes=Number(f.querySelector('[name="breakMinutes"]')?.value||0);
@@ -1184,7 +1184,7 @@ function ftTimePauseWarning_(row){
 }
 
 function ftTimeTypeOptions_(){
- return [['OBJECT','Objektkontrolle / Begehung'],['INCIDENT','BMA / Störung – ab Abfahrt bis Ende'],['OTHER','Sonstige Arbeitszeit']];
+ return [['OBJECT','Objektkontrolle / Begehung'],['INCIDENT','Bereitschaftseinsatz (von Abfahrt bis Einsatzende)'],['OTHER','Sonstige Arbeitszeit']];
 }
 function ftTimeChoiceOptions_(type,selected){
  const rows=(ST.h?.activityTypes||[]).filter(x=>x.type===type&&x.active!==false);
@@ -1198,10 +1198,68 @@ function ftTimeChoiceField_(type,selected,fieldName='activityOptionId'){
   '<select name="'+E(fieldName)+'" data-time-choice="1">'+ftTimeChoiceOptions_(type,selected)+'</select></label>';
 }
 function ftTimeLabel_(row){
- const base=ftTimeTypeOptions_().find(x=>x[0]===row.type)?.[1]||row.type;
  const subtype=(ST.h.activityTypes||[]).find(x=>x.id===row.activityOptionId);
- return E(subtype?.label||base);
+ const historical=row.type==='INCIDENT'?'BMA / Störung – ab Abfahrt bis Ende':
+  row.type==='OTHER'?'Sonstige Arbeitszeit':'Objektkontrolle / Begehung';
+ return E(subtype?.label||historical);
 }
+
+/** Direkte Tätigkeitswahl – technische Abrechnungsarten bleiben OBJECT/INCIDENT/OTHER.
+ * Bestehende individualisierte und inaktive historische Tätigkeiten bleiben editierbar. */
+function ftDirectActivityOptions_(){
+ const primary=[
+  ['OBJECT|','Objektkontrolle / Begehung'],
+  ['INCIDENT|FT_STD_INCIDENT','Bereitschaftseinsatz (von Abfahrt bis Einsatzende)'],
+  ['OTHER|FT_STD_MAINTENANCE','Wartungsarbeiten'],
+  ['OTHER|FT_STD_EXTINGUISHER','Feuerlöscher'],
+  ['OTHER|FT_STD_OFFICE','Büro'],
+  ['OTHER|FT_STD_OTHER','Sonstige']
+ ];
+ const custom=(ST.h?.activityTypes||[]).filter(x=>x.active!==false&&!x.standard)
+  .map(x=>[x.type+'|'+x.id,x.label]);
+ return primary.concat(custom);
+}
+function ftActivityPicker_(type,id,timer=false){
+ if(!ST.h?.activityDefaultsSupported){
+  return timer?select('timerType','Welche Arbeit beginnst du?',ftTimeTypeOptions_(),'OBJECT')+
+   ftTimeChoiceField_('OBJECT','','timerOptionId'):
+   select('type','Art der Tätigkeit',ftTimeTypeOptions_(),type)+ftTimeChoiceField_(type,id);
+ }
+ const items=ftDirectActivityOptions_();
+ const current=String(type||'OBJECT')+'|'+String(id||'');
+ if(!items.some(x=>x[0]===current)){
+  const label=type==='INCIDENT'?'Bisheriger BMA-/Störungseinsatz':
+   type==='OTHER'?'Bisherige sonstige Arbeitszeit':'Bisherige Tätigkeit';
+  items.push([current,label]);
+ }
+ const name=timer?'timerActivity':'activitySelection';
+ return select(name,timer?'Welche Arbeit beginnst du?':'Art der Tätigkeit',items,current);
+}
+function ftDirectActivityPayload_(value){
+ const raw=String(value||''),at=raw.indexOf('|');
+ if(at<0)throw Error('Bitte eine Tätigkeit auswählen.');
+ const type=raw.slice(0,at),activityOptionId=raw.slice(at+1);
+ if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Bitte eine gültige Tätigkeit auswählen.');
+ return {type,activityOptionId};
+}
+function ftTimeToday_(){
+ const p=ftViennaParts(new Date());
+ return p.year+'-'+p.month+'-'+p.day;
+}
+function ftTimeSyncEndDate_(form){
+ const start=form?.elements?.namedItem('start'),end=form?.elements?.namedItem('end');
+ if(!start||!end||!/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(start.value))return;
+ const day=start.value.slice(0,10),old=String(end.value||'');
+ const clock=/T\d\d:\d\d$/.test(old)?old.slice(10):'T09:00';
+ end.value=day+clock;
+ // Preserve the chosen end clock whenever possible. If start is later,
+ // default to one hour after start; user can still choose next-day end.
+ if(end.value<=start.value){
+  const shifted=shiftedEnd(start.value,1);
+  if(shifted)end.value=shifted;
+ }
+}
+
 function ftTimerPanel_(){
  if(me()?.role!=='STAFF')return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
   '<p class="muted">Die Stempeluhr ist für Mitarbeiterkonten vorgesehen. Als Administrator kannst du Arbeitszeiten nur für Mitarbeiter über das manuelle Formular erfassen.</p></section>';
@@ -1216,8 +1274,7 @@ function ftTimerPanel_(){
  '<small>Bei Objektkontrollen über 6 Stunden mindestens 30 Minuten angeben. Die Pause wird nicht automatisch eingetragen.</small></label>'+
  '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button></div>':
  '<form id="ftTimerForm"><div class="cols">'+
- select('timerType','Welche Arbeit beginnst du?',ftTimeTypeOptions_(),'OBJECT')+
- ftTimeChoiceField_('OBJECT','','timerOptionId')+
+ ftActivityPicker_('OBJECT','',true)+
  input('Objekt / Einsatzort (optional)','timerObject','')+
  '</div><label class="field"><span>Bemerkung (optional)</span><textarea name="timerDescription" rows="2"></textarea></label>'+
  '<button type="button" class="btn primary" data-act="timerStart">Arbeit beginnen</button></form>';
@@ -1232,10 +1289,9 @@ function time(){
  '<div class="card"><h2>'+(edit?'Arbeitszeit bearbeiten':'Arbeitszeit manuell erfassen')+'</h2>'+
  '<form id="timeForm"><input type="hidden" name="id" value="'+E(edit?.id||'')+'"><div class="cols">'+
  (isAdmin()?optionsUsers('userId',edit?.userId||ST.selected||''):'')+
- select('type','Art der Tätigkeit',ftTimeTypeOptions_(),edit?.type||'OBJECT')+
- ftTimeChoiceField_(edit?.type||'OBJECT',edit?.activityOptionId||'')+
- input('Beginn / tatsächliche Abfahrt','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')+
- input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')+
+ ftActivityPicker_(edit?.type||'OBJECT',edit?.activityOptionId||'')+
+ input('Beginn / tatsächliche Abfahrt','start',edit?stampInput(edit.start):ftTimeToday_()+'T08:00','datetime-local','required')+
+ input('Ende / Rückkehr','end',edit?stampInput(edit.end):ftTimeToday_()+'T09:00','datetime-local','required')+
  input('Tatsächlich genommene Pause (Minuten)','breakMinutes',edit?.breakMinutes||0,'number','min="0" max="1440" step="1" inputmode="numeric" required')+
  input('Objekt / Einsatzort (optional)','object',edit?.object||'')+
  '</div>'+ftTimePauseHint_()+'<label class="field"><span>Beschreibung</span><textarea name="description" rows="2">'+E(edit?.description||'')+'</textarea></label>'+
@@ -2325,7 +2381,7 @@ const RULE_TYPES=[['STANDBY','Bereitschaft (ohne aktiven Einsatz)'],['OBJECT','O
 const ftIsBsbRules_=()=>String(firm()?.slug||'').toLowerCase()==='bsb3100';
 function rules(){if(!isAdmin())return '';if(!ST.rules)return hint('Firmenregeln werden geladen …');const r=ST.rules.current;const group=(key,title,desc)=>`<div class="card"><h3>${E(title)}</h3><p class="muted">${E(desc)}</p>${RULE_TYPES.filter(([k])=>!ftIsBsbRules_()||k!=='STANDBY').map(([k,label])=>`<label class="cbox"><input type="checkbox" name="${key}" value="${k}" ${r[key].includes(k)?'checked':''}><span>${E(label)}</span></label>`).join('')}</div>`;
 return hint('<b>Was ist ein firmeneigener Zuschlag?</b> Das ist ein zusätzlicher Betrag, den die Firma nach ihrem Vertrag, Kollektivvertrag oder ihrer internen Vergütungsregel für bestimmte Zeiten bezahlt. Beispiel: 20 % Sonntagszuschlag bedeutet bei einer zuschlagsberechtigten Stunde 20 % zusätzlich auf den jeweiligen Stundensatz. Die Einstellungen ersetzen keine gesetzlichen oder kollektivvertraglichen Ansprüche.')+`<div class="card"><h2>Zuschläge · ${E(firm().name)}</h2><p class="muted">Aktive Regel seit ${E(r.effectiveMonth)}. Änderungen gelten ab dem gewählten Monat; bereits freigegebene Berichte bleiben gespeichert.</p><div class="actions"><button class="btn" data-act="preset" data-id="bsb">Vorlage: BSB3100</button><button class="btn" data-act="preset" data-id="work">Vorlage: Arbeitszeiten</button></div><form id="rulesForm"><div class="cols">${input('Gültig ab Monat','effectiveMonth',ST.month,'month','required')}${select('holidayCalendar','Feiertagskalender',[['AT','Österreichische gesetzliche Feiertage'],['NONE','Kein automatischer Feiertagskalender']],r.holidayCalendar)}</div>${group('nightTypes','1. Nachtzuschlag','Ein zusätzliches Entgelt für Tätigkeiten in der festgelegten Nachtzeit, zum Beispiel 22:00 bis 06:00 Uhr. Wähle aus, für welche Arten die Firma diesen Zuschlag zahlt. Nachtzeiten werden automatisch erkannt.')}${group('sundayTypes','2. Sonntagszuschlag','Ein zusätzlicher Betrag für Zeiten, die wirklich auf einen Sonntag fallen. Bei BSB3100 wird Bereitschaft immer zum gleichen Satz bezahlt. Wähle nur tatsächlich geleistete Arbeitszeiten; Objektkontrollen sind nach eurer Firmenregel nicht zuschlagsberechtigt.')}${group('holidayTypes','3. Feiertagszuschlag','Ein zusätzlicher Betrag für Zeiten an erkannten Feiertagen. Bei BSB3100 niemals für Bereitschaft, sondern nur für ausgewählte tatsächlich geleistete Arbeitszeiten. Gesetzliche und kollektivvertragliche Ansprüche sind gesondert zu prüfen.')}
-<div class="card"><h3>4. Höhe der zusätzlichen Zahlungen</h3><div class="cols">${input('Bereitschaftsgrundbetrag (€ pro Stunde)','standbyRate',r.standbyRate,'number','step="0.01" min="0" required')}${input('Nachtzuschlag (%)','nightPct',r.nightPct,'number','step="0.01" min="0" required')}${input('Sonntagszuschlag (%)','sundayPct',r.sundayPct,'number','step="0.01" min="0" required')}${input('Feiertagszuschlag (%)','holidayPct',r.holidayPct,'number','step="0.01" min="0" required')}</div><p class="muted small">BSB3100: Bereitschaft erhält keine Nacht-, Sonn- oder Feiertagszuschläge, sondern einen einheitlichen Bereitschaftssatz. Bei aktiver Arbeit wird ein ausgewählter firmeneigener Zuschlag auf den individuellen Arbeitsstundensatz berechnet. Andere Firmen können ihre Regeln selbst festlegen. 0 % bedeutet kein zusätzlicher Zuschlag nach dieser Firmenregel.</p></div><div class="card"><h3>5. Sondertage und Dokumentation</h3>${input('Weitere firmeneigene Sondertage (JJJJ-MM-TT, getrennt durch Kommas)','extraHolidays',r.extraHolidays.join(', '))}<label class="field"><span>Notiz / Vertrags- oder KV-Grundlage</span><textarea name="note" rows="3">${E(r.note)}</textarea></label><button class="btn primary">Neue Regelversion speichern</button></div></form></div><div class="card"><h3>Frühere Regelversionen</h3>${ST.rules.history.map(x=>`<div>${E(x.effectiveMonth)} – ${DT(x.createdAt)}</div>`).join('')||'Noch keine gespeichert.'}</div>`;}
+<div class="card"><h3>4. Höhe der zusätzlichen Zahlungen</h3><div class="cols">${input('Bereitschaftsgrundbetrag (€ pro Stunde)','standbyRate',r.standbyRate,'number','step="any" min="0" required')}${input('Nachtzuschlag (%)','nightPct',r.nightPct,'number','step="0.01" min="0" required')}${input('Sonntagszuschlag (%)','sundayPct',r.sundayPct,'number','step="0.01" min="0" required')}${input('Feiertagszuschlag (%)','holidayPct',r.holidayPct,'number','step="0.01" min="0" required')}</div><p class="muted small">BSB3100: Bereitschaft erhält keine Nacht-, Sonn- oder Feiertagszuschläge, sondern einen einheitlichen Bereitschaftssatz. Bei aktiver Arbeit wird ein ausgewählter firmeneigener Zuschlag auf den individuellen Arbeitsstundensatz berechnet. Andere Firmen können ihre Regeln selbst festlegen. 0 % bedeutet kein zusätzlicher Zuschlag nach dieser Firmenregel.</p></div><div class="card"><h3>5. Sondertage und Dokumentation</h3>${input('Weitere firmeneigene Sondertage (JJJJ-MM-TT, getrennt durch Kommas)','extraHolidays',r.extraHolidays.join(', '))}<label class="field"><span>Notiz / Vertrags- oder KV-Grundlage</span><textarea name="note" rows="3">${E(r.note)}</textarea></label><button class="btn primary">Neue Regelversion speichern</button></div></form></div><div class="card"><h3>Frühere Regelversionen</h3>${ST.rules.history.map(x=>`<div>${E(x.effectiveMonth)} – ${DT(x.createdAt)}</div>`).join('')||'Noch keine gespeichert.'}</div>`;}
 
 function ftActivityTypesAdminPanel_(){
  if(!has('TIME'))return '';
@@ -2354,10 +2410,12 @@ if(a==='timerStart'){
  if(!ST.h?.workflowReady){say('Bitte zuerst die neue Code.gs installieren und ft_workflowUpgrade ausführen.',true);return;}
  const f=document.getElementById('ftTimerForm');if(!f)return;
  const input=Object.fromEntries(new FormData(f).entries());
+ if(f.elements.namedItem('timerActivity'))Object.assign(input,ftDirectActivityPayload_(input.timerActivity));
+ else{input.type=input.timerType;input.activityOptionId=input.timerOptionId;}
  if(!confirm('Arbeit jetzt beginnen? Startzeit ist die aktuelle Serverzeit.'))return;
  btn.disabled=true;
  try{
-  await api('timerStart',{companyId:firm().id,type:input.timerType,activityOptionId:input.timerOptionId,
+  await api('timerStart',{companyId:firm().id,type:input.type,activityOptionId:input.activityOptionId,
    object:input.timerObject,description:input.timerDescription});
   await load();say('Arbeitsbeginn gespeichert.');
  }catch(err){say('Arbeitsbeginn fehlgeschlagen: '+String(err.message||err),true);}
@@ -2703,11 +2761,16 @@ if(form.getAttribute('id')==='ftActivityTypeForm'){
  return run(async()=>{await api('activityTypesSave',{...p,companyId:firm().id,active:true});await load();},'Tätigkeitsauswahl gespeichert.');
 }
 if(form.getAttribute('id')==='timeForm'){
+ if(form.elements.namedItem('activitySelection'))Object.assign(p,ftDirectActivityPayload_(p.activitySelection));
  if(!ftTimePauseCheckForm_(form))return;
  if(isAdmin()&&!myUsers().some(u=>u.role==='STAFF'&&u.status==='ACTIVE'&&String(u.id)===String(p.userId))){
   say('Bitte einen aktiven Mitarbeiter auswählen. Administratoren haben kein eigenes Stundenkonto.',true);return;
  }
- return run(async()=>{await api('activitySave',{...p,companyId:firm().id});ST.edit='';await load();},'Arbeitszeit gespeichert.');
+ return run(async()=>{
+  await api('activitySave',{...p,companyId:firm().id});
+  if(!p.id&&p.start)ST.month=p.start.slice(0,7);
+  ST.edit='';await load();
+ },'Arbeitszeit gespeichert.');
 }
 if(form.getAttribute('id')==='leaveForm')return run(async()=>{
  const valid=isAdmin()?ftAbsenceSelectableUsers_().some(u=>String(u.id)===String(p.userId)):String(me().id)===String(p.userId||me().id);
@@ -2786,7 +2849,9 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.name==='type'&&x.form?.id==='timeForm'||x.name==='timerType'&&x.form?.id==='ftTimerForm'){
+document.addEventListener('change',e=>{const x=e.target;
+if(x.form?.id==='timeForm'&&x.name==='start'){ftTimeSyncEndDate_(x.form);return;}
+if(x.name==='type'&&x.form?.id==='timeForm'||x.name==='timerType'&&x.form?.id==='ftTimerForm'){
  const dst=x.form.querySelector('[data-time-choice]');
  if(dst)dst.innerHTML=ftTimeChoiceOptions_(x.value,'');
  return;
