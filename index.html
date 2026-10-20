@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-19-leave-history-dashboard-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-vacation-account-absence-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -226,6 +226,39 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-leave-group-title+.ft-leave-item{border-top:0}
 .ft-leave-history-foot{border-top:1px solid #36516a;padding-top:13px;margin-top:16px}
 @media(max-width:480px){.ft-leave-account-grid{grid-template-columns:minmax(0,1fr)}.ft-vacation-home>.btn{width:100%}}
+
+/* Annual leave accounts and absence history – backend v1.7 integration */
+.ft-absences{margin-top:23px}
+.ft-absence-header{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center}
+.ft-absence-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:11px;margin:16px 0}
+.ft-absence-fields label{margin:0}
+.ft-absence-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,165px),1fr));gap:10px;margin:12px 0}
+.ft-absence-stat{background:#10273b;border:1px solid #365772;border-radius:13px;padding:13px}
+.ft-absence-stat span{display:block;color:#bbcfdf;font-size:12px}
+.ft-absence-stat strong{display:block;font-size:24px;letter-spacing:-.035em;margin-top:6px}
+.ft-absence-status{padding:10px 12px;border:1px solid #4b687d;border-radius:11px;font-size:13px;line-height:1.5;margin:14px 0;background:#172f43}
+.ft-absence-status.warn{border-color:#956b47;color:#ffdeb1;background:#473a2c}
+.ft-absence-h3{font-size:15px;letter-spacing:-.01em;margin:23px 0 10px}
+.ft-absence-table th,.ft-absence-table td{font-size:12px;white-space:normal}
+.ft-absence-table .table{margin:10px 0}
+.ft-absence-table .table table{min-width:620px}
+.ft-absence-list{display:grid;gap:9px}
+.ft-absence-row{background:#10273b;border:1px solid #36536d;border-radius:12px;padding:13px}
+.ft-absence-row strong{font-size:14px}
+.ft-absence-row small{display:block;color:#bad0df;font-size:12px;margin-top:5px}
+.ft-absence-row .ft-status{display:inline-block;padding:3px 8px;border-radius:99px;background:#25475e;font-size:11px;font-weight:730;margin-left:7px}
+.ft-absence-policy{border:1px solid #456987;background:#19364a;border-radius:14px;padding:15px;margin:22px 0}
+.ft-absence-policy .ft-policy-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px;align-items:end}
+.ft-absence-policy .ft-policy-checkbox{display:flex;gap:11px;align-items:center;min-width:0;font-size:13px}
+.ft-absence-policy input[type=checkbox]{min-height:0;width:18px;flex:none}
+.ft-absence-help{color:#b9cedc;font-size:12px;line-height:1.6;margin:10px 0}
+.ft-absence-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ft-absence-actions .btn{flex:0 1 auto}
+.ft-absence-archive article{background:#10273b;padding:13px;border:1px solid #35536c;border-radius:12px;margin:10px 0}
+.ft-absence-archive article strong{display:block;overflow-wrap:anywhere}
+.ft-absence-archive article small{display:block;color:#b1c9dc;margin-top:5px}
+.ft-absence-empty{color:#b7c9d8;font-size:13px;padding:12px 0}
+@media(max-width:520px){.ft-absence-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ft-absence-fields .ft-absence-employee{grid-column:1/-1}.ft-absence-actions .btn{width:100%}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -329,7 +362,7 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -441,8 +474,8 @@ async function rpc(name,...args){
     case 'ft_api':request={type:'api',token:args[0],action:args[1],data:args[2]||{}};break;
     default:throw Error('Nicht freigegebener API-Aufruf: '+name);
   }
-  const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk','pdfStore','pdfBatchArchive','pdfBatchChunk','pdfBatchStore'].includes(request.action);
-  const deadline=pdfAction?(['pdfStore','pdfBatchStore'].includes(request.action)?55000:request.action==='pdfPrepare'?25000:20000):65000;
+  const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk','pdfStore','pdfBatchArchive','pdfBatchChunk','pdfBatchStore','absencePdfCreate','absencePdfArchive','absencePdfChunk'].includes(request.action);
+  const deadline=pdfAction?(['pdfStore','pdfBatchStore'].includes(request.action)?55000:request.action==='absencePdfCreate'?105000:request.action==='pdfPrepare'?25000:20000):65000;
   const abort=new AbortController();
   const timeout=setTimeout(()=>abort.abort(),deadline);
   let response;
@@ -462,9 +495,11 @@ async function rpc(name,...args){
 function api(action,p={}){
   const startedContext=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
   const result=rpc('ft_api',ST.token,action,p);
-  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk']);
+  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','absenceHistory','leaveAccount','leavePolicyGet','absencePdfArchive','absencePdfChunk']);
   if(readOnly.has(action))return result;
   return result.then(value=>{
+    if(['leaveRequest','leaveUpdate','leaveWithdraw','leaveReview','sickReport','sickReview','userUpdate','leavePolicySave'].includes(action))
+      FT_ABSENCE_CACHE.clear();
     // Nach Schreibzugriff dürfen zuvor geöffnete Ansichten nicht als frisch gelten.
     // Der aktuelle Tab kann sofort lokal aktualisiert werden (z. B. Mitarbeiteranlage).
     const context=(firm()?.id||'SYS')+'|'+ST.month;
@@ -653,6 +688,7 @@ function page(){
   requestAnimationFrame(()=>{if(el.isConnected)ftFitFormControls(el);});
  }
  if(ST.tab==='reports')ftResumePdfJob();
+ if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
 }
 function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
   '<div class="ft-loading-dashboard" role="status" aria-live="polite"><div class="ft-loader-ring"></div><div><b>Arbeitsbereich bereit</b><div class="muted small">Sollstunden, Iststunden und Bereitschaft werden geladen …</div></div></div>'+
@@ -1031,6 +1067,209 @@ function ftLeaveDate(v){
  return /^\d{4}-\d{2}-\d{2}$/.test(x)?x.slice(8,10)+'.'+x.slice(5,7)+'.'+x.slice(0,4):x;
 }
 
+
+const FT_ABSENCE_CACHE=new Map();
+let FT_ABSENCE_SEQ=0,FT_ABSENCE_PDF_BUSY=false,FT_ABSENCE_POLICY_BUSY=false;
+function ftAbsenceContext_(){
+ if(!ST.h?.me||!firm()?.id||!has('LEAVE'))return null;
+ const companyId=String(firm().id),self=String(me().id);
+ const allowed=isAdmin()?myUsers().some(u=>String(u.id)===String(ST.absenceUserId)):false;
+ const userId=allowed?String(ST.absenceUserId):self;
+ const fromYear=Number(ST.absenceFromYear||new Date().getFullYear());
+ const toYear=Number(ST.absenceToYear||fromYear);
+ return {companyId,userId,fromYear,toYear};
+}
+function ftAbsenceKey_(c){return [c.companyId,c.userId,c.fromYear,c.toYear].join('|');}
+function ftAbsenceLabel_(s){
+ return ({PENDING:'Offen',APPROVED:'Genehmigt',REJECTED:'Abgelehnt',WITHDRAWN:'Zurückgezogen',
+  CANCEL_PENDING:'Stornierung beantragt',CANCELLED:'Storniert'})[s]||String(s||'–');
+}
+function ftAbsenceYearsOptions_(year){
+ const current=new Date().getFullYear(),out=[];
+ for(let y=current+1;y>=2000;y--)out.push('<option value="'+y+'"'+(y===Number(year)?' selected':'')+'>'+y+'</option>');
+ return out.join('');
+}
+function ftAbsencePanel_(){
+ if(!has('LEAVE')||!firm())return '';
+ const c=ftAbsenceContext_();
+ if(!c)return '';
+ const employee=isAdmin()?'<label class="field ft-absence-employee"><span>Mitarbeiter</span><select id="ftAbsenceEmployee">'+
+   myUsers().map(u=>'<option value="'+E(u.id)+'"'+(String(u.id)===c.userId?' selected':'')+'>'+E(u.name)+'</option>').join('')+
+   '</select></label>':'';
+ const cache=FT_ABSENCE_CACHE.get(ftAbsenceKey_(c));
+ const current=cache&&Date.now()-cache.at<120000?cache.data:null;
+ return '<section class="card ft-absences"><div class="ft-absence-header"><div><h2>Urlaubskonto und Abwesenheitsauszüge</h2>'+
+ '<div class="muted small">Jahresgutschriften, übertragener Altbestand, Urlaub und Krankenstände im gewählten Zeitraum</div></div>'+
+ '</div><div class="ft-absence-fields">'+employee+
+ '<label class="field"><span>Von Jahr</span><select id="ftAbsenceFromYear">'+ftAbsenceYearsOptions_(c.fromYear)+'</select></label>'+
+ '<label class="field"><span>Bis Jahr</span><select id="ftAbsenceToYear">'+ftAbsenceYearsOptions_(c.toYear)+'</select></label></div>'+
+ '<div id="ftAbsenceResults" aria-live="polite">'+(current?ftAbsenceResultHtml_(current):'<div class="ft-loading-view" role="status"><div class="ft-loader-ring"></div><span>Urlaubskonto und Krankenstände werden geladen …</span></div>')+'</div>'+
+ '<div class="ft-absence-actions"><button class="btn" type="button" data-act="absenceRefresh">Aktualisieren</button>'+
+ '<button class="btn primary" type="button" data-act="absencePdfCreate">PDF-Auszug erstellen und archivieren</button>'+
+ '<button class="btn" type="button" data-act="absencePdfArchive">Gespeicherte PDFs anzeigen</button></div>'+
+ '<div id="ftAbsenceArchive" class="ft-absence-archive" aria-live="polite"></div></section>';
+}
+function ftAbsenceResultHtml_(data){
+ const a=data.account||{},policy=a.policy||{},years=data.years||[],leaves=data.leaves||[],sick=data.sick||[];
+ const safeNum=n=>E(N(Number(n)||0)),when=v=>E(ftViennaDateTime(v))+' Uhr';
+ let html='<div class="ft-absence-summary">'+
+  '<div class="ft-absence-stat"><span>Gesamter Resturlaub heute</span><strong>'+safeNum(a.totalBalance)+' Tage</strong></div>'+
+  '<div class="ft-absence-stat"><span>Jährlicher Anspruch laut Stammdaten</span><strong>'+safeNum(a.annualEntitlement)+' Tage</strong></div>'+
+  '<div class="ft-absence-stat"><span>Übernommener Altbestand</span><strong>'+(a.legacyOpening===null?'Noch nicht erfasst':safeNum(a.legacyOpening)+' Tage')+'</strong></div>'+
+  '</div><p class="ft-absence-help">Der aktuelle Resturlaub ist der Gesamtsaldo. Ältere Bestände sind nicht nach ursprünglichem Anspruchsjahr aufteilbar. Jahreswerte zeigen ausschließlich belegte Buchungen; noch nicht gebuchte Ansprüche werden nicht als Gutschrift ausgewiesen.</p>';
+ if(a.ledgerStatus==='RECONCILIATION_REQUIRED')
+  html+='<div class="ft-absence-status warn"><strong>Abweichung im Urlaubskonto:</strong> '+safeNum(a.difference)+' Tage. Automatische Jahresgutschriften können gesperrt sein. Bitte durch Firmenadministration prüfen.</div>';
+ else if(a.ledgerStatus==='NOT_INITIALIZED')
+  html+='<div class="ft-absence-status">Das historische Urlaubskonto wurde noch nicht initialisiert. Der bisherige Gesamtrest bleibt bestehen.</div>';
+ else html+='<div class="ft-absence-status">Urlaubskonto und verbuchter Gesamtrest stimmen überein.</div>';
+ html+='<h3 class="ft-absence-h3">Jahresübersicht</h3><div class="ft-absence-table"><div class="table"><table><thead><tr><th>Jahr</th><th>Neu gebucht</th><th>Übertrag vor Gutschrift</th><th>Genehmigt</th><th>Vergangen</th><th>Geplant</th><th>Krankenstände</th></tr></thead><tbody>'+
+ years.map(y=>'<tr><td><strong>'+E(y.year)+'</strong></td><td>'+safeNum(y.granted)+' T</td>'+
+   '<td>'+(y.carryoverBefore===null?'–':safeNum(y.carryoverBefore)+' T')+'</td>'+
+   '<td>'+safeNum(y.approvedDays)+' T</td><td>'+safeNum(y.takenDays)+' T</td>'+
+   '<td>'+safeNum(y.plannedDays)+' T</td><td>'+E(y.sickReports)+'</td></tr>').join('')+
+ '</tbody></table></div></div>';
+ if(years.some(y=>y.crossYearEstimated))html+='<p class="ft-absence-help">Hinweis: Jahresübergreifende Urlaube wurden anteilig mit dem derzeit hinterlegten Arbeitstage-Modell geschätzt.</p>';
+ html+='<h3 class="ft-absence-h3">Urlaubshistorie</h3><div class="ft-absence-list">'+
+ (leaves.length?leaves.map(x=>'<article class="ft-absence-row"><strong>'+E(ftLeaveDate(x.from))+' – '+E(ftLeaveDate(x.to))+'</strong>'+
+   '<span class="ft-status">'+E(ftAbsenceLabel_(x.status))+'</span><small>'+safeNum(x.days)+' Tage</small></article>').join(''):
+  '<div class="ft-absence-empty">Keine Urlaube im ausgewählten Zeitraum.</div>')+'</div>';
+ html+='<h3 class="ft-absence-h3">Krankenstandshistorie</h3><div class="ft-absence-list">'+
+ (sick.length?sick.map(x=>'<article class="ft-absence-row"><strong>'+when(x.from)+' – '+when(x.to)+'</strong>'+
+  '<span class="ft-status">'+E(ftAbsenceLabel_(x.status))+'</span><small>Sollgutschrift: '+safeNum(x.creditHours)+
+  ' h · Bereitschaftsgutschrift: '+safeNum(x.standbyCreditHours)+' h</small></article>').join(''):
+  '<div class="ft-absence-empty">Keine Krankenstände im ausgewählten Zeitraum.</div>')+'</div>';
+ if(isAdmin()){
+  const status=policy.yearMode==='CALENDAR'?'Kalenderjahr':policy.yearMode==='ANNIVERSARY'?'Eintrittsdatum':'Noch nicht eingerichtet';
+  html+='<div class="ft-absence-policy"><h3>Urlaubsjahr-Regel der Firma</h3>'+
+   '<div class="ft-absence-help">Modell: <b>'+E(status)+'</b> · Automatische Jahresgutschrift: <b>'+(policy.autoGrant?'aktiv':'deaktiviert')+
+   '</b>. Bestehender Resturlaub wird nicht erneut gutgeschrieben. Der erste neue automatische Jahresanspruch wird frühestens im Kalenderjahr nach der Aktivierung gebucht.</div>'+
+   '<div class="ft-policy-controls"><label class="field"><span>Urlaubsjahr beginnt mit</span><select id="ftPolicyYearMode">'+
+   '<option value="CALENDAR"'+(policy.yearMode==='CALENDAR'?' selected':'')+'>1. Jänner (Kalenderjahr)</option>'+
+   '<option value="ANNIVERSARY"'+(policy.yearMode==='ANNIVERSARY'?' selected':'')+'>Eintrittsdatum je Mitarbeiter</option></select></label>'+
+   '<label class="ft-policy-checkbox"><input type="checkbox" id="ftPolicyAutoGrant"'+(policy.autoGrant?' checked':'')+'>'+
+   '<span>Neue Jahresansprüche künftig automatisch gutschreiben</span></label></div>'+
+   '<div class="ft-absence-actions"><button class="btn" data-act="absencePolicySave">Urlaubsjahr-Regel speichern</button></div>'+
+   '<p class="ft-absence-help">Bitte erst nach Prüfung der Firmenvereinbarung und Ansprüche aktivieren. Frühere Jahre werden nicht nachträglich neu gutgeschrieben.</p></div>';
+ }
+ html+='<p class="ft-absence-help">Im PDF-Auszug werden keine medizinischen Diagnosen ausgewiesen. Der Auszug ersetzt keine rechtliche oder lohnverrechnerische Prüfung.</p>';
+ return html;
+}
+async function ftAbsenceFetch_(force=false){
+ if(ST.tab!=='leave')return;
+ const c=ftAbsenceContext_(),pane=document.getElementById('ftAbsenceResults');
+ if(!c||!pane)return;
+ if(c.fromYear>c.toYear||c.toYear-c.fromYear>15){
+  pane.innerHTML='<div class="ft-absence-status warn">Bitte einen gültigen Zeitraum von maximal 16 Jahren auswählen.</div>';return;
+ }
+ const key=ftAbsenceKey_(c),cached=FT_ABSENCE_CACHE.get(key);
+ if(!force&&cached&&Date.now()-cached.at<120000)return;
+ const seq=++FT_ABSENCE_SEQ;
+ pane.innerHTML='<div class="ft-loading-view" role="status"><div class="ft-loader-ring"></div><span>Urlaubskonto und Abwesenheiten werden geladen …</span></div>';
+ try{
+  const result=await api('absenceHistory',c);
+  if(seq!==FT_ABSENCE_SEQ||ST.tab!=='leave'||ftAbsenceKey_(ftAbsenceContext_()||{})!==key)return;
+  if(!result||!result.account||!Array.isArray(result.years))throw Error('Der Server liefert keine vollständige Jahresübersicht.');
+  FT_ABSENCE_CACHE.set(key,{at:Date.now(),data:result});
+  const target=document.getElementById('ftAbsenceResults');
+  if(target)target.innerHTML=ftAbsenceResultHtml_(result);
+ }catch(err){
+  if(seq!==FT_ABSENCE_SEQ)return;
+  const target=document.getElementById('ftAbsenceResults');
+  if(target)target.innerHTML='<div class="ft-absence-status warn">Urlaubskonto nicht erreichbar: '+E(err.message||err)+
+   '. Bitte prüfen, ob die Funktion ft_absenceUpgrade einmal ausgeführt wurde und die neue Code.gs bereitgestellt ist.</div>';
+ }
+}
+async function ftAbsenceArchive_(){
+ const c=ftAbsenceContext_(),pane=document.getElementById('ftAbsenceArchive');
+ if(!c||!pane)return;
+ pane.textContent='Gespeicherte Abwesenheitsauszüge werden geladen …';
+ try{
+  const list=await api('absencePdfArchive',c);
+  if(ST.tab!=='leave'||ftAbsenceKey_(ftAbsenceContext_()||{})!==ftAbsenceKey_(c)||!pane.isConnected)return;
+  if(!Array.isArray(list))throw Error('Ungültige Archivdaten.');
+  pane.innerHTML=list.length?'<h3 class="ft-absence-h3">Gespeicherte Abwesenheits-PDFs</h3>'+
+  list.map(x=>'<article><strong>'+E(x.name)+'</strong>'+
+   '<small>Zeitraum '+E(x.fromYear)+'–'+E(x.toYear)+' · Version '+E(x.version)+
+   ' · Erstellt: '+E(ftViennaDateTime(x.createdAt))+' Uhr</small><div class="ft-absence-actions">'+
+   '<button class="btn primary" data-act="absencePdfView" data-id="'+E(x.id)+'">Ansehen</button>'+
+   '<button class="btn" data-act="absencePdfDownload" data-id="'+E(x.id)+'">Herunterladen</button></div></article>').join(''):
+   '<div class="ft-absence-empty">Noch keine archivierten Auszüge für diese Auswahl.</div>';
+ }catch(err){
+  if(pane.isConnected)pane.textContent='Archiv konnte nicht geladen werden: '+String(err.message||err);
+ }
+}
+async function ftAbsenceCreatePdf_(){
+ if(FT_ABSENCE_PDF_BUSY)return;
+ const c=ftAbsenceContext_();
+ if(!c||c.fromYear>c.toYear||c.toYear-c.fromYear>15){say('Bitte gültigen Zeitraum wählen.',true);return;}
+ const btn=document.querySelector('[data-act="absencePdfCreate"]'),pane=document.getElementById('ftAbsenceArchive');
+ FT_ABSENCE_PDF_BUSY=true;
+ if(btn){btn.disabled=true;btn.textContent='PDF wird bei Google erstellt …';}
+ if(pane)pane.textContent='Abwesenheitsauszug wird erstellt und dauerhaft in Google Drive gespeichert …';
+ try{
+  const result=await api('absencePdfCreate',{...c,requestId:ftPdfRequestId_('absence')});
+  if(!result?.id)throw Error('Google hat die PDF-Archivierung nicht bestätigt.');
+  say('Abwesenheits-PDF wurde archiviert.');
+  if(ftAbsenceKey_(ftAbsenceContext_()||{})===ftAbsenceKey_(c))await ftAbsenceArchive_();
+ }catch(err){
+  if(pane)pane.textContent='PDF-Erstellung fehlgeschlagen: '+String(err.message||err);
+  say('Abwesenheits-PDF: '+String(err.message||err),true);
+ }finally{
+  FT_ABSENCE_PDF_BUSY=false;
+  if(btn){btn.disabled=false;btn.textContent='PDF-Auszug erstellen und archivieren';}
+ }
+}
+async function ftAbsencePdfDownload_(id,view){
+ const context=ftAbsenceContext_();
+ if(!context)return;
+ const chunks=[];let total=null,size=null,name='FireTimePro_Abwesenheiten.pdf';
+ for(let i=0;i<512;i++){
+  const r=await api('absencePdfChunk',{companyId:context.companyId,userId:context.userId,id,index:i});
+  if(String(r.id)!==String(id)||r.index!==i||!Number.isInteger(r.total)||r.total<1||r.total>512)
+   throw Error('PDF-Übertragung fehlerhaft.');
+  if(total===null){total=r.total;size=r.size;name=r.name||name;}
+  else if(total!==r.total||size!==r.size)throw Error('PDF-Daten wurden zwischenzeitlich geändert.');
+  const raw=atob(r.base64),bytes=new Uint8Array(raw.length);
+  for(let j=0;j<raw.length;j++)bytes[j]=raw.charCodeAt(j);
+  chunks.push(bytes);
+  if(i+1===total)break;
+ }
+ if(total===null||chunks.length!==total)throw Error('PDF unvollständig übertragen.');
+ const file=new Blob(chunks,{type:'application/pdf'});
+ if(file.size!==size)throw Error('PDF-Größe stimmt nicht.');
+ const url=URL.createObjectURL(file),a=document.createElement('a');
+ a.href=url;a.download=name;document.body.appendChild(a);
+ try{
+  if(view){
+   const popup=window.open(url,'_blank');
+   if(!popup){a.click();say('PDF-Anzeige blockiert. Download wird gestartet.');}
+  }else a.click();
+ }finally{
+  a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);
+ }
+}
+async function ftAbsencePolicySave_(){
+ if(!isAdmin()||FT_ABSENCE_POLICY_BUSY)return;
+ const mode=document.getElementById('ftPolicyYearMode')?.value;
+ const enabled=Boolean(document.getElementById('ftPolicyAutoGrant')?.checked);
+ if(!['CALENDAR','ANNIVERSARY'].includes(mode))return;
+ const ask='Urlaubsjahr-Modell: '+(mode==='CALENDAR'?'Kalenderjahr':'Eintrittsdatum')+
+  '. Automatische Jahresgutschrift: '+(enabled?'EIN':'AUS')+
+  '. Der bisherige Gesamtrest darf NICHT erneut gutgeschrieben werden. Bestehende Ansprüche und Startsalden geprüft?';
+ if(!confirm(ask))return;
+ if(enabled&&!confirm('Wirklich automatische Jahresgutschriften aktivieren? Die erste neue Gutschrift erfolgt frühestens im Kalenderjahr nach der ersten Aktivierung. Die Funktion verändert künftig Urlaubsstände.'))return;
+ FT_ABSENCE_POLICY_BUSY=true;
+ const btn=document.querySelector('[data-act="absencePolicySave"]');
+ if(btn){btn.disabled=true;btn.textContent='Speichern …';}
+ try{
+  const result=await api('leavePolicySave',{companyId:firm().id,yearMode:mode,autoGrant:enabled,confirmExistingBalance:true});
+  FT_ABSENCE_CACHE.clear();
+  say(result.message||'Urlaubsjahr-Regel gespeichert.');
+  await ftAbsenceFetch_(true);
+ }catch(err){say('Urlaubsjahr-Regel: '+String(err.message||err),true);}
+ finally{FT_ABSENCE_POLICY_BUSY=false;if(btn&&btn.isConnected){btn.disabled=false;btn.textContent='Urlaubsjahr-Regel speichern';}}
+}
+
 function ftVacationToday(){
  const p=ftViennaParts(new Date());
  return p?p.year+'-'+p.month+'-'+p.day:'';
@@ -1098,7 +1337,7 @@ function leave(){
  '<h3 class="ft-leave-group-title">Offene und sonstige Anträge</h3>'+
  entries(other,'Keine weiteren Anträge vorhanden.')+
  '<div class="ft-leave-history-foot">Jahresübergreifende Anträge erscheinen in beiden betroffenen Jahren. Die zugeordneten Urlaubstage werden derzeit noch nicht jahresweise aufgeteilt.</div>'+
- '</section></div>';
+ '</section></div>'+ftAbsencePanel_();
 }
 function work(){const list=ST.h.workShifts,sel=isAdmin(),p=ST.h.profile;const workBegin=ST.month+'-01T'+validClock(p.workStart);return hint('Arbeitsdienstplan für fixe Zeiten, 12-/24-Stunden-Schichten oder freie Dienste. Der Dienstplan ist eine Planung und erzeugt keine Ist-Arbeitsstunden. Beim Veröffentlichen erhalten Mitarbeiter eine E-Mail oder eine Google-Kalendereinladung.')+monthPick()+`${sel?`<div class="card"><h2>Arbeitsdienst eintragen</h2><form id="workForm"><div class="cols">${optionsUsers()}${input('Bezeichnung','title','Arbeitsdienst')}${input('Beginn','start',workBegin,'datetime-local','required')}${input('Ende','end',shiftedEnd(workBegin,p.workHours||8),'datetime-local','required')}</div><button class="btn primary">Entwurf speichern</button></form><button class="btn" data-act="workPublish">Alle Entwürfe dieses Monats veröffentlichen & einladen</button></div>`:''}<div class="card"><h2>Arbeitsdienste</h2><div class="table"><table><tr><th>Mitarbeiter</th><th>Beginn</th><th>Ende</th><th>Tätigkeit</th><th>Status</th><th></th></tr>${list.map(x=>`<tr><td>${E(who(x.userId).name)}</td><td>${DT(x.start)}</td><td>${DT(x.end)}</td><td>${E(x.title)}</td><td>${E(x.status)}</td><td>${sel&&x.status==='DRAFT'?`<button class="btn danger" data-act="workDelete" data-id="${x.id}">Löschen</button>`:''}</td></tr>`).join('')}</table></div></div>`;}
 
@@ -1130,7 +1369,7 @@ function sick(){
  const rows=ST.h.sick||[],admin=isAdmin(),users=admin?myUsers():[me()];
  return hint('Krankenstand selbst melden oder als Administrator erfassen. Die Meldung zeigt betroffene Dienste als Vertretungsbedarf an. Die Anrechnung entscheidet der Administrator bei der Monatsprüfung anhand der geltenden Ansprüche.')+monthPick()+
  `<div class="card"><h2>Krankenstand melden</h2><form id="sickForm">${admin?select('userId','Mitarbeiter',users.map(x=>[x.id,x.name]),me().id):''}<div class="cols">${input('Beginn','from','','datetime-local','required')}${input('Ende','to','','datetime-local','required')}</div>${input('Hinweis (keine Diagnosen eintragen)','note','')}<button class="btn primary">Krankenstand erfassen</button></form></div>`+
- `<div class="card"><h2>Krankenstandsmeldungen</h2>${rows.map(x=>`<div class="card" data-sick-row="${E(x.id)}"><div class="row between"><b>${E(who(x.userId).name)}</b><span>${x.status==='PENDING'?'Prüfung offen':x.status==='APPROVED'?'✓ Geprüft':'Abgelehnt'}</span></div><p>${DT(x.from)} – ${DT(x.to)}</p><p class="muted small">${E(x.note||'')}</p>${admin&&x.status==='PENDING'?`<div class="cols">${select('creditMode','Anrechnung',[['NONE','Keine Anrechnung'],['WORK','Nur Arbeitszeit-Sollgutschrift'],['STANDBY','Nur Bereitschaftsanspruch'],['BOTH','Beides']],'NONE')}${input('Arbeitszeitgutschrift in Stunden','creditHours',0,'number','min="0" step="0.25"')}${input('Bereitschaftsanspruch in Stunden','standbyCreditHours',0,'number','min="0" step="0.25"')}</div>${input('Begründung / Vertragsgrundlage','reviewNote','')}<button class="btn primary" data-act="sickApprove" data-id="${E(x.id)}">Prüfen und bestätigen</button><button class="btn danger" data-act="sickReject" data-id="${E(x.id)}">Meldung zurückweisen</button>`:x.status==='APPROVED'?`<p>Arbeitszeit: ${N(x.creditHours)} h · Bereitschaftsanspruch: ${N(x.standbyCreditHours)} h</p>`:''}</div>`).join('')||'Noch keine Krankenstände erfasst.'}</div>`;
+ `<div class="card"><h2>Krankenstandsmeldungen</h2>${rows.map(x=>`<div class="card" data-sick-row="${E(x.id)}"><div class="row between"><b>${E(who(x.userId).name)}</b><span>${x.status==='PENDING'?'Prüfung offen':x.status==='APPROVED'?'✓ Geprüft':'Abgelehnt'}</span></div><p>${DT(x.from)} – ${DT(x.to)}</p><p class="muted small">${E(x.note||'')}</p>${admin&&x.status==='PENDING'?`<div class="cols">${select('creditMode','Anrechnung',[['NONE','Keine Anrechnung'],['WORK','Nur Arbeitszeit-Sollgutschrift'],['STANDBY','Nur Bereitschaftsanspruch'],['BOTH','Beides']],'NONE')}${input('Arbeitszeitgutschrift in Stunden','creditHours',0,'number','min="0" step="0.25"')}${input('Bereitschaftsanspruch in Stunden','standbyCreditHours',0,'number','min="0" step="0.25"')}</div>${input('Begründung / Vertragsgrundlage','reviewNote','')}<button class="btn primary" data-act="sickApprove" data-id="${E(x.id)}">Prüfen und bestätigen</button><button class="btn danger" data-act="sickReject" data-id="${E(x.id)}">Meldung zurückweisen</button>`:x.status==='APPROVED'?`<p>Arbeitszeit: ${N(x.creditHours)} h · Bereitschaftsanspruch: ${N(x.standbyCreditHours)} h</p>`:''}</div>`).join('')||'Noch keine Krankenstände erfasst.'}</div>${has('LEAVE')?'<div class="card"><h3>Abwesenheits-Historie</h3><p>Vergangene Krankenstände und Urlaube sowie PDF-Jahresauszüge findest du im Menü Urlaub → Urlaubskonto und Abwesenheitsauszüge.</p><button class="btn" data-tab="leave">Abwesenheitsübersicht öffnen →</button></div>':''}`;
 }
 function availability(){const sub=ST.h.availSubmissions.some(x=>x.userId===me().id);if(ST.availMonth!==ST.month){ST.avail={};ST.h.availability.filter(x=>x.userId===me().id).forEach(x=>ST.avail[x.day]=x.answer);ST.availMonth=ST.month;}const [y,m]=ST.month.split('-').map(Number),offset=(new Date(y,m-1,1).getDay()+6)%7;return hint('Bis zum vereinbarten Stichtag muss jeder Mitarbeiter seine Verfügbarkeit melden – auch wenn kein einziger Tag möglich ist. Die Meldung wird gespeichert und ist danach für den Dienstplaner sichtbar.')+monthPick()+`<div class="card"><h2>Meine Verfügbarkeit · ${E(ST.month)}</h2>${sub?'<p class="muted">Bereits abgegeben – Änderung nur durch Administrator.</p>':'<p class="muted">Je Tag klicken: offen → verfügbar → nicht verfügbar.</p>'}<div class="days">${['Mo','Di','Mi','Do','Fr','Sa','So'].map(x=>`<b style="text-align:center">${x}</b>`).join('')}${Array(offset).fill('<span></span>').join('')}${Array.from({length:days(ST.month)},(_,i)=>{const d=i+1,v=ST.avail[d]||'';return `<button class="day ${v==='YES'?'yes':v==='NO'?'no':''}" data-act="availDay" data-id="${d}" ${sub?'disabled':''}>${d}<br><small>${v==='YES'?'✓ Kann':v==='NO'?'✕ Nein':'– Offen'}</small></button>`;}).join('')}</div><div class="actions"><button class="btn" data-act="availAllYes" ${sub?'disabled':''}>Alle verfügbar</button><button class="btn" data-act="availAllNo" ${sub?'disabled':''}>Alle nicht verfügbar</button><button class="btn" data-act="availSave" ${sub?'disabled':''}>Zwischenspeichern</button><button class="btn primary" data-act="availSubmit" ${sub?'disabled':''}>Verbindlich abgeben</button></div></div>${isAdmin()?`<div class="card"><h2>Abgaben der Mitarbeiter</h2>${myUsers().map(u=>`<div>${E(u.name)}: ${ST.h.availSubmissions.some(x=>x.userId===u.id)?'✓ Abgegeben':'Noch offen'}</div>`).join('')}</div>`:''}`;}
 const RULE_TYPES=[['STANDBY','Bereitschaft (ohne aktiven Einsatz)'],['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz'],['OTHER','Sonstige tatsächliche Arbeitszeit']];
@@ -1173,6 +1412,13 @@ if(a==='sickApprove'||a==='sickReject'){
 if(a==='availDay'){const d=Number(id),v=ST.avail[d]||'';ST.avail[d]=v===''?'YES':v==='YES'?'NO':'';page();return;}
 if(a==='availAllYes'||a==='availAllNo'){for(let d=1;d<=days(ST.month);d++)ST.avail[d]=a==='availAllYes'?'YES':'NO';page();return;}
 if(a==='availSave'||a==='availSubmit'){const all=Array.from({length:days(ST.month)},(_,i)=>({day:i+1,answer:ST.avail[i+1]||''}));if(a==='availSubmit'&&all.some(x=>!x.answer)){say('Bitte alle Tage markieren.',true);return;}if(a==='availSubmit'&&!confirm('Verfügbarkeit verbindlich abgeben?'))return;await run(async()=>{await api('availabilitySave',{companyId:firm().id,month:ST.month,days:all});if(a==='availSubmit')await api('availabilitySubmit',{companyId:firm().id,month:ST.month});await load();},'Verfügbarkeit gespeichert.');return;}
+if(a==='absenceRefresh'){await ftAbsenceFetch_(true);return;}
+if(a==='absencePdfCreate'){await ftAbsenceCreatePdf_();return;}
+if(a==='absencePdfArchive'){await ftAbsenceArchive_();return;}
+if(a==='absencePdfView'||a==='absencePdfDownload'){
+ await run(()=>ftAbsencePdfDownload_(id,a==='absencePdfView'));return;
+}
+if(a==='absencePolicySave'){await ftAbsencePolicySave_();return;}
 if(a==='leaveEdit'){ST.edit=id;page();return;}
 if(a==='leaveEditCancel'){ST.edit='';page();return;}
 if(a==='leaveWithdraw'){if(!confirm('Diesen Urlaubsantrag zurückziehen bzw. die Stornierung beantragen?'))return;await run(async()=>{await api('leaveWithdraw',{id,companyId:firm().id});ST.edit='';await load();},'Urlaubsantrag aktualisiert.');return;}
@@ -1393,7 +1639,7 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.id==='ftAbsenceFromYear'){ST.absenceFromYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceToYear'){ST.absenceToYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceEmployee'){ST.absenceUserId=x.value;FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
