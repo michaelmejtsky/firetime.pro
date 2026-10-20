@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.3-opening-balance-cutover-20261020';
+const FT_VERSION='1.8.4-roster-time-mail-20261020';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -446,7 +446,10 @@ function ft_objectPauseEnsureReady_(companyId,userId,month){
 
 function ft_activitySave_(actor,p,internalAllowPausePending){const uid=actor.role==='STAFF'?actor.id:p.userId||actor.id,u=ft_user_(actor,uid),c=ft_company_(actor,u.companyId);const type=String(p.type||'OBJECT');if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Ungültige Tätigkeit');const start=ft_datetime_(p.start),end=ft_datetime_(p.end);if(end<=start||ft_hours_(start,end)>48)throw Error('Ende muss nach Beginn liegen; maximal 48 Stunden.');const br=ft_number_(p.breakMinutes||0,0,1440,'Pausen');if(br>=ft_hours_(start,end)*60)throw Error('Pause darf nicht die ganze Schicht umfassen.');if(ft_objectPauseRequired_(type,start,end)&&br<30&&!internalAllowPausePending)throw Error('Objektkontrolle über 6 Stunden: Bitte mindestens 30 Minuten tatsächlich genommene Pause eintragen. Nichts wird automatisch abgezogen. Wenn keine Pause stattgefunden hat, Arbeitszeit nicht falsch kürzen und mit dem Arbeitgeber klären.');const dates=[ft_localMonth_(start),ft_localMonth_(new Date(end.getTime()-1))];dates.forEach(m=>ft_requireMonthOpen_(c.id,u.id,m));const entries=ft_get_('Activities').filter(x=>x.companyId===c.id&&x.userId===u.id&&x.id!==p.id);if(entries.some(x=>ft_overlap_(start,end,x.start,x.end)>0))throw Error('Aktive Arbeitszeiten dürfen sich nicht überschneiden. Objektkontrollen während Bereitschaft sind erlaubt.');let row=p.id?ft_one_('Activities',p.id):null;if(p.id&&(!row||row.userId!==u.id||row.companyId!==c.id))throw Error('Zeiteintrag nicht gefunden');const before=row?ft_publicRow_(row):{};row=row||{id:ft_uuid_(),companyId:c.id,userId:u.id,createdAt:ft_now_()};
  const activityOptionId=String(p.activityOptionId||'').trim();
- if(activityOptionId){const choice=ft_activityTypesRows_().find(x=>x.id===activityOptionId&&x.companyId===c.id&&x.type===type);if(!choice)throw Error('Tätigkeitsauswahl gehört nicht zu dieser Firma oder Tätigkeitsart.');}
+ if(activityOptionId){
+   const choice=ft_activityTypesFor_(c).find(x=>x.id===activityOptionId&&x.type===type);
+   if(!choice)throw Error('Tätigkeitsauswahl gehört nicht zu dieser Firma oder Tätigkeitsart.');
+ }
  const note=' [Pausenangabe offen – bitte nachtragen]';
  let description=ft_str_(p.description,1000).replace(/ \[Pausenangabe offen – bitte nachtragen\]/g,'');
  if(internalAllowPausePending&&ft_objectPauseRequired_(type,start,end)&&br<30)description=description.slice(0,1000-note.length)+note;
@@ -1521,8 +1524,21 @@ function ft_planCalendarShare_(actor,p){
  ft_audit_(actor,'PLAN_CALENDAR_SHARE','PlanMonths',state.id,before,ft_publicRow_(state));
  return {count,warnings:warns,shareStatus:state.shareStatus};
 }
+// Standardauswahl ist virtuell: keine Migration, vorhandene historische Daten bleiben unangetastet.
+const FT_STANDARD_ACTIVITIES_=[
+ {id:'FT_STD_INCIDENT',type:'INCIDENT',label:'Bereitschaftseinsatz (von Abfahrt bis Einsatzende)'},
+ {id:'FT_STD_MAINTENANCE',type:'OTHER',label:'Wartungsarbeiten'},
+ {id:'FT_STD_EXTINGUISHER',type:'OTHER',label:'Feuerlöscher'},
+ {id:'FT_STD_OFFICE',type:'OTHER',label:'Büro'},
+ {id:'FT_STD_OTHER',type:'OTHER',label:'Sonstige'}
+];
 function ft_activityTypesRows_(){return ft_db_().getSheetByName('ActivityTypes')?ft_get_('ActivityTypes'):[];}
-function ft_activityTypesFor_(c){return ft_activityTypesRows_().filter(x=>x.companyId===c.id).sort((a,b)=>Number(a.sort||0)-Number(b.sort||0)).map(x=>({id:x.id,type:x.type,label:x.label,active:ft_bool_(x.active)}));}
+function ft_activityTypesFor_(c){
+ const saved=ft_activityTypesRows_().filter(x=>x.companyId===c.id)
+  .sort((a,b)=>Number(a.sort||0)-Number(b.sort||0))
+  .map(x=>({id:x.id,type:x.type,label:x.label,active:ft_bool_(x.active)}));
+ return FT_STANDARD_ACTIVITIES_.map(x=>({...x,active:true,standard:true})).concat(saved);
+}
 function ft_activityTypesGet_(actor,p){
  const c=ft_company_(actor,p.companyId||actor.companyId);ft_need_(actor,c,'TIME');
  const rows=ft_activityTypesRows_().filter(x=>x.companyId===c.id);
@@ -1605,6 +1621,30 @@ function ft_timerStop_(actor,p){
  const pause=ft_number_(p.breakMinutes||0,0,1440,'Pause in Minuten');
  return ft_timerClose_(row,actor,false,pause);
 }
+/** Automatische Schließung: genau eine Benachrichtigung pro Arbeitszeiteintrag.
+ * Status ERROR wird beim nächsten 15-Minuten-Trigger erneut versucht.
+ * Keine E-Mail bei manueller Stopptaste.
+ */
+function ft_timerAutoNotice_(company,user,activity){
+ if(!company||!user||!activity||!user.email)return false;
+ const stamp=Utilities.formatDate(new Date(activity.end),FT_TZ,'dd.MM.yyyy HH:mm');
+ const url=ft_clientUrl_(company)||ft_publicGithubUrl_();
+ return ft_notification_(company,user,'TIMER_AUTO_CLOSE',activity.id,
+  'FireTime Pro – Arbeitszeit automatisch um 19:00 Uhr beendet',
+  'Hallo '+user.name+'!\\n\\nDeine Arbeitszeit vom '+stamp+
+  ' Uhr wurde automatisch mit 19:00 Uhr beendet, weil kein manuelles Arbeitsende erfasst wurde.'+
+  '\\n\\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
+  '\\nDie automatische Endzeit und eine Pause von 0 Minuten sind nur vorläufige Werte – es wurde keine Pause erfunden.'+
+  '\\n\\n'+url+'\\n\\n'+company.name);
+}
+function ft_timerRetryNotices_(){
+ let retried=0;
+ for(const n of ft_get_('Notifications').filter(x=>x.kind==='TIMER_AUTO_CLOSE'&&x.status==='ERROR').slice(0,25)){
+  const c=ft_one_('Companies',n.companyId),u=ft_one_('Users',n.userId),a=ft_one_('Activities',n.reference);
+  if(c&&u&&a&&a.companyId===c.id&&a.userId===u.id&&ft_timerAutoNotice_(c,u,a))retried++;
+ }
+ return retried;
+}
 function ft_timerSweep_(){
  const sh=ft_db_().getSheetByName('ActivityTimers');if(!sh)return {closed:0,errors:[]};
  const timers=ft_get_('ActivityTimers').slice(),now=new Date();
@@ -1614,9 +1654,14 @@ function ft_timerSweep_(){
  ready.sort((a,b)=>b.__row-a.__row);
  for(const t of ready){
   try{const user=ft_one_('Users',t.userId);if(!user)throw Error('Mitarbeiter fehlt.');
-   ft_timerClose_(t,user,true);closed++;}
+   const result=ft_timerClose_(t,user,true);closed++;
+   try{
+    const company=ft_one_('Companies',t.companyId);
+    ft_timerAutoNotice_(company,user,result.activity);
+   }catch(mailError){errors.push('E-Mail '+t.id+': '+String(mailError.message||mailError));}}
   catch(err){errors.push(t.id+': '+String(err.message||err));}
  }
+ try{ft_timerRetryNotices_();}catch(retryError){errors.push('E-Mail-Wiederholung: '+String(retryError.message||retryError));}
  return {closed,errors};
 }
 function ft_timerTick_(){return ft_lock_(()=>ft_timerSweep_());}
@@ -1849,6 +1894,7 @@ function ft_home_(u,p){
   standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
   workflowReady:Boolean(c&&ft_db_().getSheetByName('ActivityTimers')&&ft_db_().getSheetByName('ActivityTypes')&&ft_db_().getSheetByName('PlanMonths')),
   balanceCutoverSupported:true,
+  activityDefaultsSupported:true,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
