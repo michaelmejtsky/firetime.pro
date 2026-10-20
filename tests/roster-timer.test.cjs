@@ -66,7 +66,7 @@ test('new time starts today and moving its beginning also moves its end',()=>{
  assert.equal(entries.end.value,'2026-10-24T15:30');
  entries.start.value='2026-10-25T18:00';
  h.ftTimeSyncEndDate_({elements:{namedItem:n=>entries[n]}});
- assert.equal(entries.end.value,'2026-10-25T18:00');
+ assert.equal(entries.end.value,'2026-10-25T19:00'); // keep chronology when new start is later
  entries.start.value='2026-10-26T17:45';
  entries.end.value='2026-10-25T16:30';
  h.ftTimeSyncEndDate_({elements:{namedItem:n=>entries[n]}});
