@@ -452,6 +452,43 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-balance-breakdown table{min-width:540px}
 .ft-balance-breakdown th,.ft-balance-breakdown td{font-size:11px}
 .ft-balance-warning{background:#473c30;border-radius:8px;border:1px solid #836843;padding:11px;color:#ffe1bb;font-size:12px;line-height:1.6}
+
+/* Monatskalender Bereitschaft – Wochenansicht statt endloser Tabellen. */
+.ft-roster-month{padding:17px}
+.ft-roster-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:15px}
+.ft-roster-head h2{font-size:18px;margin:0 0 6px}
+.ft-roster-head p{margin:0}
+.ft-roster-legend{display:flex;gap:9px;flex-wrap:wrap;color:#b6cedd;font-size:11px}
+.ft-roster-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.ft-roster-weekday{text-align:center;color:#a9cce2;font-size:12px;padding:6px 0;font-weight:750}
+.ft-roster-day{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:5px;min-width:0;min-height:91px;padding:10px 8px;background:#12293f;border:1px solid #3e5e76;border-radius:10px;color:#e9f5fc;text-align:left}
+.ft-roster-day.assigned{background:#1d4057;border-color:#567b8b}
+.ft-roster-day.own{background:#1c5242;border-color:#3b9c71}
+.ft-roster-day.draft{border-style:dashed}
+.ft-roster-day.today{box-shadow:inset 0 0 0 2px #f37850}
+.ft-roster-day.selected{outline:2px solid #fca780;outline-offset:1px}
+.ft-roster-date-full{font-size:11px;font-weight:750;white-space:nowrap}
+.ft-roster-date-short{display:none}
+.ft-roster-name{font-size:12px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
+.ft-roster-mine,.ft-roster-draft{font-size:10px;color:#b9eed1}
+.ft-roster-draft{color:#ffd1a2}
+.ft-roster-detail{margin-top:13px;padding:14px;background:#10263b;border:1px solid #42627b;border-radius:11px;min-height:66px}
+.ft-roster-detail p{margin:7px 0 0}
+.ft-roster-detail-header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;margin-bottom:8px}
+.ft-roster-detail-header span{color:#b9d1e1}
+.ft-roster-detail-line{display:flex;flex-direction:column;gap:3px;padding:9px 0;border-top:1px solid #35536b;font-size:12px}
+.ft-roster-detail-line span{color:#c4ddeb;line-height:1.5}
+@media(max-width:650px){
+ .ft-roster-month{padding:14px 11px}
+ .ft-roster-grid{gap:3px}
+ .ft-roster-day{padding:6px 3px;min-height:68px;gap:3px;border-radius:7px;align-items:center;text-align:center}
+ .ft-roster-date-full{display:none}
+ .ft-roster-date-short{display:inline;font-size:12px;font-weight:800}
+ .ft-roster-name{font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+ .ft-roster-mine,.ft-roster-draft{font-size:8px}
+ .ft-roster-weekday{font-size:11px}
+ .ft-roster-legend{font-size:10px}
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -2249,7 +2286,7 @@ function ftStandbyDayRow_(date,shift,split,staff){
  const selectedName=selected?assigned?.name||who(selected).name:'';
  const assignedLine=!split&&selected?
   '<div class="ft-standby-current">Eingeteilt: <strong>'+E(selectedName)+'</strong></div>':'';
- return '<tr><td><strong>'+E(date)+'</strong></td>'+
+ return '<tr><td><strong>'+E(ftRosterDate_(date))+'</strong></td>'+
   '<td class="ft-standby-avail-cell">'+availNames+details+'</td>'+
   '<td>'+selectHtml+assignedLine+warning+'</td>'+
   '<td data-standby-status="1">'+E(ftStandbyStatusText_(shift?.status))+'</td></tr>';
@@ -2354,6 +2391,73 @@ function ftStandbySections_(all,sickLeaves,full){
  '</section>';
 }
 
+
+/* Lesbare Monatsübersicht wie bei der Verfügbarkeit: Ansicht, keine Planänderung. */
+function ftRosterDate_(date){
+ const m=/^(\d{4})-(\d\d)-(\d\d)$/.exec(String(date||''));
+ return m?m[3]+'.'+m[2]+'.'+m[1]:String(date||'');
+}
+function ftRosterDayAssignments_(day){
+ const month=day.slice(0,7),admin=isAdmin();
+ const base=(ST.h?.shifts||[]).filter(x=>x.day===day&&(admin||x.status==='PUBLISHED'));
+ const allocations=ST.h?.segments||[];
+ const result=[];
+ for(const shift of base){
+  if(!shift.userId)continue;
+  const divided=allocations.filter(x=>String(x.shiftId)===String(shift.id));
+  const rows=divided.length?divided:[shift];
+  for(const part of rows){
+   if(!part.userId)continue;
+   result.push({name:who(part.userId).name,userId:part.userId,start:part.start,end:part.end,
+    status:shift.status,split:divided.length>0});
+  }
+ }
+ return result.sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+}
+function ftRosterDayDetail_(day){
+ if(!/^\d{4}-\d\d-\d\d$/.test(String(day||''))||day.slice(0,7)!==ST.month)return '';
+ const entries=ftRosterDayAssignments_(day);
+ return '<div class="ft-roster-detail-header"><strong>'+E(ftRosterDate_(day))+'</strong><span>'+
+ (entries.length?entries.length+' Einteilung'+(entries.length===1?'':'en'):'Keine Bereitschaft eingeteilt')+'</span></div>'+
+ (entries.length?entries.map(x=>'<div class="ft-roster-detail-line"><b>'+E(x.name)+'</b>'+
+ '<span>'+E(DT(x.start))+' – '+E(DT(x.end))+' Uhr'+(x.status!=='PUBLISHED'?' · Entwurf':'')+
+ (x.split?' · Geteilter Dienst':'')+'</span></div>').join(''):
+ '<p class="muted small">Für diesen Tag ist noch niemand eingeteilt beziehungsweise veröffentlicht.</p>');
+}
+function ftRosterMonthGrid_(){
+ if(!has('STANDBY'))return '';
+ const [year,m]=ST.month.split('-').map(Number),offset=(new Date(year,m-1,1).getDay()+6)%7;
+ const weekdays=['Mo','Di','Mi','Do','Fr','Sa','So'];
+ const today=ftTimeToday_();
+ const cells=Array.from({length:days(ST.month)},(_,i)=>{
+  const day=ST.month+'-'+String(i+1).padStart(2,'0');
+  const entries=ftRosterDayAssignments_(day);
+  const mine=entries.some(x=>String(x.userId)===String(me().id));
+  const allDraft=entries.length&&entries.every(x=>x.status!=='PUBLISHED');
+  const names=[...new Set(entries.map(x=>x.name))];
+  const first=names[0]||'';
+  const short=first.split(/\s+/).slice(-1)[0]||first;
+  const aria=ftRosterDate_(day)+': '+(names.length?names.join(', '):'Nicht besetzt');
+  const className=mine?' own':entries.length?' assigned':' empty';
+  return '<button type="button" class="ft-roster-day'+className+(allDraft?' draft':'')+
+   (day===today?' today':'')+'" data-act="rosterInspect" data-id="'+E(day)+'" aria-label="'+E(aria)+
+   '" title="'+E(aria)+'"><span class="ft-roster-date-full">'+E(ftRosterDate_(day))+'</span>'+
+   '<span class="ft-roster-date-short">'+(i+1)+'.</span>'+
+   '<span class="ft-roster-name">'+(entries.length?E(short)+(names.length>1?' +'+(names.length-1):''):'–')+'</span>'+
+   (mine?'<span class="ft-roster-mine">Mein Dienst</span>':allDraft?'<span class="ft-roster-draft">Entwurf</span>':'')+
+   '</button>';
+ }).join('');
+ return '<section class="card ft-roster-month"><div class="ft-roster-head"><div>'+
+  '<h2>Bereitschaftskalender · '+E(ftPdfMonthLabel(ST.month))+'</h2>'+
+  '<p class="muted small">Monatsübersicht nach der Einteilung · Tippe auf einen Tag für Namen und Dienstzeiten.</p>'+
+  '</div><div class="ft-roster-legend"><span>● Eingeteilt</span><span>● Mein Dienst</span></div></div>'+
+  '<div class="ft-roster-grid" role="group" aria-label="Bereitschaften '+E(ftPdfMonthLabel(ST.month))+'">'+
+  weekdays.map(x=>'<div class="ft-roster-weekday">'+x+'</div>').join('')+
+  Array(offset).fill('<span class="ft-roster-blank" aria-hidden="true"></span>').join('')+
+  cells+'</div><div class="ft-roster-detail" id="ftRosterInfo" aria-live="polite">'+
+  '<p class="muted small">Wähle einen Kalendertag aus, um die vollständige Einteilung zu sehen.</p></div></section>';
+}
+
 function standby(){
  const c=firm(),list=ST.h.shifts||[],parts=shiftAllocations(),changes=ST.h.changes||[],sickLeaves=ST.h.sick||[];
  const full=isAdmin(),own=parts.filter(x=>x.userId===me().id),mineOrAll=full?parts:parts.filter(x=>x.userId===me().id);
@@ -2364,7 +2468,7 @@ function standby(){
  const requests=changes.filter(x=>x.status==='PENDING');
  return '<div class="ft-duty-month-nav">'+monthPick()+
  (ST.month!==monthOf(new Date())?'<button type="button" class="btn" data-act="standbyThisMonth">Zum aktuellen Monat →</button>':'')+
- '</div>'+ftStandbySections_(mineOrAll,sickLeaves,full)+
+ '</div>'+ftStandbySections_(mineOrAll,sickLeaves,full)+ftRosterMonthGrid_()+
  `${full?`<details class="card ft-duty-admin-plan" ${ST.month>monthOf(new Date())?'open':''}><summary><strong>Bereitschaft einteilen</strong><span>Monatsplan und Freigaben</span></summary><div class="ft-duty-plan-body"><p class="muted small">Firmenmodell: ${E(ST.h.profile?.standbyStart||'07:00')} Uhr, ${N(ST.h.profile?.standbyHours||24)} Stunden.</p><div class="actions">${has('AVAILABILITY')?'<button class="btn" data-act="planSuggest">Vorschlag nach Verfügbarkeit</button>':''}<button type="button" class="btn" data-act="planRefreshAvailability">Verfügbarkeiten aktualisieren</button></div>${ftPlanFlowPanel_()}<div class="ft-standby-availability-explain">✓ Im Dropdown erscheinen nur Mitarbeiter, die für den jeweiligen Tag <strong>„Kann“ gemeldet und verbindlich abgegeben</strong> haben. Nicht verfügbare und noch offene Mitarbeiter werden ausgeblendet. Bereits bestehende Einteilungen bleiben zur Kontrolle sichtbar.</div><div class="table ft-standby-plan-table"><table><tr><th>Tag</th><th>Bestätigt verfügbar</th><th>Einteilung</th><th>Status</th></tr>${Array.from({length:days(ST.month)},(_,i)=>{const date=ST.month+'-'+String(i+1).padStart(2,'0'),s=list.find(x=>x.day===date),isSplit=parts.some(x=>x.shiftId===s?.id&&x.segment);return ftStandbyDayRow_(date,s,isSplit,targets);}).join('')}</table></div></div></details>`:''}`+
  `<details class="card ft-duty-details"><summary>Bereitschaft tauschen oder übergeben</summary><div class="ft-duty-details-body"><p class="muted">Du kannst den gesamten Dienst oder nur einen Zeitraum an einen Kollegen übergeben. Die Übernahme wird erst nach dessen Zustimmung wirksam.</p>${proposalParts.length?`<form id="handoverForm"><label class="field"><span>Mein Dienstabschnitt</span><select name="shiftId" id="handoverShift" required>${partOptions}</select></label><input type="hidden" name="fromUserId" value="${E(first?.userId||'')}"><div class="cols">${input('Übergabe ab','start',stampInput(first?.start),'datetime-local','required')}${input('Übergabe bis','end',stampInput(first?.end),'datetime-local','required')}${select('toUserId','Kollege übernimmt',targets.filter(x=>x.id!==first?.userId).map(x=>[x.id,x.name]),'')}</div>${input('Grund / Hinweis (optional)','reason','')}<button class="btn primary">Übernahme anfragen</button></form>`:'<p>Kein noch offener, übergebbarer Dienstabschnitt vorhanden.</p>'}</div></details>`+
  `<div class="card"><h2>Offene Übernahmen</h2>${requests.map(x=>`<div class="card"><b>${E(who(x.fromUserId).name)} → ${E(who(x.toUserId).name)}</b><div>${DT(x.start)} – ${DT(x.end)}</div><p class="muted small">${E(x.reason||'Ohne Kommentar')}</p>${x.toUserId===me().id||full?`<button class="btn primary" data-act="handoverAccept" data-id="${E(x.id)}">Übernehmen</button><button class="btn danger" data-act="handoverDecline" data-id="${E(x.id)}">Ablehnen</button>`:'Warten auf Zustimmung des Kollegen'}</div>`).join('')||'Keine offenen Übernahmen.'}</div>`+
@@ -2488,7 +2592,13 @@ if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>ap
 if(a==='deleteTime'){if(confirm('Eintrag löschen?'))await run(async()=>{await api('activityDelete',{id});await load();},'Gelöscht.');return;}
 if(a==='workDelete'){if(confirm('Unveröffentlichten Dienst löschen?'))await run(async()=>{await api('workDelete',{id,companyId:firm().id});await load();},'Dienst gelöscht.');return;}
 if(a==='workPublish'){if(confirm('Entwürfe des Monats veröffentlichen und E-Mails/Kalendereinladungen verschicken?'))await run(async()=>{const r=await api('workPublish',{companyId:firm().id,month:ST.month});await load();say(r.published+' Schichten veröffentlicht. '+r.warnings.join('; '),r.warnings.length>0);});return;}
-if(a==='standbyThisMonth'){const current=monthOf(new Date());ST.month=current;FT_TAB_MONTHS.standby=current;ST.availMonth='';await load();window.scrollTo(0,0);return;}
+if(a==='rosterInspect'){
+  const panel=document.getElementById('ftRosterInfo');
+  if(panel){panel.innerHTML=ftRosterDayDetail_(id);
+   document.querySelectorAll('.ft-roster-day').forEach(x=>x.classList.toggle('selected',x.dataset.id===id));}
+  return;
+ }
+ if(a==='standbyThisMonth'){const current=monthOf(new Date());ST.month=current;FT_TAB_MONTHS.standby=current;ST.availMonth='';await load();window.scrollTo(0,0);return;}
 if(a==='shiftDone'){if(confirm('Bereitschaft tatsächlich geleistet?'))await run(async()=>{await api('shiftConfirm',{id,companyId:firm().id});await load();},'Bestätigt.');return;}
 if(a==='planRefreshAvailability'){
  FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|standby');
