@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-vacation-account-absence-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-employee-leave-settings-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -259,6 +259,19 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-absence-archive article small{display:block;color:#b1c9dc;margin-top:5px}
 .ft-absence-empty{color:#b7c9d8;font-size:13px;padding:12px 0}
 @media(max-width:520px){.ft-absence-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ft-absence-fields .ft-absence-employee{grid-column:1/-1}.ft-absence-actions .btn{width:100%}}
+
+/* Austrian per-employee leave rules · AK Niederösterreich */
+.ft-staff-leave-rules{margin:17px 0 20px;background:#142c40;border:1px solid #476982;border-radius:16px;padding:16px}
+.ft-staff-leave-rules>h3{font-size:16px;letter-spacing:-.01em;margin:2px 0 12px}
+.ft-staff-leave-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px}
+.ft-staff-leave-calculation{font-size:13px;color:#d0e3f1;background:#1b4358;border-left:3px solid #86bada;border-radius:8px;padding:10px 12px;line-height:1.6}
+.ft-leave-readonly{opacity:.77;cursor:default}
+.ft-staff-ak{margin-top:16px;border:1px solid #527188;background:#1b3548;border-radius:12px;padding:13px 14px;color:#dbeaf6}
+.ft-staff-ak strong{font-size:14px}
+.ft-staff-ak p{font-size:12px;line-height:1.66;margin:9px 0}
+.ft-staff-ak a{color:#a6dafa;font-weight:760;font-size:13px;text-decoration:underline}
+.ft-staff-ak-source{display:block;color:#9fbed3;font-size:11px;margin-top:9px;line-height:1.5}
+@media(max-width:650px){.ft-staff-leave-cols{grid-template-columns:minmax(0,1fr)}.ft-staff-leave-rules{padding:14px 12px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -689,6 +702,7 @@ function page(){
  }
  if(ST.tab==='reports')ftResumePdfJob();
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
+ if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
 }
 function dashboard(){if(me().role==='SYSADMIN'&&!firm())return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+`<div class="grid"><div class="card"><span class="muted small">Kunden</span><div class="metric">${ST.h.companies.length}</div></div><div class="card"><span class="muted small">Aktive Kunden</span><div class="metric">${ST.h.companies.filter(x=>x.active===true||x.active==='TRUE').length}</div></div></div><div class="card"><h2>Meine Kunden</h2>${ST.h.companies.map(c=>`<div class="row between" style="padding:11px 0;border-bottom:1px solid #345068"><div><b>${E(c.name)}</b><div class="muted small">${E(c.slug)}</div></div><button class="btn primary" data-act="openFirm" data-id="${c.id}">Verwalten →</button></div>`).join('')}<button class="btn" data-tab="customers">Kundenanlage öffnen</button></div>`;if(FT_DASHBOARD_LOADING)return hint('Du bist angemeldet. Die Monatskennzahlen werden im Hintergrund geladen. Du kannst die anderen Menüs bereits öffnen.')+
   '<div class="ft-loading-dashboard" role="status" aria-live="polite"><div class="ft-loader-ring"></div><div><b>Arbeitsbereich bereit</b><div class="muted small">Sollstunden, Iststunden und Bereitschaft werden geladen …</div></div></div>'+
@@ -698,7 +712,75 @@ function profileFields(p){return `<div class="cols">${select('workModel','Arbeit
 function modulesForm(enabled,scope){return `<div class="cols">${MODULES.map(([key,title,desc])=>`<label class="cbox"><input name="module" type="checkbox" value="${key}" ${enabled.includes(key)?'checked':''}><span><b>${E(title)}</b><div class="muted small">${E(desc)}</div></span></label>`).join('')}</div><p class="muted small">${scope==='sale'?'Nur du als FireTime-Pro-Systemadministrator bestimmst, welche Funktionen gekauft/freigeschaltet sind.':'Die Firmenadministration kann ihre freigeschalteten Module nicht selbst erweitern.'}</p>`;}
 function customers(){if(me().role!=='SYSADMIN')return '';return hint('Jede neue Firma erhält ein eigenes Logo, eigene Farben, ein eigenes Arbeitsmodell und nur die Module, die du verkaufst. BSB3100 ist bereits angelegt.')+`<div class="card"><h2>Bestehende Kunden</h2>${ST.h.companies.map(c=>`<div class="row between"><b>${E(c.name)}</b><button class="btn" data-act="openFirm" data-id="${c.id}">Öffnen</button></div>`).join('')}</div><div class="card"><h2>Neuen Kunden samt Administrator anlegen</h2><form id="onboardForm"><div class="cols">${input('Firmenname','name','','text','required')}${input('Firmenkürzel / Link','slug','','text','required')}${input('Primärfarbe','color','#f37850','color')}${input('Name des ersten Firmenadministrators','adminName','','text','required')}${input('E-Mail des Firmenadministrators','adminEmail','','email','required')}</div><h3>Firmenlogo</h3><div class="drop" data-pick="newLogo">Logo anklicken oder hineinziehen (PNG/JPG/WEBP, max. 2 MB)<input type="file" id="newLogo" accept="image/png,image/jpeg,image/webp"></div><div id="newLogoLabel" class="muted small"></div><h3 style="margin-top:20px">Arbeitsmodell</h3>${profileFields({workModel:'OFFICE',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24})}<h3>Welche Module hat die Firma gekauft?</h3>${modulesForm(['TIME','REPORTS','LEAVE'],'sale')}<button class="btn primary">Kunden erstellen und Admin einladen</button></form></div>`;}
 function license(){if(me().role!=='SYSADMIN'||!firm())return '';return hint('Nur du schaltest die gekauften Funktionen frei. Der Firmenadministrator kann keine Module dazukaufen oder selbst aktivieren.')+`<div class="card"><h2>Modulfreigabe · ${E(firm().name)}</h2><form id="licenseForm">${modulesForm(ST.h.modules,'sale')}<button class="btn primary">Modulfreigabe speichern</button></form></div>`;}
-function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${input('Monatssoll (Stunden)','monthlyHours',u?.monthlyHours??25,'number','min="0" max="300" step="0.25"')}${input('Stundensatz (€)','hourlyRate',u?.hourlyRate??0,'number','min="0" step="0.01"')}${input('Urlaubsrest in Tagen','leaveBalance',u?.leaveBalance??25,'number','min="0"')}${input('Urlaubsanspruch in Tagen','leaveEntitlement',u?.leaveEntitlement??25,'number','min="0"')}${input('Stunden-Startsaldo','openingHours',u?.openingHours??0,'number','step="0.25"')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
+
+// Austrian leave rules. New controls activate only once Code.gs V1.7.1 is deployed.
+function ftStaffVacationSupported_(){
+ return !!ST.h?.me&&Object.prototype.hasOwnProperty.call(ST.h.me,'leaveYearMode');
+}
+function ftStaffVacationFields_(user){
+ if(!ftStaffVacationSupported_())
+  return input('Urlaubsanspruch in Tagen','leaveEntitlement',user?.leaveEntitlement??25,'number','min="0" step="0.5"');
+ const type=user?.leaveRuleType||'STANDARD_5';
+ const mode=user?.leaveYearMode||'ANNIVERSARY';
+ const weeks=String(user?.workdays||'1,2,3,4,5').split(',').filter(Boolean).length;
+ const value=user?.leaveEntitlement??(weeks*5);
+ const basis=user?.leaveRuleLegalBasis||'';
+ const note=user?.leaveRuleNote||'';
+ return '<div class="ft-staff-leave-rules"><h3>Urlaubsanspruch und Urlaubsjahr</h3>'+
+ '<div class="ft-staff-leave-cols">'+
+ select('leaveRuleType','Urlaubsregelung',[
+  ['STANDARD_5','Gesetzlicher Anspruch – 5 Wochen'],
+  ['STANDARD_6','Erhöhter Anspruch – 6 Wochen'],
+  ['SPECIAL','Sonderregelung – individuell'],
+  ...(user?[['LEGACY','Bisherigen Anspruch beibehalten (Altbestand)']]:[])
+ ],type)+
+ input('Urlaubstage pro Jahr','leaveEntitlement',value,'number','min="0" step="0.5" required')+
+ select('leaveYearMode','Neuer Urlaub jeweils ab',[
+  ['ANNIVERSARY','Eintrittsdatum (gesetzlicher Standard)'],
+  ['CALENDAR','1. Jänner (Kalenderjahr – mit Vereinbarung)']
+ ],mode)+
+ select('leaveRuleLegalBasis','Grundlage für Kalenderjahr',[
+  ['','Bitte wählen'],
+  ['KV','Kollektivvertrag'],
+  ['BETRIEBSVEREINBARUNG','Betriebsvereinbarung'],
+  ['SCHRIFTLICHE_EINZELVEREINBARUNG','Schriftliche Einzelvereinbarung (ohne Betriebsrat)']
+ ],basis)+
+ '</div>'+input('Begründung / Vereinbarung bei Sonderregelung','leaveRuleNote',note,'text','maxlength="250"')+
+ '<p class="ft-staff-leave-calculation" id="ftLeaveRulePreview">Urlaubstage werden aus der Anzahl regelmäßiger Arbeitstage pro Woche berechnet.</p>'+
+ '<div class="ft-staff-ak"><strong>Urlaubsrecht – Arbeiterkammer Niederösterreich</strong>'+
+ '<p>In Österreich stehen grundsätzlich <b>5 Wochen bezahlter Urlaub</b> pro Arbeitsjahr zu (bei 5 Arbeitstagen pro Woche 25 Tage; bei 2 Arbeitstagen 10 Tage). Das Urlaubsjahr beginnt normalerweise am <b>Eintrittstag</b>. Das Kalenderjahr kann durch Kollektivvertrag, Betriebsvereinbarung oder – ohne Betriebsrat – schriftliche Einzelvereinbarung gelten. Der Anspruch wächst in den ersten 6 Monaten des ersten Arbeitsjahres aliquot. Ab dem zweiten Arbeitsjahr entsteht er grundsätzlich zu Beginn des Urlaubsjahres vollständig. Nicht verbrauchter Urlaub wird grundsätzlich übertragen; zunächst wird der älteste offene Anspruch verbraucht.</p>'+
+ '<a href="https://noe.arbeiterkammer.at/beratung/arbeitundrecht/urlaub/So_viel_Urlaub_bekommen_Sie.html" target="_blank" rel="noopener noreferrer">AK NÖ – Ihr Anspruch auf Urlaub ↗</a>'+
+ '<span class="ft-staff-ak-source">Quelle: Arbeiterkammer Niederösterreich · Allgemeine Rechtsinformation; Sonderregelungen und Vereinbarungen rechtlich prüfen.</span></div>'+
+ '</div>';
+}
+function ftStaffVacationSync_(){
+ const form=document.getElementById('staffForm');
+ if(!form||!ftStaffVacationSupported_())return;
+ const daysField=form.querySelector('[name="workdays"]');
+ const rule=form.querySelector('[name="leaveRuleType"]');
+ const year=form.querySelector('[name="leaveYearMode"]');
+ const annual=form.querySelector('[name="leaveEntitlement"]');
+ const basis=form.querySelector('[name="leaveRuleLegalBasis"]');
+ const note=form.querySelector('[name="leaveRuleNote"]');
+ const hint=document.getElementById('ftLeaveRulePreview');
+ if(!daysField||!rule||!year||!annual)return;
+ const days=String(daysField.value||'').split(',').map(x=>x.trim()).filter(Boolean);
+ const valid=days.length>0&&days.every(d=>/^[1-7]$/.test(d))&&new Set(days).size===days.length;
+ const weeks=rule.value==='STANDARD_5'?5:rule.value==='STANDARD_6'?6:0;
+ if(weeks>0&&valid)annual.value=String(days.length*weeks);
+ annual.readOnly=weeks>0;
+ annual.classList.toggle('ft-leave-readonly',weeks>0);
+ const calendar=year.value==='CALENDAR';
+ if(basis){basis.required=calendar;basis.closest('label.field').hidden=!calendar;}
+ if(note){note.required=rule.value==='SPECIAL';note.closest('label.field').hidden=rule.value!=='SPECIAL';}
+ if(hint)hint.textContent=valid?
+  (weeks>0?'Berechnung: '+days.length+' regelmäßige Arbeitstage/Woche × '+weeks+' Wochen = '+days.length*weeks+' Urlaubstage/Jahr.':
+   'Individueller Anspruch. Gesetzliche Untergrenze bei '+days.length+' Tagen/Woche: '+days.length*5+' Urlaubstage/Jahr.')+
+    (calendar?' Neues Urlaubsjahr: 1. Jänner, nur mit entsprechender Vereinbarung.':' Neues Urlaubsjahr: jedes Jahr zum Eintrittsdatum.'):
+  'Bitte zuerst die regelmäßigen Arbeitstage korrekt eingeben (z. B. 1,2,3,4,5).';
+}
+
+function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${input('Monatssoll (Stunden)','monthlyHours',u?.monthlyHours??25,'number','min="0" max="300" step="0.25"')}${input('Stundensatz (€)','hourlyRate',u?.hourlyRate??0,'number','min="0" step="0.01"')}${input('Urlaubsrest in Tagen','leaveBalance',u?.leaveBalance??25,'number','min="0"')}${input('Stunden-Startsaldo','openingHours',u?.openingHours??0,'number','step="0.25"')}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div>${ftStaffVacationFields_(u)}<button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
 function time(){const a=ST.h.activities.filter(x=>x.start.slice(0,7)===ST.month||x.end.slice(0,7)===ST.month),edit=a.find(x=>x.id===ST.edit);return hint('Hier werden nur tatsächliche Arbeitsstunden erfasst. Ein Objekt ist ein Freitextfeld – keine Objektlisten oder Objektzuweisung. BSB3100: Objektkontrollen zählen zum Soll und dürfen parallel zur Bereitschaft laufen. Störungseinsätze zählen zum Soll und unterbrechen die Bereitschaft von Alarm bis Rückkehr.')+monthPick()+`<div class="card"><h2>${edit?'Arbeitszeit bearbeiten':'Arbeitszeit erfassen'}</h2><form id="timeForm"><input type="hidden" name="id" value="${E(edit?.id||'')}"><div class="cols">${isAdmin()?optionsUsers('userId',edit?.userId||me().id):''}${select('type','Art der Tätigkeit',[['OBJECT','Objektkontrolle'],['INCIDENT','BMA-/Störungseinsatz (Anruf bis Rückkehr)'],['OTHER','Sonstige Arbeitszeit']],edit?.type||'OBJECT')}${input('Beginn','start',edit?stampInput(edit.start):ST.month+'-01T08:00','datetime-local','required')}${input('Ende / Rückkehr','end',edit?stampInput(edit.end):ST.month+'-01T09:00','datetime-local','required')}${input('Pause in Minuten','breakMinutes',edit?.breakMinutes||0,'number','min="0"')}${input('Objekt (optional)','object',edit?.object||'')}</div><label class="field"><span>Beschreibung</span><textarea name="description" rows="2">${E(edit?.description||'')}</textarea></label><button class="btn primary">Arbeitszeit speichern</button>${edit?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Arbeitszeiten</h2><div class="table"><table><tr><th>Zeit</th><th>Mitarbeiter</th><th>Art</th><th>Objekt</th><th></th></tr>${a.map(x=>`<tr><td>${DT(x.start)} – ${DT(x.end)}</td><td>${E(who(x.userId).name)}</td><td>${E(x.type)}</td><td>${E(x.object)}</td><td><button class="btn" data-act="editTime" data-id="${x.id}">Bearbeiten</button><button class="btn danger" data-act="deleteTime" data-id="${x.id}">Löschen</button></td></tr>`).join('')}</table></div></div>`;}
 const FT_PDF_JOB_STORE='ft_pdf_pending_job_v2';
 let FT_PDF_RUNNING_ID='';
@@ -1111,12 +1193,13 @@ function ftAbsencePanel_(){
 }
 function ftAbsenceResultHtml_(data){
  const a=data.account||{},policy=a.policy||{},years=data.years||[],leaves=data.leaves||[],sick=data.sick||[];
+ const individual=a.personalRule||{};
  const safeNum=n=>E(N(Number(n)||0)),when=v=>E(ftViennaDateTime(v))+' Uhr';
  let html='<div class="ft-absence-summary">'+
   '<div class="ft-absence-stat"><span>Gesamter Resturlaub heute</span><strong>'+safeNum(a.totalBalance)+' Tage</strong></div>'+
   '<div class="ft-absence-stat"><span>Jährlicher Anspruch laut Stammdaten</span><strong>'+safeNum(a.annualEntitlement)+' Tage</strong></div>'+
   '<div class="ft-absence-stat"><span>Übernommener Altbestand</span><strong>'+(a.legacyOpening===null?'Noch nicht erfasst':safeNum(a.legacyOpening)+' Tage')+'</strong></div>'+
-  '</div><p class="ft-absence-help">Der aktuelle Resturlaub ist der Gesamtsaldo. Ältere Bestände sind nicht nach ursprünglichem Anspruchsjahr aufteilbar. Jahreswerte zeigen ausschließlich belegte Buchungen; noch nicht gebuchte Ansprüche werden nicht als Gutschrift ausgewiesen.</p>';
+  '</div>'+(individual.leaveYearMode?'<div class="ft-absence-status">Urlaubsjahr dieses Mitarbeiters: <strong>'+E(individual.leaveYearMode==='CALENDAR'?'Beginn 1. Jänner':'Eintrittsdatum')+'</strong> · Regelung: '+E(({STANDARD_5:'5 Wochen',STANDARD_6:'6 Wochen',SPECIAL:'Sonderregelung',LEGACY:'Bestehender Anspruch'})[individual.leaveRuleType]||'Nicht festgelegt')+'</div>':'')+'<p class="ft-absence-help">Der aktuelle Resturlaub ist der Gesamtsaldo. Ältere Bestände sind nicht nach ursprünglichem Anspruchsjahr aufteilbar. Jahreswerte zeigen ausschließlich belegte Buchungen; noch nicht gebuchte Ansprüche werden nicht als Gutschrift ausgewiesen.</p>';
  if(a.ledgerStatus==='RECONCILIATION_REQUIRED')
   html+='<div class="ft-absence-status warn"><strong>Abweichung im Urlaubskonto:</strong> '+safeNum(a.difference)+' Tage. Automatische Jahresgutschriften können gesperrt sein. Bitte durch Firmenadministration prüfen.</div>';
  else if(a.ledgerStatus==='NOT_INITIALIZED')
@@ -1639,7 +1722,7 @@ document.addEventListener('submit',e=>{
   if(e.target.getAttribute('id')==='staffForm'&&staffValidationError(e.target))return;
   Promise.resolve().then(()=>submit(e.target)).catch(err=>say('Formularfehler: '+(err?.message||String(err)),true));
 });
-document.addEventListener('change',e=>{const x=e.target;if(x.id==='ftAbsenceFromYear'){ST.absenceFromYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceToYear'){ST.absenceToYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceEmployee'){ST.absenceUserId=x.value;FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
+document.addEventListener('change',e=>{const x=e.target;if(x.form?.id==='staffForm'&&['leaveYearMode','leaveRuleType','workdays'].includes(x.name)){ftStaffVacationSync_();return;}if(x.id==='ftAbsenceFromYear'){ST.absenceFromYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceToYear'){ST.absenceToYear=Number(x.value);FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftAbsenceEmployee'){ST.absenceUserId=x.value;FT_ABSENCE_SEQ++;ftAbsenceFetch_(true);return;}if(x.id==='ftLeaveYearFilter'){ST.leaveYear=x.value;page();return;}if(x.id==='ftLeaveUserFilter'){ST.leaveUserFilter=x.value;page();return;}if(x.matches?.('[data-ft-bulk-employee]')){ftUpdateBulkCount();return;}if(x.id==='handoverShift'){const op=x.selectedOptions[0],f=x.form;if(op&&f){f.elements.namedItem('start').value=op.dataset.start||'';f.elements.namedItem('end').value=op.dataset.end||'';f.elements.namedItem('fromUserId').value=op.dataset.from||'';}}if(x.name==='workModel'){const form=x.form,h=form&&form.querySelector('[name=workHours]');if(h)h.value=x.value==='SHIFT12'?12:x.value==='SHIFT24'?24:8;}if(x.id==='monthPick'){ST.month=x.value;ST.availMonth='';load();}if(x.name==='reportUser'){ST.selected=x.value;FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|reports');load();}if(x.type==='file')run(()=>uploadFile(x));if(x.dataset.standby){
   const date=x.dataset.standby;
   const month=ST.month;
   const companyId=firm().id;
