@@ -324,10 +324,11 @@ function ft_balanceStartMonth_(user){
   if(/^20\d{2}-(0[1-9]|1[0-2])/.test(raw))return raw.slice(0,7);
   throw Error('Der Abrechnungsbeginn des Stundenkontos ist ungültig.');
  }
- const created=String(user.createdAt||'');
- if(/^20\d{2}-(0[1-9]|1[0-2])/.test(created))return created.slice(0,7);
- const hired=String(user.startDate||'');
- if(/^20\d{2}-(0[1-9]|1[0-2])/.test(hired))return hired.slice(0,7);
+ const created=String(user.createdAt||''),hired=String(user.startDate||'');
+ const c=/^20\d{2}-(0[1-9]|1[0-2])/.test(created)?created.slice(0,7):'';
+ const h=/^20\d{2}-(0[1-9]|1[0-2])/.test(hired)?hired.slice(0,7):'';
+ if(c&&h)return c>h?c:h;
+ if(c||h)return c||h;
  return ft_localMonth_(new Date());
 }
 function ft_balanceStartSave_(actor,user,month){
@@ -1847,6 +1848,7 @@ function ft_home_(u,p){
   availSubmissions,shifts,workShifts,leaves,months,reports,...extra,
   standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
   workflowReady:Boolean(c&&ft_db_().getSheetByName('ActivityTimers')&&ft_db_().getSheetByName('ActivityTypes')&&ft_db_().getSheetByName('PlanMonths')),
+  balanceCutoverSupported:true,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
