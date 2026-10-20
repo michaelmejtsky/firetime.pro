@@ -30,6 +30,7 @@ function setup(){
   ft_overlap_:(a,b,c,d)=>Math.max(0,(Math.min(new Date(b),new Date(d))-Math.max(new Date(a),new Date(c)))/3600000),
   ft_hours_:(a,b)=>Math.max(0,(new Date(b)-new Date(a))/3600000),
   ft_2_:v=>Math.round(Number(v)*100)/100,
+  ft_hourRound_:v=>Math.round(Number(v)*1e8)/1e8,
   ft_ruleBuckets_:()=>({night:0,sunday:0,holiday:0}),
   ft_accountableShifts_:()=>[],
   ft_ruleSegments_:()=>[],
