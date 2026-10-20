@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-mobile-dashboard-staff-only-hours-v1a"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-mobile-standby-confirm-first-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -400,6 +400,50 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-vacation-home .ft-vacation-total{font-size:clamp(22px,3vw,29px)}
 .ft-vacation-home .btn{background:#294d68;color:#fff;border:1px solid #5a8298}
 @media(max-width:560px){.ft-home-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.ft-home-open-plan{width:100%}.ft-home-schedule-head{align-items:stretch}}
+
+/* Standby: iPhone-first confirmations, collapsible administration. */
+.ft-duty-month-nav{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:13px}
+.ft-duty-month-nav .actions{margin:0}
+.ft-duty-month-nav>.btn{min-height:45px}
+.ft-duty-section{padding:17px}
+.ft-duty-section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:17px}
+.ft-duty-section-head h2{font-size:19px;margin:5px 0 6px}
+.ft-duty-section-head p{margin:0}
+.ft-duty-eyebrow{color:#b6d3e6;font-size:12px;font-weight:700}
+.ft-duty-count{padding:7px 10px;border:1px solid #4e7087;border-radius:20px;background:#24435a;font-size:12px;font-weight:750;color:#cbe5f7;white-space:nowrap}
+.ft-duty-count.has-due{background:#4e3c27;color:#ffe0aa;border-color:#8a6745}
+.ft-duty-subhead{font-size:14px;margin:20px 0 10px}
+.ft-duty-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,295px),1fr));gap:10px}
+.ft-duty-item{min-width:0;display:flex;flex-direction:column;gap:11px;padding:14px;border:1px solid #40607a;border-radius:13px;background:#142a3e}
+.ft-duty-item.ft-duty-due{background:#243345;border-color:#8a6d49}
+.ft-duty-item-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.ft-duty-item-top strong{font-size:14px;overflow-wrap:anywhere}
+.ft-duty-status{font-size:11px;font-weight:750;border-radius:7px;padding:5px 8px;background:#2c4b64;color:#def0fc}
+.ft-duty-status-due{background:#5a4028;color:#ffe4b8}
+.ft-duty-status-live{background:#205841;color:#bcf3d4}
+.ft-duty-status-done{background:#1f4d40;color:#bff6d3}
+.ft-duty-dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ft-duty-dates>div{min-width:0}
+.ft-duty-dates span{display:block;color:#b1c8d9;font-size:11px;margin-bottom:4px}
+.ft-duty-dates b{font-size:12px;display:block;line-height:1.45;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.ft-duty-confirm{display:block;width:100%;min-height:50px;margin:0;font-size:14px}
+.ft-duty-item-actions{margin-top:auto}
+.ft-duty-warning{color:#ffe2bf;background:#523d2d;padding:10px;border-radius:8px;font-size:12px;line-height:1.5;margin:0}
+.ft-duty-empty{margin:0;padding:13px 14px;border-radius:10px;border:1px dashed #4c6e83;color:#c5dbea;line-height:1.5;font-size:12px}
+.ft-duty-more{margin-top:11px;border:1px solid #3f6079;background:#163247;border-radius:11px;min-width:0}
+.ft-duty-more>summary{cursor:pointer;padding:13px;min-height:47px;font-size:13px;font-weight:700;color:#e3f1fc}
+.ft-duty-more>.ft-duty-list{padding:10px}
+.ft-duty-admin-plan>summary,.ft-duty-details>summary{cursor:pointer;min-height:46px;font-size:15px;font-weight:750}
+.ft-duty-admin-plan>summary span{display:block;font-size:12px;font-weight:400;color:#b6ccdd}
+.ft-duty-plan-body,.ft-duty-details-body{margin-top:17px}
+.ft-duty-admin-plan[open]>summary,.ft-duty-details[open]>summary{padding-bottom:12px;border-bottom:1px solid #3a5a73}
+@media(max-width:560px){
+ .ft-duty-list{grid-template-columns:minmax(0,1fr)}
+ .ft-duty-section{padding:15px 13px}
+ .ft-duty-section-head h2{font-size:18px}
+ .ft-duty-month-nav>button{width:100%;margin:0}
+ .ft-duty-item{padding:13px}
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -516,7 +560,8 @@ function ftChooseTabMonth(nextTab){
  const planned=nextMonth(current);
  let target;
  if(nextTab==='dashboard')target=current;
- else if(nextTab==='standby'||nextTab==='availability')target=FT_TAB_MONTHS[nextTab]||planned;
+ else if(nextTab==='availability')target=FT_TAB_MONTHS[nextTab]||planned;
+ else if(nextTab==='standby')target=FT_TAB_MONTHS[nextTab]||current;
  else target=FT_TAB_MONTHS[nextTab]||current;
  ST.tab=nextTab;
  if(ST.month!==target){ST.month=target;ST.availMonth='';}
@@ -2170,6 +2215,62 @@ function ftPlanFlowRefresh_(){
  if(area)area.outerHTML=ftPlanFlowPanel_();
 }
 
+
+/** Display only relevant duty actions first; never mutate shift records while rendering. */
+function ftStandbyCard_(x,sickLeaves,group){
+ const start=Date.parse(x.start),end=Date.parse(x.end),now=Date.now();
+ const done=x.actualStatus==='DONE',due=!done&&end<=now;
+ const live=!done&&start<=now&&end>now;
+ const type=done?'done':due?'due':live?'live':'planned';
+ const label=done?'Geleistet':due?'Bestätigung offen':live?'Läuft gerade':'Geplant';
+ const title=isAdmin()?E(who(x.userId).name):'Meine Bereitschaft';
+ const sick=(sickLeaves||[]).some(y=>String(y.userId)===String(x.userId)&&y.status!=='REJECTED'&&
+  Date.parse(y.from)<end&&Date.parse(y.to)>start);
+ const button=due&&(isAdmin()||String(x.userId)===String(me().id))?
+  '<button type="button" class="btn primary ft-duty-confirm" data-act="'+(x.segment?'segmentDone':'shiftDone')+
+  '" data-id="'+E(x.id)+'" aria-label="'+title+' vom '+E(DT(x.start))+' als geleistet bestätigen">✓ Dienst bestätigen</button>':'';
+ return '<article class="ft-duty-item ft-duty-'+type+'" data-duty-group="'+group+'">'+
+  '<div class="ft-duty-item-top"><strong>'+title+'</strong><span class="ft-duty-status ft-duty-status-'+type+'">'+label+'</span></div>'+
+  '<div class="ft-duty-dates"><div><span>Beginn</span><b>'+E(DT(x.start))+' Uhr</b></div>'+
+  '<div><span>Ende</span><b>'+E(DT(x.end))+' Uhr</b></div></div>'+
+  (sick?'<p class="ft-duty-warning">⚠ Krankenstand / Vertretung vor der Bestätigung prüfen.</p>':'')+
+  (button?'<div class="ft-duty-item-actions">'+button+'</div>':'')+'</article>';
+}
+function ftStandbySections_(all,sickLeaves,full){
+ const now=Date.now();
+ const valid=(all||[]).filter(x=>Number.isFinite(Date.parse(x.start))&&Number.isFinite(Date.parse(x.end)));
+ const due=valid.filter(x=>x.actualStatus!=='DONE'&&Date.parse(x.end)<=now).sort((a,b)=>
+  (String(a.userId)===String(me().id)?0:1)-(String(b.userId)===String(me().id)?0:1)||
+  Date.parse(a.end)-Date.parse(b.end));
+ const live=valid.filter(x=>x.actualStatus!=='DONE'&&Date.parse(x.start)<=now&&Date.parse(x.end)>now)
+  .sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+ const future=valid.filter(x=>x.actualStatus!=='DONE'&&Date.parse(x.start)>now)
+  .sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+ const done=valid.filter(x=>x.actualStatus==='DONE').sort((a,b)=>Date.parse(b.end)-Date.parse(a.end));
+ const cards=(rows,group)=>'<div class="ft-duty-list">'+rows.map(x=>ftStandbyCard_(x,sickLeaves,group)).join('')+'</div>';
+ const more=(rows,group,text)=>rows.length?'<details class="ft-duty-more"><summary>'+E(text)+' ('+
+  rows.length+')</summary>'+cards(rows,group)+'</details>':'';
+ return '<section class="card ft-duty-section" id="ft-duty-confirmations">'+
+  '<div class="ft-duty-section-head"><div><span class="ft-duty-eyebrow">'+E(ftPdfMonthLabel(ST.month))+'</span>'+
+  '<h2>Bereitschaften & Bestätigungen</h2>'+
+  '<p class="muted small">'+(full?'Firmenübersicht':'Meine Dienstübersicht')+
+  ' · Dienstbestätigung direkt beim jeweiligen Abschnitt</p></div>'+
+  '<span class="ft-duty-count'+(due.length?' has-due':'')+'">'+
+  (due.length?due.length+' offen':'Alles bestätigt')+'</span></div>'+
+  (due.length?'<h3 class="ft-duty-subhead">Jetzt bestätigen</h3>'+cards(due.slice(0,5),'due')+
+   more(due.slice(5),'due','Weitere offene Bestätigungen'):
+   '<p class="ft-duty-empty">✓ Keine abgeschlossenen, unbestätigten Dienste in diesem Monat.</p>')+
+  (live.length?'<h3 class="ft-duty-subhead">Laufende Dienste</h3>'+cards(live.slice(0,3),'live')+
+   more(live.slice(3),'live','Weitere laufende Dienste'):'')+
+  '<h3 class="ft-duty-subhead">Als Nächstes ('+future.length+')</h3>'+
+  (future.length?cards(future.slice(0,3),'future')+more(future.slice(3),'future','Weitere geplante Dienste'):
+   '<p class="ft-duty-empty">Keine weiteren bevorstehenden Dienste in diesem Monat.</p>')+
+  (done.length?'<details class="ft-duty-more ft-duty-done-history"><summary>✓ Bereits bestätigt ('+
+   done.length+')</summary>'+cards(done,'done')+'</details>':'')+
+  ((all||[]).length>valid.length?'<p class="ft-duty-warning">⚠ Ein Dienst hat unklare Zeitangaben.</p>':'')+
+ '</section>';
+}
+
 function standby(){
  const c=firm(),list=ST.h.shifts||[],parts=shiftAllocations(),changes=ST.h.changes||[],sickLeaves=ST.h.sick||[];
  const full=isAdmin(),own=parts.filter(x=>x.userId===me().id),mineOrAll=full?parts:parts.filter(x=>x.userId===me().id);
@@ -2178,15 +2279,13 @@ function standby(){
  const partOptions=proposalParts.map(x=>`<option value="${E(x.shiftId)}" data-from="${E(x.userId)}" data-start="${E(stampInput(x.start))}" data-end="${E(stampInput(x.end))}">${E(who(x.userId).name)} · ${DT(x.start)} – ${DT(x.end)}</option>`).join('');
  const first=proposalParts[0];
  const requests=changes.filter(x=>x.status==='PENDING');
- return hint('Tausch und Teilübergabe funktionieren am Handy: Der übernehmende Kollege stimmt zu und die Einteilung gilt sofort. Die Abrechnung prüft der Admin später. Jeder bestätigt nach Dienstende seinen eigenen Abschnitt.')+monthPick()+
- `${full?`<div class="card"><h2>Bereitschaft einteilen</h2><p class="muted small">Firmenmodell: ${E(ST.h.profile?.standbyStart||'07:00')} Uhr, ${N(ST.h.profile?.standbyHours||24)} Stunden.</p><div class="actions">${has('AVAILABILITY')?'<button class="btn" data-act="planSuggest">Vorschlag nach Verfügbarkeit</button>':''}<button type="button" class="btn" data-act="planRefreshAvailability">Verfügbarkeiten aktualisieren</button></div>${ftPlanFlowPanel_()}<div class="ft-standby-availability-explain">✓ Im Dropdown erscheinen nur Mitarbeiter, die für den jeweiligen Tag <strong>„Kann“ gemeldet und verbindlich abgegeben</strong> haben. Nicht verfügbare und noch offene Mitarbeiter werden ausgeblendet. Bereits bestehende Einteilungen bleiben zur Kontrolle sichtbar.</div><div class="table ft-standby-plan-table"><table><tr><th>Tag</th><th>Bestätigt verfügbar</th><th>Einteilung</th><th>Status</th></tr>${Array.from({length:days(ST.month)},(_,i)=>{const date=ST.month+'-'+String(i+1).padStart(2,'0'),s=list.find(x=>x.day===date),isSplit=parts.some(x=>x.shiftId===s?.id&&x.segment);return ftStandbyDayRow_(date,s,isSplit,targets);}).join('')}</table></div></div>`:''}`+
- `<div class="card"><h2>Aktuelle Bereitschaftsabschnitte</h2><div class="table"><table><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th>Status</th><th>Bestätigung</th></tr>${mineOrAll.map(x=>{
-   const blocked=sickLeaves.some(y=>y.userId===x.userId&&y.status!=='REJECTED'&&new Date(y.from)<new Date(x.end)&&new Date(y.to)>new Date(x.start));
-   return `<tr><td>${E(who(x.userId).name)}</td><td>${DT(x.start)}</td><td>${DT(x.end)}</td><td>${blocked?'⚠ Krankenstand / Vertretung prüfen':x.actualStatus==='DONE'?'✓ Geleistet':'Geplant'}</td><td>${x.actualStatus!=='DONE'&&new Date(x.end)<=new Date()&&(full||x.userId===me().id)?`<button class="btn primary" data-act="${x.segment?'segmentDone':'shiftDone'}" data-id="${E(x.id)}">Geleistet bestätigen</button>`:''}</td></tr>`;
- }).join('')||'<tr><td colspan="5">Noch keine Bereitschaftsdienste.</td></tr>'}</table></div></div>`+
- `<div class="card"><h2>Bereitschaft tauschen oder teilweise übergeben</h2><p class="muted">Du kannst den gesamten Dienst oder nur einen Zeitraum an einen Kollegen übergeben. Die Übernahme wird erst nach dessen Zustimmung wirksam.</p>${proposalParts.length?`<form id="handoverForm"><label class="field"><span>Mein Dienstabschnitt</span><select name="shiftId" id="handoverShift" required>${partOptions}</select></label><input type="hidden" name="fromUserId" value="${E(first?.userId||'')}"><div class="cols">${input('Übergabe ab','start',stampInput(first?.start),'datetime-local','required')}${input('Übergabe bis','end',stampInput(first?.end),'datetime-local','required')}${select('toUserId','Kollege übernimmt',targets.filter(x=>x.id!==first?.userId).map(x=>[x.id,x.name]),'')}</div>${input('Grund / Hinweis (optional)','reason','')}<button class="btn primary">Übernahme anfragen</button></form>`:'<p>Kein noch offener, übergebbarer Dienstabschnitt vorhanden.</p>'}</div>`+
+ return '<div class="ft-duty-month-nav">'+monthPick()+
+ (ST.month!==monthOf(new Date())?'<button type="button" class="btn" data-act="standbyThisMonth">Zum aktuellen Monat →</button>':'')+
+ '</div>'+ftStandbySections_(mineOrAll,sickLeaves,full)+
+ `${full?`<details class="card ft-duty-admin-plan" ${ST.month>monthOf(new Date())?'open':''}><summary><strong>Bereitschaft einteilen</strong><span>Monatsplan und Freigaben</span></summary><div class="ft-duty-plan-body"><p class="muted small">Firmenmodell: ${E(ST.h.profile?.standbyStart||'07:00')} Uhr, ${N(ST.h.profile?.standbyHours||24)} Stunden.</p><div class="actions">${has('AVAILABILITY')?'<button class="btn" data-act="planSuggest">Vorschlag nach Verfügbarkeit</button>':''}<button type="button" class="btn" data-act="planRefreshAvailability">Verfügbarkeiten aktualisieren</button></div>${ftPlanFlowPanel_()}<div class="ft-standby-availability-explain">✓ Im Dropdown erscheinen nur Mitarbeiter, die für den jeweiligen Tag <strong>„Kann“ gemeldet und verbindlich abgegeben</strong> haben. Nicht verfügbare und noch offene Mitarbeiter werden ausgeblendet. Bereits bestehende Einteilungen bleiben zur Kontrolle sichtbar.</div><div class="table ft-standby-plan-table"><table><tr><th>Tag</th><th>Bestätigt verfügbar</th><th>Einteilung</th><th>Status</th></tr>${Array.from({length:days(ST.month)},(_,i)=>{const date=ST.month+'-'+String(i+1).padStart(2,'0'),s=list.find(x=>x.day===date),isSplit=parts.some(x=>x.shiftId===s?.id&&x.segment);return ftStandbyDayRow_(date,s,isSplit,targets);}).join('')}</table></div></div></details>`:''}`+
+ `<details class="card ft-duty-details"><summary>Bereitschaft tauschen oder übergeben</summary><div class="ft-duty-details-body"><p class="muted">Du kannst den gesamten Dienst oder nur einen Zeitraum an einen Kollegen übergeben. Die Übernahme wird erst nach dessen Zustimmung wirksam.</p>${proposalParts.length?`<form id="handoverForm"><label class="field"><span>Mein Dienstabschnitt</span><select name="shiftId" id="handoverShift" required>${partOptions}</select></label><input type="hidden" name="fromUserId" value="${E(first?.userId||'')}"><div class="cols">${input('Übergabe ab','start',stampInput(first?.start),'datetime-local','required')}${input('Übergabe bis','end',stampInput(first?.end),'datetime-local','required')}${select('toUserId','Kollege übernimmt',targets.filter(x=>x.id!==first?.userId).map(x=>[x.id,x.name]),'')}</div>${input('Grund / Hinweis (optional)','reason','')}<button class="btn primary">Übernahme anfragen</button></form>`:'<p>Kein noch offener, übergebbarer Dienstabschnitt vorhanden.</p>'}</div></details>`+
  `<div class="card"><h2>Offene Übernahmen</h2>${requests.map(x=>`<div class="card"><b>${E(who(x.fromUserId).name)} → ${E(who(x.toUserId).name)}</b><div>${DT(x.start)} – ${DT(x.end)}</div><p class="muted small">${E(x.reason||'Ohne Kommentar')}</p>${x.toUserId===me().id||full?`<button class="btn primary" data-act="handoverAccept" data-id="${E(x.id)}">Übernehmen</button><button class="btn danger" data-act="handoverDecline" data-id="${E(x.id)}">Ablehnen</button>`:'Warten auf Zustimmung des Kollegen'}</div>`).join('')||'Keine offenen Übernahmen.'}</div>`+
- `<div class="card"><h2>Bisherige Übergaben</h2>${changes.filter(x=>x.status!=='PENDING').map(x=>`<div class="row between"><span>${E(who(x.fromUserId).name)} → ${E(who(x.toUserId).name)} · ${DT(x.start)} – ${DT(x.end)}</span><b>${x.status==='ACCEPTED'?'✓ Angenommen':'Abgelehnt'}</b></div>`).join('')||'Noch keine Übergaben.'}</div>`;
+ `<details class="card ft-duty-details"><summary>Bisherige Übergaben</summary><div class="ft-duty-details-body">${changes.filter(x=>x.status!=='PENDING').map(x=>`<div class="row between"><span>${E(who(x.fromUserId).name)} → ${E(who(x.toUserId).name)} · ${DT(x.start)} – ${DT(x.end)}</span><b>${x.status==='ACCEPTED'?'✓ Angenommen':'Abgelehnt'}</b></div>`).join('')||'Noch keine Übergaben.'}</div></details>`;
 }
 function sick(){
  const rows=ST.h.sick||[],admin=isAdmin(),users=admin?myUsers():[me()];
@@ -2304,6 +2403,7 @@ if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>ap
 if(a==='deleteTime'){if(confirm('Eintrag löschen?'))await run(async()=>{await api('activityDelete',{id});await load();},'Gelöscht.');return;}
 if(a==='workDelete'){if(confirm('Unveröffentlichten Dienst löschen?'))await run(async()=>{await api('workDelete',{id,companyId:firm().id});await load();},'Dienst gelöscht.');return;}
 if(a==='workPublish'){if(confirm('Entwürfe des Monats veröffentlichen und E-Mails/Kalendereinladungen verschicken?'))await run(async()=>{const r=await api('workPublish',{companyId:firm().id,month:ST.month});await load();say(r.published+' Schichten veröffentlicht. '+r.warnings.join('; '),r.warnings.length>0);});return;}
+if(a==='standbyThisMonth'){const current=monthOf(new Date());ST.month=current;FT_TAB_MONTHS.standby=current;ST.availMonth='';await load();window.scrollTo(0,0);return;}
 if(a==='shiftDone'){if(confirm('Bereitschaft tatsächlich geleistet?'))await run(async()=>{await api('shiftConfirm',{id,companyId:firm().id});await load();},'Bestätigt.');return;}
 if(a==='planRefreshAvailability'){
  FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|standby');
