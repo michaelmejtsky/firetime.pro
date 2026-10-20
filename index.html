@@ -816,7 +816,7 @@ function ftStaffSpecialFields_(user){
 
 function ftStaffVacationFields_(user){
  if(!ftStaffVacationSupported_())
-  return input('Urlaubsanspruch in Tagen','leaveEntitlement',user?.leaveEntitlement??25,'number','min="0" step="0.5"');
+  return ftStaffDecimalField_('Urlaubsanspruch in Tagen','leaveEntitlement',ftStaffFormatDecimal_(user?.leaveEntitlement??25),'Beliebige Dezimalwerte möglich; Anspruch fachlich prüfen.');
  const type=user?.leaveRuleType||'STANDARD_5';
  const mode=user?.leaveYearMode||'ANNIVERSARY';
  const weeks=String(user?.workdays||'1,2,3,4,5').split(',').filter(Boolean).length;
@@ -831,7 +831,7 @@ function ftStaffVacationFields_(user){
   ['SPECIAL','Sonderregelung – individuell'],
   ...(user?[['LEGACY','Bisherigen Anspruch beibehalten (Altbestand)']]:[])
  ],type)+
- input('Urlaubstage pro Jahr','leaveEntitlement',value,'number','min="0" step="0.5" required')+
+ ftStaffDecimalField_('Urlaubstage pro Jahr','leaveEntitlement',ftStaffFormatDecimal_(value),'Bei Sonderregelungen frei wählbar; gesetzliche Mindestansprüche beachten')+
  select('leaveYearMode','Neuer Urlaub jeweils ab',[
   ['ANNIVERSARY','Eintrittsdatum (gesetzlicher Standard)'],
   ['CALENDAR','1. Jänner (Kalenderjahr – mit Vereinbarung)']
