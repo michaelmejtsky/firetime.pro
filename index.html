@@ -1460,7 +1460,9 @@ function ftVacationItem(row,statuses,cssStatus,today){
  (actions?'<div class="actions">'+actions+'</div>':'')+'</article>';
 }
 function leave(){
- const mine=ST.h.leaves||[];
+ const companyId=String(firm()?.id||'');
+ const permitted=new Set(ftAbsenceSelectableUsers_().map(u=>String(u.id)));
+ const mine=(ST.h.leaves||[]).filter(l=>String(l.companyId)===companyId&&permitted.has(String(l.userId)));
  const statuses={PENDING:'Offen',APPROVED:'Genehmigt',REJECTED:'Abgelehnt',
   WITHDRAWN:'Zurückgezogen',CANCEL_PENDING:'Stornierung beantragt',CANCELLED:'Storniert'};
  const edit=mine.find(x=>x.id===ST.edit&&x.status==='PENDING');
