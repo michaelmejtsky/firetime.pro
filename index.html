@@ -738,7 +738,7 @@ function ftStaffFlexFields_(user){
  '<div class="ft-flex-settings" id="ftStaffFlexSettings">'+
  '<div class="ft-staff-leave-calculation">Bei flexiblen Monatsstunden (z. B. 25 h/Monat) darf FireTime Pro keine Urlaubstage aus Montag bis Sonntag ableiten. Bloßes Vor- oder Nacharbeiten ist kein Urlaub. Einzelne Tage und ganze Wochen können beantragt werden. Die Bewertung erfolgt erst bei der Freigabe nach geprüfter Regel.</div>'+
  input('Vereinbarte rechnerische Urlaubstage pro Woche (0 = noch ungeklärt)','leaveFlexReferenceDays',
-  user?.leaveFlexReferenceDays??0,'number','min="0" max="7" step="1"')+
+  user?.leaveFlexReferenceDays??0,'number','min="0" max="6" step="1"')+
  input('Dokumentierte Berechnungsgrundlage (AK/Lohnverrechnung/Vereinbarung)',
   'leaveFlexBasis',user?.leaveFlexBasis||'','text','maxlength="300"')+
  '<p class="ft-flex-warning">Solange keine nachvollziehbare Grundlage und Referenz festgelegt sind, bleiben automatische Urlaubsabbuchungen und Jahresgutschriften für dieses flexible Modell gesperrt. Bestehende Resturlaube werden nicht verändert.</p></div></div>';
@@ -799,7 +799,7 @@ function ftStaffVacationSync_(){
  const weeks=rule.value==='STANDARD_5'?5:rule.value==='STANDARD_6'?6:0;
  const flexModel=ftStaffFlexSupported_()&&form.querySelector('[name="leaveWorkModel"]')?.value==='FLEX';
  const reference=Number(form.querySelector('[name="leaveFlexReferenceDays"]')?.value||0);
- const flexValid=flexModel&&Number.isInteger(reference)&&reference>0&&reference<=7;
+ const flexValid=flexModel&&Number.isInteger(reference)&&reference>0&&reference<=6;
  const calcDays=flexModel?reference:days.length;
  const canAuto=weeks>0&&(flexModel?flexValid:valid);
  if(canAuto)annual.value=String(calcDays*weeks);
@@ -1566,10 +1566,10 @@ if(a==='leaveApprove'||a==='leaveReject'){
   if(!staff.leaveFlexConfigured){
    say('Flex-Urlaub: Bitte zuerst beim Mitarbeiter rechnerische Urlaubstage/Woche und dokumentierte Berechnungsgrundlage hinterlegen.',true);return;
   }
-  const daysText=prompt('Flexible Urlaubstage ausdrücklich bewerten: Wie viele vereinbarte Urlaubstage werden für '+l.from+' bis '+l.to+' verbraucht? (Kein automatischer Tagesabzug.)','');
+  const daysText=prompt('Flexible Urlaubstage ausdrücklich bewerten: Wie viele ganze vereinbarte Urlaubstage werden für '+l.from+' bis '+l.to+' verbraucht? (Kein automatischer Tagesabzug.)','');
   if(daysText===null)return;
   const flexDays=Number(daysText);
-  if(!Number.isFinite(flexDays)||flexDays<=0||Math.round(flexDays*4)!==flexDays*4){say('Bitte gültige Urlaubstage in 0,25-Tage-Schritten eingeben.',true);return;}
+  if(!Number.isFinite(flexDays)||flexDays<=0||!Number.isInteger(flexDays)){say('Bitte eine ganze Anzahl an Urlaubstagen gemäß der dokumentierten Vereinbarung eingeben.',true);return;}
   const creditText=prompt('Welche bezahlte Sollstundengutschrift ist für diesen Urlaub nach der geprüften Vereinbarung vorgesehen?','');
   if(creditText===null)return;
   const creditHours=Number(creditText);
