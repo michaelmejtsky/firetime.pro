@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-employee-decimals-simple-leave-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-standby-confirmed-availability-dropdown-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -300,6 +300,21 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-staff-special[hidden]{display:none!important}
 .ft-staff-special-tip{grid-column:1/-1;color:#c6d8e5;font-size:12px;line-height:1.55;margin:0}
 @media(max-width:600px){.ft-staff-special{grid-template-columns:1fr}}
+
+/* Standby assignment: only confirmed "YES" staff are selectable per day. */
+.ft-standby-availability-explain{margin:13px 0;padding:12px 14px;border:1px solid #41758b;border-radius:13px;background:#19394b;color:#d3e6f2;font-size:12px;line-height:1.6}
+.ft-standby-plan-table table{min-width:660px}
+.ft-standby-plan-table td{vertical-align:top;white-space:normal}
+.ft-standby-plan-table th{font-size:12px}
+.ft-standby-avail-cell{min-width:175px;max-width:320px}
+.ft-standby-yes{color:#b5ead0;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.ft-standby-none{color:#ffca91;font-size:12px;line-height:1.55}
+.ft-standby-details{font-size:11px;color:#c5d6e5;margin-top:6px}
+.ft-standby-details summary{cursor:pointer;color:#c5d6e5;line-height:1.4}
+.ft-standby-details div{padding:5px 0;line-height:1.5;overflow-wrap:anywhere}
+.ft-standby-assign{min-width:205px;max-width:100%;width:100%;box-sizing:border-box}
+.ft-standby-unsafe{font-size:11px;color:#ffcb91;line-height:1.5;margin-top:8px}
+@media(max-width:700px){.ft-standby-plan-table{overflow-x:auto}.ft-standby-plan-table table{min-width:620px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -1585,6 +1600,62 @@ function shiftAllocations(){
     parts.map(x=>({...x,status:'PUBLISHED',shiftId:x.shiftId,segment:true,day:published.find(y=>y.id===x.shiftId)?.day||''}))
   ).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
 }
+// Planning uses only the selected month's submitted availability.
+// An unanswered or not-submitted day is NOT an available day.
+function ftStandbyDayAnswer_(item,date){
+ if(!item)return false;
+ const raw=String(item.day??''),month=date.slice(0,7),day=Number(date.slice(8,10));
+ if(item.month&&String(item.month)!==month)return false;
+ if(/^\d{4}-\d\d-\d\d$/.test(raw))return raw===date;
+ return /^\d{1,2}$/.test(raw)&&Number(raw)===day;
+}
+function ftStandbyDailyAvailability_(date,staff){
+ const staffIds=new Set(staff.map(x=>String(x.id)));
+ if(!has('AVAILABILITY'))
+  return {yes:staff.slice(),no:[],open:[],submitted:staff.slice(),enabled:false};
+ const month=date.slice(0,7),all=ST.h?.availability||[],submissions=ST.h?.availSubmissions||[];
+ const sent=new Set(submissions.filter(x=>x.userId&&(!x.month||String(x.month)===month)&&staffIds.has(String(x.userId))).map(x=>String(x.userId)));
+ const byUser=new Map();
+ for(const item of all){
+  if(!staffIds.has(String(item.userId))||!ftStandbyDayAnswer_(item,date))continue;
+  byUser.set(String(item.userId),String(item.answer||'').toUpperCase());
+ }
+ const yes=[],no=[],open=[];
+ for(const person of staff){
+  if(!sent.has(String(person.id))){open.push(person);continue;}
+  const response=byUser.get(String(person.id));
+  if(response==='YES')yes.push(person);
+  else if(response==='NO')no.push(person);
+  else open.push(person);
+ }
+ return {yes,no,open,submitted:staff.filter(x=>sent.has(String(x.id))),enabled:true};
+}
+function ftStandbyDayRow_(date,shift,split,staff){
+ const result=ftStandbyDailyAvailability_(date,staff);
+ const candidates=result.yes,selected=String(shift?.userId||'');
+ const allowed=candidates.some(x=>String(x.id)===selected);
+ const assigned=staff.find(x=>String(x.id)===selected);
+ const splitHtml=split?'<b>Geteilter Dienst – siehe unten</b>':null;
+ const selectHtml=splitHtml||'<select class="ft-standby-assign" data-standby="'+E(date)+'" aria-label="Bereitschaft für '+E(date)+' zuweisen">'+
+  '<option value="">– Nicht eingeteilt –</option>'+
+  (selected&&!allowed?'<option value="'+E(selected)+'" selected>⚠ '+E(assigned?.name||who(selected).name)+' – bisher eingeteilt, Verfügbarkeit nicht bestätigt</option>':'')+
+  candidates.map(x=>'<option value="'+E(x.id)+'"'+(selected===String(x.id)?' selected':'')+'>✓ '+E(x.name)+'</option>').join('')+
+  (!candidates.length?'<option disabled>– Niemand bestätigt verfügbar –</option>':'')+'</select>';
+ const availNames=result.enabled?(
+  result.yes.length?'<div class="ft-standby-yes">✓ '+result.yes.map(x=>E(x.name)).join(', ')+'</div>':
+   '<div class="ft-standby-none">Keine bestätigte Verfügbarkeit</div>'
+ ):'<div class="ft-standby-yes">Verfügbarkeitsmodul nicht aktiv – alle Mitarbeiter wählbar</div>';
+ const details=result.enabled?'<details class="ft-standby-details"><summary>'+
+  result.yes.length+' verfügbar · '+result.no.length+' nicht verfügbar · '+result.open.length+' offen</summary>'+
+  (result.no.length?'<div>✕ Nicht verfügbar: '+result.no.map(x=>E(x.name)).join(', ')+'</div>':'')+
+  (result.open.length?'<div>◷ Noch nicht abgegeben/offen: '+result.open.map(x=>E(x.name)).join(', ')+'</div>':'')+
+  '</details>':'';
+ const warning=result.enabled&&selected&&!allowed?'<div class="ft-standby-unsafe">⚠ Vorhandene Einteilung ohne bestätigte Verfügbarkeit – bitte prüfen.</div>':'';
+ return '<tr><td><strong>'+E(date)+'</strong></td>'+
+  '<td class="ft-standby-avail-cell">'+availNames+details+'</td>'+
+  '<td>'+selectHtml+warning+'</td><td>'+E(shift?.status||'OFFEN')+'</td></tr>';
+}
+
 function standby(){
  const c=firm(),list=ST.h.shifts||[],parts=shiftAllocations(),changes=ST.h.changes||[],sickLeaves=ST.h.sick||[];
  const full=isAdmin(),own=parts.filter(x=>x.userId===me().id),mineOrAll=full?parts:parts.filter(x=>x.userId===me().id);
@@ -1594,7 +1665,7 @@ function standby(){
  const first=proposalParts[0];
  const requests=changes.filter(x=>x.status==='PENDING');
  return hint('Tausch und Teilübergabe funktionieren am Handy: Der übernehmende Kollege stimmt zu und die Einteilung gilt sofort. Die Abrechnung prüft der Admin später. Jeder bestätigt nach Dienstende seinen eigenen Abschnitt.')+monthPick()+
- `${full?`<div class="card"><h2>Bereitschaft einteilen</h2><p class="muted small">Firmenmodell: ${E(ST.h.profile?.standbyStart||'07:00')} Uhr, ${N(ST.h.profile?.standbyHours||24)} Stunden.</p><div class="actions">${has('AVAILABILITY')?'<button class="btn" data-act="planSuggest">Vorschlag nach Verfügbarkeit</button>':''}<button class="btn primary" data-act="planPublish">Monat veröffentlichen & Einladungen schicken</button>${has('CALENDAR')?'<button type="button" class="btn" data-act="calendarResync">Geteilte Kalenderdienste abgleichen</button>':''}</div><div class="table"><table><tr><th>Tag</th><th>Zugewiesen</th><th>Status</th></tr>${Array.from({length:days(ST.month)},(_,i)=>{const date=ST.month+'-'+String(i+1).padStart(2,'0'),s=list.find(x=>x.day===date),isSplit=parts.some(x=>x.shiftId===s?.id&&x.segment);return `<tr><td>${date}</td><td>${isSplit?'<b>Geteilter Dienst – siehe unten</b>':`<select data-standby="${date}"><option value="">– Nicht eingeteilt –</option>${targets.map(u=>`<option value="${u.id}" ${s?.userId===u.id?'selected':''}>${E(u.name)}</option>`).join('')}</select>`}</td><td>${E(s?.status||'OFFEN')}</td></tr>`;}).join('')}</table></div></div>`:''}`+
+ `${full?`<div class="card"><h2>Bereitschaft einteilen</h2><p class="muted small">Firmenmodell: ${E(ST.h.profile?.standbyStart||'07:00')} Uhr, ${N(ST.h.profile?.standbyHours||24)} Stunden.</p><div class="actions">${has('AVAILABILITY')?'<button class="btn" data-act="planSuggest">Vorschlag nach Verfügbarkeit</button>':''}<button type="button" class="btn" data-act="planRefreshAvailability">Verfügbarkeiten aktualisieren</button><button class="btn primary" data-act="planPublish">Monat veröffentlichen & Einladungen schicken</button>${has('CALENDAR')?'<button type="button" class="btn" data-act="calendarResync">Geteilte Kalenderdienste abgleichen</button>':''}</div><div class="ft-standby-availability-explain">✓ Im Dropdown erscheinen nur Mitarbeiter, die für den jeweiligen Tag <strong>„Kann“ gemeldet und verbindlich abgegeben</strong> haben. Nicht verfügbare und noch offene Mitarbeiter werden ausgeblendet. Bereits bestehende Einteilungen bleiben zur Kontrolle sichtbar.</div><div class="table ft-standby-plan-table"><table><tr><th>Tag</th><th>Bestätigt verfügbar</th><th>Einteilung</th><th>Status</th></tr>${Array.from({length:days(ST.month)},(_,i)=>{const date=ST.month+'-'+String(i+1).padStart(2,'0'),s=list.find(x=>x.day===date),isSplit=parts.some(x=>x.shiftId===s?.id&&x.segment);return ftStandbyDayRow_(date,s,isSplit,targets);}).join('')}</table></div></div>`:''}`+
  `<div class="card"><h2>Aktuelle Bereitschaftsabschnitte</h2><div class="table"><table><tr><th>Mitarbeiter</th><th>Von</th><th>Bis</th><th>Status</th><th>Bestätigung</th></tr>${mineOrAll.map(x=>{
    const blocked=sickLeaves.some(y=>y.userId===x.userId&&y.status!=='REJECTED'&&new Date(y.from)<new Date(x.end)&&new Date(y.to)>new Date(x.start));
    return `<tr><td>${E(who(x.userId).name)}</td><td>${DT(x.start)}</td><td>${DT(x.end)}</td><td>${blocked?'⚠ Krankenstand / Vertretung prüfen':x.actualStatus==='DONE'?'✓ Geleistet':'Geplant'}</td><td>${x.actualStatus!=='DONE'&&new Date(x.end)<=new Date()&&(full||x.userId===me().id)?`<button class="btn primary" data-act="${x.segment?'segmentDone':'shiftDone'}" data-id="${E(x.id)}">Geleistet bestätigen</button>`:''}</td></tr>`;
@@ -1633,6 +1704,10 @@ if(a==='deleteTime'){if(confirm('Eintrag löschen?'))await run(async()=>{await a
 if(a==='workDelete'){if(confirm('Unveröffentlichten Dienst löschen?'))await run(async()=>{await api('workDelete',{id,companyId:firm().id});await load();},'Dienst gelöscht.');return;}
 if(a==='workPublish'){if(confirm('Entwürfe des Monats veröffentlichen und E-Mails/Kalendereinladungen verschicken?'))await run(async()=>{const r=await api('workPublish',{companyId:firm().id,month:ST.month});await load();say(r.published+' Schichten veröffentlicht. '+r.warnings.join('; '),r.warnings.length>0);});return;}
 if(a==='shiftDone'){if(confirm('Bereitschaft tatsächlich geleistet?'))await run(async()=>{await api('shiftConfirm',{id,companyId:firm().id});await load();},'Bestätigt.');return;}
+if(a==='planRefreshAvailability'){
+ FT_VIEWS_LOADED.delete((firm()?.id||'SYS')+'|'+ST.month+'|standby');
+ await load();return;
+}
 if(a==='planSuggest'){await run(async()=>{const r=await api('planSuggest',{companyId:firm().id,month:ST.month});await load();say(r.assigned+' Bereitschaften vorgeschlagen, '+r.gaps.length+' Tage offen.');});return;}
 if(a==='planPublish'){if(confirm('Bereitschaftsplan veröffentlichen und E-Mails/Kalendereinladungen senden?'))await run(async()=>{const r=await api('planPublish',{companyId:firm().id,month:ST.month});await load();say(r.published+' Dienste veröffentlicht. '+r.warnings.join('; '),r.warnings.length>0);});return;}
 
@@ -1945,9 +2020,12 @@ document.addEventListener('change',e=>{const x=e.target;if(x.form?.id==='staffFo
   const formerStatus=previous?.status||'OFFEN';
   const newUserId=x.value;
   if(newUserId===formerUserId)return;
-  const available=has('AVAILABILITY')&&ST.h.availability.some(a=>a.userId===newUserId&&Number(a.day)===Number(date.slice(-2))&&a.answer==='YES')&&ST.h.availSubmissions.some(a=>a.userId===newUserId);
-  if(newUserId&&!available&&has('AVAILABILITY')&&!confirm('Keine bestätigte Verfügbarkeit. Trotzdem einteilen?')){
-    x.value=formerUserId;return;
+  const available=ftStandbyDailyAvailability_(date,(ST.h.directory||[]).filter(u=>u.id))
+   .yes.some(u=>String(u.id)===String(newUserId));
+  if(newUserId&&has('AVAILABILITY')&&!available){
+    x.value=formerUserId;
+    say('Dieser Mitarbeiter hat für '+date+' keine bestätigte Verfügbarkeit. Bitte aktualisieren und einen verfügbaren Mitarbeiter auswählen.',true);
+    return;
   }
   if(previous?.status==='PUBLISHED'&&!confirm('Veröffentlichten Bereitschaftsdienst ändern?')){
     x.value=formerUserId;return;
