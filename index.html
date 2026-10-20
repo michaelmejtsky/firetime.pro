@@ -292,6 +292,10 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 
 /* Employee-hour inputs accept comma, signed saldo and any reasonable decimals. */
 .ft-staff-decimal-help{display:block;margin-top:5px;font-size:11px;line-height:1.45;color:#acc8dc}
+.ft-staff-number-row{display:flex;align-items:stretch;gap:8px;min-width:0}
+.ft-staff-number-row input{min-width:0;width:100%;flex:1 1 auto}
+.ft-staff-sign-toggle{flex:none;min-width:50px;padding:0 12px;border-radius:11px;background:#2a4b63;border:1px solid #6b8aa5;color:#f1f7ff;font-size:21px;font-weight:800;cursor:pointer}
+.ft-staff-sign-toggle:focus-visible{outline:2px solid #a6dafa;outline-offset:2px}
 .ft-staff-special{margin:10px 0 14px;padding:14px;border:1px solid #476b85;border-radius:12px;background:#173247;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .ft-staff-special[hidden]{display:none!important}
 .ft-staff-special-tip{grid-column:1/-1;color:#c6d8e5;font-size:12px;line-height:1.55;margin:0}
@@ -770,10 +774,12 @@ function ftStaffVacationSupported_(){
 // No browser step restriction: Austrian decimal comma and signed opening hours.
 function ftStaffDecimalField_(label,name,value,hint=''){
  return '<label class="field"><span>'+E(label)+'</span>'+
+  (name==='openingHours'?'<span class="ft-staff-number-row">':'')+
   '<input type="text" name="'+E(name)+'" value="'+E(value??'')+
   '" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="z. B. '+
   (name==='openingHours'?'-7,35':'25,10')+
   '" data-staff-decimal="1" aria-label="'+E(label)+'" required>'+
+  (name==='openingHours'?'<button type="button" class="ft-staff-sign-toggle" data-act="toggleOpeningSign" aria-label="Vorzeichen Plus oder Minus wechseln" title="Vorzeichen wechseln">±</button></span>':'')+
   (hint?'<small class="ft-staff-decimal-help">'+E(hint)+'</small>':'')+'</label>';
 }
 function ftStaffParseDecimal_(value,label,min,max){
@@ -1611,6 +1617,11 @@ return hint('<b>Was ist ein firmeneigener Zuschlag?</b> Das ist ein zusätzliche
 function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return hint('Der Firmenadministrator kann Name, Logo, Farben, Arbeitszeitmodell und Kalender pflegen. Gekaufte Module kann nur der FireTime-Pro-Systemadministrator freischalten. Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.')+`<div class="cols"><div class="card"><h2>Firmendesign</h2>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}<div class="drop" data-pick="existingLogo">Firmenlogo hochladen oder ersetzen<input type="file" id="existingLogo" accept="image/png,image/jpeg,image/webp"></div><div class="muted small" id="existingLogoLabel"></div><form id="settingsForm">${input('Firmenname','name',c.name,'text','required')}${input('Primärfarbe','color',c.color,'color')}${input('Google-Kalender-ID','calendarId',c.calendarId||'')}${chk('calendarOn','Google-Kalender aktivieren',c.calendarOn===true||c.calendarOn==='TRUE','Nur verfügbar, wenn du das Kalendermodul gekauft/freigeschaltet hast.')}${chk('remindHours','Monatsabschluss erinnern',c.remindHours===true||c.remindHours==='TRUE')}${chk('remindAvailability','Verfügbarkeit erinnern',c.remindAvailability===true||c.remindAvailability==='TRUE')}${chk('remindShift','Bereitschaft erinnern',c.remindShift===true||c.remindShift==='TRUE')}${input('Stichtag der Verfügbarkeit (Tag im Monat)','availabilityDay',c.availabilityDay||20,'number','min="1" max="28"')}${input('Nachtbeginn (0–23 Uhr)','nightStart',c.nightStart??22,'number','min="0" max="23"')}${input('Nachtende (0–23 Uhr)','nightEnd',c.nightEnd??6,'number','min="0" max="23"')}<button class="btn primary">Firmenangaben speichern</button>${has('CALENDAR')?'<button class="btn" type="button" data-act="calendarTest">Kalender testen</button>':''}</form></div><div class="card"><h2>Arbeitszeitmodell</h2><form id="profileForm">${profileFields(p)}<button class="btn primary">Arbeitszeitmodell speichern</button></form><hr><h3>Kundenlink</h3><p class="small muted" style="word-break:break-word">${E(ST.h.loginUrl)}</p><button class="btn" data-act="copyUrl">Link kopieren</button></div></div>`;}
 function profile(){return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;}
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
+if(a==='toggleOpeningSign'){
+ const input=btn.closest('form')?.querySelector('[name="openingHours"]');
+ if(input){const current=input.value.trim();input.value=current.startsWith('-')||current.startsWith('−')?current.slice(1):'-'+(current||'0');input.focus();}
+ return;
+}
 if(a==='normalLogin'){ST.invite=false;auth();return;}
 if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
 if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
