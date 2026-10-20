@@ -621,7 +621,7 @@ const LABELS={sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwal
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter'],['PAY_PREVIEW','Vergütungsvorschau (Zusatzmodul)','Unverbindliche Bruttovorschau, Bereitschaftsvergütung und Zuschläge'],['SICK','Krankenstandsverwaltung (Zusatzmodul)','Krankenstandsmeldungen, Prüfungen und Zeitgutschriften']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const app=document.getElementById('app');
-const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:2});
+const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
