@@ -48,6 +48,7 @@ function communications(){
  const ctx={
   Date,Math,Number,String,Error,Set,Buffer,
   ft_absenceRows_:(name)=>rows[name]||[],
+  ft_absenceSheet_:()=>({getRange:()=>({setNumberFormat:()=>{}})}),
   ft_absenceAdd_:(name,_cols,r)=>{r.__row=rows[name].length+2;rows[name].push(r);},
   ft_absenceSave_:()=>true,
   ft_uuid_:()=>String(++id),ft_now_:()=>new Date().toISOString(),ft_audit_:()=>true,
