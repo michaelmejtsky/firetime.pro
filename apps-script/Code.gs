@@ -1805,6 +1805,16 @@ function ft_remindOne_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=
 
 
 
+/** Einmaliger Berechtigungscheck für Web Push; kein Versand, keine Datenänderung.
+ * Kann im Apps Script Editor nach Manifest-Update manuell gestartet werden.
+ */
+function ft_pushBerechtigungPruefen_EINMAL(){
+ const url='https://firetime-pro-api.firetime-pro.workers.dev/api';
+ const prepared=UrlFetchApp.getRequest(url,{method:'get'});
+ Logger.log('Web-Push-Berechtigung erteilt. Kein Netzwerkaufruf ausgeführt.');
+ return {ok:Boolean(prepared&&prepared.url),note:'Keine Nachricht versendet.'};
+}
+
 /** Optionaler Web Push: pro angemeldetem Mitarbeiter & Gerät.
  * Keine Bearbeitung bestehender Tabellen: PushDevices entsteht erst bei Registrierung.
  * Push-Schlüssel sind ausschließlich Worker-Secrets, niemals in Sheets oder GitHub.
