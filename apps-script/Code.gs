@@ -1906,6 +1906,28 @@ function ft_pushWorkerUrl_(){
  if(!/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.workers\.dev$/i.test(raw))return '';
  return raw.replace(/\/+$/,'');
 }
+/** Only user-safe push failure categories, never private keys or endpoints. */
+function ft_pushFailureReason_(results){
+ const failed=(results||[]).find(x=>x&&!x.ok);
+ if(!failed)return 'Keine Bestätigung vom Push-Anbieter.';
+ const status=Number(failed.status)||0;
+ if(failed.invalid||status===404||status===410)
+  return 'Geräte-Registrierung beim Push-Anbieter abgelaufen. Push am Handy deaktivieren und erneut aktivieren.';
+ if(status===401||status===403)
+  return 'Push-Anbieter lehnt die VAPID-Anmeldung ab (HTTP '+status+'). Öffentlichen und privaten Schlüssel in Cloudflare prüfen.';
+ if(status===400||status===413||status===422)
+  return 'Push-Anbieter lehnt die verschlüsselte Nachricht ab (HTTP '+status+'). Cloudflare-Worker und Verschlüsselung prüfen.';
+ if(status===429)return 'Push-Anbieter begrenzt gerade Anfragen (HTTP 429). Später erneut testen.';
+ if(status>=500)return 'Push-Anbieter momentan nicht verfügbar (HTTP '+status+').';
+ if(status)return 'Push-Anbieter hat HTTP '+status+' zurückgegeben.';
+ const error=String(failed.error||'').toLowerCase();
+ if(/jwk|key|ecdh|ecdsa|crypto|encrypt|decrypt|signature/.test(error))
+  return 'Cloudflare-Kryptografiefehler. VAPID-Schlüsselpaar bzw. Web-Push-Verschlüsselung prüfen.';
+ if(/fetch|network|timeout|abort/.test(error))
+  return 'Cloudflare konnte den Push-Anbieter nicht erreichen (Netzwerk oder Zeitüberschreitung).';
+ return 'Cloudflare-Worker konnte die Push-Nachricht nicht zustellen (Status 0).';
+}
+
 function ft_pushDispatch_(actor,kind,id,title,body){
  const server=ft_pushWorkerUrl_(),secret=ft_prop_('FT_GATEWAY_KEY');
  if(!server||!secret||secret.length<48)return {sent:0,reason:'not_configured'};
@@ -1925,21 +1947,30 @@ function ft_pushDispatch_(actor,kind,id,title,body){
   const response=UrlFetchApp.fetch(server+'/internal/push',{method:'post',
    contentType:'application/json',payload:JSON.stringify(req),muteHttpExceptions:true});
   if(response.getResponseCode()!==200){
-   console.warn('Web Push HTTP '+response.getResponseCode()+' (E-Mail bleibt aktiv)');
-   return {sent:0,reason:'gateway_unavailable'};
+   const code=response.getResponseCode();
+   console.warn('Web Push HTTP '+code+' (E-Mail bleibt aktiv)');
+   const reason=code===401||code===403
+    ?'Cloudflare hat die interne Push-Autorisierung abgewiesen (HTTP '+code+'). FT_GATEWAY_KEY und GAS_SHARED_KEY prüfen.'
+    :code===503?'Cloudflare meldet unvollständige Push- oder VAPID-Konfiguration (HTTP 503).'
+    :'Cloudflare-Push-Gateway antwortet mit HTTP '+code+'.';
+   return {sent:0,reason};
   }
   const result=JSON.parse(response.getContentText());
-  if(!result.ok||!Array.isArray(result.results))return {sent:0,reason:'invalid_response'};
+  if(!result.ok||!Array.isArray(result.results))
+   return {sent:0,reason:'Cloudflare-Push-Gateway lieferte eine ungültige Antwort.'};
   const expired=result.results.filter(x=>x.gone||x.invalid).map(x=>x.id);
   if(expired.length){
    const sh=ft_absenceSheet_('PushDevices',FT_PUSH_COLS_,false);
    ft_pushRows_().filter(x=>x.companyId===actor.companyId&&x.userId===actor.id&&
     expired.includes(x.id)).sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
   }
-  return {sent:result.results.filter(x=>x.ok).length,
-   failed:result.results.filter(x=>!x.ok).length};
+  const successes=result.results.filter(x=>x.ok).length;
+  const failures=result.results.filter(x=>!x.ok).length;
+  if(failures)console.warn('Web Push: '+failures+' Zustellfehler; HTTP '+result.results.filter(x=>!x.ok).map(x=>Number(x.status)||0).join(','));
+  return {sent:successes,failed:failures,
+   reason:failures?ft_pushFailureReason_(result.results):''};
  }catch(e){console.warn('Push nicht verschickt:',String(e.message||e).slice(0,150));
-  return {sent:0,reason:'gateway_exception'};}
+  return {sent:0,reason:'Google Apps Script konnte das Cloudflare-Push-Gateway nicht erreichen.'};}
 }
 
 /** Erinnerung am Vortag offener Aufgaben: einmalig um ca. 09 Uhr (Triggerintervall
