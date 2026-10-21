@@ -617,7 +617,7 @@ let FT_LAST_CONTEXT='';
 let FT_RULES_KEY='';
 const FT_VIEW_FETCHED_AT=new Map();
 let FT_LOAD_SEQ=0;
-const LABELS={sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
+const LABELS={messages:'Nachrichten & Aufgaben',sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter'],['PAY_PREVIEW','Vergütungsvorschau (Zusatzmodul)','Unverbindliche Bruttovorschau, Bereitschaftsvergütung und Zuschläge'],['SICK','Krankenstandsverwaltung (Zusatzmodul)','Krankenstandsmeldungen, Prüfungen und Zeitgutschriften']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const app=document.getElementById('app');
@@ -832,6 +832,8 @@ async function load(){
     } else if(!same){FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
     FT_LAST_CONTEXT=context;
     ST.h=home;
+    if(!same)ST.comm=null;
+    if(typeof home.commUnread==='number')ftCommSetBadge_(home.commUnread);
     FT_VIEWS_LOADED.add(context+'|'+view);
     FT_VIEW_FETCHED_AT.set(context+'|'+view,performance.now());
     if(bulkRead){
@@ -878,17 +880,17 @@ async function load(){
     say(message,true);
   }
 }
-function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers','profile'];const tabs=['dashboard'];if(me().role==='SYSADMIN')tabs.push('customers','license');if(isAdmin())tabs.push('staff');if(has('TIME'))tabs.push('time');if(has('REPORTS'))tabs.push('reports');if(has('LEAVE'))tabs.push('leave');if(has('SICK'))tabs.push('sick');if(has('WORKPLAN'))tabs.push('work');if(has('STANDBY'))tabs.push('standby');if(has('AVAILABILITY'))tabs.push('availability');if(isAdmin()&&has('REPORTS'))tabs.push('rules');if(isAdmin())tabs.push('settings');tabs.push('profile');return tabs;}
+function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers','profile'];const tabs=['dashboard','messages'];if(me().role==='SYSADMIN')tabs.push('customers','license');if(isAdmin())tabs.push('staff');if(has('TIME'))tabs.push('time');if(has('REPORTS'))tabs.push('reports');if(has('LEAVE'))tabs.push('leave');if(has('SICK'))tabs.push('sick');if(has('WORKPLAN'))tabs.push('work');if(has('STANDBY'))tabs.push('standby');if(has('AVAILABILITY'))tabs.push('availability');if(isAdmin()&&has('REPORTS'))tabs.push('rules');if(isAdmin())tabs.push('settings');tabs.push('profile');return tabs;}
 function mobileNav(){
- const tabs=nav(),top=['dashboard','time','standby','reports'].filter(t=>tabs.includes(t));
- const groups=[['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
+ const tabs=nav(),top=['dashboard','time','standby','messages'].filter(t=>tabs.includes(t));
+ const groups=[['Nachrichten & Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
  const remaining=tabs.filter(t=>!top.includes(t));
- const symbols={dashboard:'⌂',time:'◷',standby:'▦',reports:'▤'};
- const mobileButtons=top.map(t=>`<button data-tab="${t}" class="${ST.tab===t?'on':''}" aria-label="${E(LABELS[t])}"><span class="ft-nav-symbol" aria-hidden="true">${symbols[t]}</span><span>${E(t==='dashboard'?'Start':t==='time'?'Zeit':t==='standby'?'Bereitschaft':'Berichte')}</span></button>`).join('');
+ const symbols={dashboard:'⌂',time:'◷',standby:'▦',messages:'✉',reports:'▤'};
+ const mobileButtons=top.map(t=>`<button data-tab="${t}" class="${ST.tab===t?'on':''}" aria-label="${E(LABELS[t])}"><span class="ft-nav-symbol" aria-hidden="true">${symbols[t]}</span><span>${E(t==='dashboard'?'Start':t==='time'?'Zeit':t==='standby'?'Bereitschaft':t==='messages'?'Post':'Berichte')}</span>${t==='messages'?'<span class="ft-msg-badge"></span>':''}</button>`).join('');
  const grouped=groups.map(([title,items])=>{const visible=items.filter(t=>remaining.includes(t));return visible.length?`<section class="ft-mobile-group"><h3>${E(title)}</h3>${visible.map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</section>`:'';}).join('');
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
-function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();}
+function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();}
 // Date inputs in mobile Safari can exceed CSS width due to native control sizing.
 // Measure the real box and clamp only inputs that cross their card's inner edge.
 function ftFitFormControls(root){
@@ -912,13 +914,14 @@ function ftFitFormControls(root){
  }
 }
 function page(){
- const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile};
+ const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};
  if(!ST.h?.me)return;
  const heading=document.querySelector('.top h1');if(heading)heading.textContent=LABELS[ST.tab]||LABELS.dashboard;
  document.querySelectorAll('.side button[data-tab],.ft-mobile-bar button[data-tab],.ft-mobile-sheet button[data-tab]').forEach(b=>{
    const active=b.dataset.tab===ST.tab;b.classList.toggle('on',active);
    if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
  });
+ ftCommUpdateBadges_();
  const el=document.getElementById('content');
  if(el){
   el.innerHTML=(views[ST.tab]||dashboard)();
@@ -927,6 +930,7 @@ function page(){
  if(ST.tab==='reports')ftResumePdfJob();
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
+ if(ST.tab==='messages'&&ST.h?.commSupported&&!ST.comm&&!ST.commLoading)ftCommFetch_();
 }
 
 function ftHomeDate_(stamp){
