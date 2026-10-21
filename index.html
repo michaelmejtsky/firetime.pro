@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-help-popup-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-ios-ui-push-diagnostics-v188"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -644,6 +644,14 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  overflow-wrap:anywhere;overscroll-behavior:contain;
  z-index:9999;box-sizing:border-box;
 }
+/* Apple Home-Screen PWA: keep title below the Dynamic Island and status clock. */
+@media (max-width:800px) and (display-mode:standalone){
+ @supports (-webkit-touch-callout:none){
+  .main{padding-top:calc(16px + max(env(safe-area-inset-top, 0px), 48px))}
+  .ft-mobile-sheet.is-open{padding-top:calc(16px + max(env(safe-area-inset-top, 0px), 48px))}
+ }
+}
+.ft-home-metrics .metric{overflow-wrap:normal;word-break:normal;hyphens:none}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -777,6 +785,7 @@ const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigke
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
+const ftDashboardHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:2});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
 const FT_VISIBLE_VERSION='1.8.8';
@@ -1455,8 +1464,8 @@ function dashboard(){
   [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF').length)],
    ['Bereitschaften im Monat',String(ftHomePublishedCount_(ST.h.shifts))],
    ['Arbeitsdienste im Monat',String(ftHomePublishedCount_(ST.h.workShifts))]]:
-  [['Monatssoll',N(r.target)+' h'],['Aktive Arbeitszeit',N(r.worked)+' h'],
-   ['Plus/Minus',N(r.saldo)+' h'],['Bereitschaft netto',N(r.standby)+' h']];
+  [['Monatssoll',ftDashboardHours_(r.target)+' h'],['Aktive Arbeitszeit',ftDashboardHours_(r.worked)+' h'],
+   ['Plus/Minus',ftDashboardHours_(r.saldo)+' h'],['Bereitschaft netto',ftDashboardHours_(r.standby)+' h']];
  const intro=adminAccount?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Nur Mitarbeiter haben ein persönliches Stundenkonto.':
   'Meine Übersicht für '+ftPdfMonthLabel(ST.month)+'. Geplante Dienste sind keine geleisteten Stunden.';
  let html='<div class="ft-home-intro">'+E(intro)+'</div>'+
@@ -3011,7 +3020,7 @@ if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
   else{
    const result=await api('pushTest',{companyId:firm().id});
    if(!result.push?.sent)throw Error('Der Push-Dienst hat die Testbenachrichtigung nicht zugestellt: '+
-    String(result.push?.reason||'Unbekannter Fehler'));
+    String(result.push?.reason|| (result.push?.failed?'Der Push-Anbieter hat die Zustellung abgelehnt (Fehlerdiagnose im Apps Script aktualisieren).':'Keine Zustellung bestätigt.')));
    say('Test-Push versendet. Prüfe die Benachrichtigung auf deinem Gerät.');
   }
   if(ST.tab==='messages')page();
