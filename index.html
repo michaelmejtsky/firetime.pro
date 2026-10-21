@@ -2973,6 +2973,18 @@ if(form.getAttribute('id')==='loginForm'){
 if(form.getAttribute('id')==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
 if(form.getAttribute('id')==='onboardForm')return run(async()=>{p.logoData=ST.logoNew;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);const result=await api('onboard',p);ST.logoNew='';ST.cid=result.company.id;ST.tab='settings';await load();say('Kunde angelegt. '+(result.warnings||[]).join(' '),result.warnings?.length>0);},'Firma angelegt.');
 if(form.getAttribute('id')==='licenseForm')return run(async()=>{p.companyId=firm().id;p.modules=[...form.querySelectorAll('[name="module"]:checked')].map(x=>x.value);await api('licenseSave',p);await load();},'Module freigeschaltet.');
+if(form.id==='ftCommCreateForm'){
+ const button=form.querySelector('button[type=submit]');if(button)button.disabled=true;
+ try{
+  const photo=await ftCommPhotoData_(form.elements.namedItem('photo'));
+  const result=await api('commCreate',{companyId:firm().id,kind:p.kind||'MESSAGE',recipientId:p.recipientId,
+   title:p.title,body:p.body,dueDate:p.dueDate||'',photo});
+  ST.commCompose=false;ST.commOpen=result.thread?.id||'';
+  await ftCommFetch_(true);
+  say(result.mailSent?'Nachricht und E-Mail versendet.':'Nachricht gespeichert. E-Mail-Versand bitte prüfen.',!result.mailSent);
+ }catch(err){say('Senden fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(button?.isConnected)button.disabled=false;}return;
+}
 if(form.getAttribute('id')==='staffForm'){
   if(form.dataset.saving==='1')return;
   form.dataset.saving='1';
