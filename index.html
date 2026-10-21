@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-fast-auto-refresh-v1811"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-warm-navigation-v1812"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -806,6 +806,63 @@ let FT_LAST_CONTEXT='';
 let FT_RULES_KEY='';
 const FT_VIEW_FETCHED_AT=new Map();
 let FT_LOAD_SEQ=0;
+// RAM-only, session-scoped prefetch. No cookies, localStorage or cached API
+// responses: another employee or company can never receive a former snapshot.
+const FT_WARM_CACHE=new Map();
+let FT_WARM_GENERATION=0,FT_WARM_BUSY=false,FT_WARM_TIMER=null;
+function ftWarmKey_(view,month=ST.month,cid=ST.cid){
+ return [ST.token,ST.h?.me?.id||'',ST.h?.company?.id||'SYS',cid||'',month,
+  view,view==='reports'?String(ST.selected||''):''].join('|');
+}
+function ftWarmPayload_(view,month=ST.month,cid=ST.cid){
+ return {month,companyId:cid,view,
+  reportsMode:view==='reports'?'selected':view==='dashboard'?'self':'none',
+  userId:view==='reports'?(ST.selected||me()?.id||''):''};
+}
+async function ftWarmTake_(view,month,cid,request){
+ const key=ftWarmKey_(view,month,cid),record=FT_WARM_CACHE.get(key);
+ if(!record||Date.now()-record.started>45000)return api('home',request);
+ FT_WARM_CACHE.delete(key);
+ try{
+  const home=record.data||await record.promise;
+  if(record.generation!==FT_WARM_GENERATION||!home||
+    String(home.me?.id)!==String(ST.h?.me?.id)||
+    String(home.company?.id||'SYS')!==String(ST.h?.company?.id||'SYS'))
+   return api('home',request);
+  return home;
+ }catch(err){return api('home',request);}
+}
+function ftWarmSchedule_(){
+ if(FT_WARM_TIMER||FT_WARM_BUSY||!ST.token||!ST.h?.me||ST.tab!=='dashboard')return;
+ // Prewarm at most three likely next views; never burst parallel GAS requests.
+ const views=['standby','time',isAdmin()?'staff':'reports'].filter(v=>nav().includes(v));
+ if(!views.length)return;
+ const token=ST.token,uid=me()?.id,cid=ST.cid,month=ST.month;
+ const generation=FT_WARM_GENERATION;
+ FT_WARM_TIMER=setTimeout(async()=>{
+  FT_WARM_TIMER=null;
+  if(FT_WARM_BUSY||document.visibilityState==='hidden'||!ST.h?.me||ST.token!==token||
+   me()?.id!==uid||ST.cid!==cid||ST.month!==month||ST.tab!=='dashboard')return;
+  FT_WARM_BUSY=true;
+  try{
+   for(const view of views){
+    if(generation!==FT_WARM_GENERATION||!ST.token||ST.token!==token||ST.tab!=='dashboard'||
+     document.visibilityState==='hidden'||ST.edit||ST.commCompose)break;
+    const key=ftWarmKey_(view,month,cid);
+    if(FT_VIEWS_LOADED.has((firm()?.id||'SYS')+'|'+month+'|'+view)||FT_WARM_CACHE.has(key))continue;
+    const request=ftWarmPayload_(view,month,cid),record={generation,started:Date.now(),data:null,promise:null};
+    record.promise=api('home',request).then(home=>{
+     if(generation===FT_WARM_GENERATION&&FT_WARM_CACHE.get(key)===record)
+      record.data=home;
+     return home;
+    });
+    FT_WARM_CACHE.set(key,record);
+    try{await record.promise;}
+    catch(err){FT_WARM_CACHE.delete(key);console.info('[FireTime Tempo] Vorschau nicht verfügbar:',view);}
+   }
+  }finally{FT_WARM_BUSY=false;}
+ },550);
+}
 const LABELS={messages:'Nachrichten & Aufgaben',sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter'],['PAY_PREVIEW','Vergütungsvorschau (Zusatzmodul)','Unverbindliche Bruttovorschau, Bereitschaftsvergütung und Zuschläge'],['SICK','Krankenstandsverwaltung (Zusatzmodul)','Krankenstandsmeldungen, Prüfungen und Zeitgutschriften']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
@@ -816,7 +873,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.11';
+const FT_VISIBLE_VERSION='1.8.12';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -930,6 +987,7 @@ function api(action,p={}){
     const context=(firm()?.id||'SYS')+'|'+ST.month;
     const current=context+'|'+ST.tab;
     FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
+    FT_WARM_CACHE.clear();FT_WARM_GENERATION++;
     if(startedContext===current){FT_VIEWS_LOADED.add(current);FT_VIEW_FETCHED_AT.set(current,performance.now());}
     if(action==='licenseSave'||action==='profileSave'||action==='companyUpdate'||action==='onboard'){
       ST.rules=null;FT_RULES_KEY='';
@@ -1006,10 +1064,10 @@ async function load(options={}){
   // Das bisherige 'all' las beim Login unnoetig fast die gesamte Datenbank.
   const bulkRead=false;
   try{
-    const home=await api('home',{month:requestedMonth,companyId:requestedCid,
-      view:bulkRead?'all':requestedTab,
-      reportsMode:bulkRead?'self':requestedTab==='reports'?'selected':requestedTab==='dashboard'?'self':'none',
-      userId:requestedTab==='reports'?ST.selected:''});
+    const request=ftWarmPayload_(requestedTab,requestedMonth,requestedCid);
+    const home=(!background&&!options.force)
+      ?await ftWarmTake_(requestedTab,requestedMonth,requestedCid,request)
+      :await api('home',request);
     if(loadSeq!==FT_LOAD_SEQ || requestedTab!==ST.tab || requestedMonth!==ST.month || requestedCid!==ST.cid)return;
     console.info('[FireTime Tempo]',requestedTab,Math.round(performance.now()-loadStart)+' ms API+Verbindung');
     if(!home||!home.me)throw Error('Sitzung oder Benutzerdaten ungültig.');
@@ -1029,7 +1087,10 @@ async function load(options={}){
       for(const k of ['activities','availability','availSubmissions','shifts','segments','changes','sick','workShifts','leaves','months','reports']){
         if(!fresh.includes(k))home[k]=ST.h[k];
       }
-    } else if(!same){FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
+    } else if(!same){
+      FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
+      FT_WARM_CACHE.clear();FT_WARM_GENERATION++;
+    }
     // Detect meaningful changes before replacing live state. An unchanged response
     // should not remount forms, scroll positions, expanded plans, or dialogs.
     const before=background&&same?JSON.stringify(ST.h):null;
@@ -1074,6 +1135,7 @@ async function load(options={}){
       if(before!==JSON.stringify(ST.h)&&ftAutoCanRender_())page();
       else ftCommUpdateBadges_();
     }else render();
+    if(!background&&ST.tab==='dashboard')ftWarmSchedule_();
   }catch(err){
     if(loadSeq!==FT_LOAD_SEQ)return;
     const message=String(err?.message||'Unbekannter Fehler.');
