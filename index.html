@@ -489,6 +489,48 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-roster-weekday{font-size:11px}
  .ft-roster-legend{font-size:10px}
 }
+
+/* Nachrichten, Aufgaben und Stempeluhr: kompakt und mobil bedienbar */
+.ft-msg-badge{display:none;min-width:19px;min-height:19px;align-items:center;justify-content:center;
+ padding:1px 5px;margin-left:6px;border-radius:999px;background:#f37850;color:#14202b;
+ font-size:11px;font-weight:800;vertical-align:middle;line-height:1.2}
+.ft-msg-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:13px}
+.ft-msg-heading h2{margin:0 0 5px}
+.ft-msg-heading p{margin:0}
+.ft-msg-layout{display:grid;grid-template-columns:minmax(220px,.85fr) minmax(0,1.5fr);gap:13px;align-items:start}
+.ft-msg-list{padding:14px}
+.ft-msg-thread{display:flex;flex-direction:column;gap:7px;width:100%;padding:12px;text-align:left;margin:0 0 8px;
+ background:#142d44;border:1px solid #3a5974;border-radius:11px;color:#e5f1fc;overflow-wrap:anywhere}
+.ft-msg-thread.is-unread{border-color:#eb986b;background:#29445a}
+.ft-msg-thread.is-selected{outline:2px solid #f37850;outline-offset:1px}
+.ft-msg-thread-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:13px}
+.ft-msg-thread-meta{font-size:11px;color:#b4d0e0;line-height:1.6}
+.ft-msg-dot{padding:3px 7px;background:#f37850;color:#112236;border-radius:8px;font-size:10px}
+.ft-msg-composer,.ft-msg-detail{padding:16px;min-width:0}
+.ft-msg-composer .field textarea,.ft-msg-detail textarea{min-height:95px}
+.ft-msg-detail-title{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ft-msg-detail-title h3{margin:0}
+.ft-msg-task-status{color:#b5e9cf;background:#22543c;padding:5px 9px;border-radius:8px;font-size:11px;font-weight:700}
+.ft-msg-body{padding:13px 14px;background:#13283a;border-radius:9px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ft-msg-reply{margin:12px 0;padding:12px 14px;border-left:3px solid #6694ae;background:#142f47;border-radius:8px}
+.ft-msg-reply p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;margin:7px 0}
+.ft-msg-reply small{color:#a9cadd}
+.ft-msg-photo-btn{min-height:44px}
+.ft-msg-photo-dialog{border:1px solid #6387a0;border-radius:14px;background:#12283d;color:#fff;padding:15px;
+ max-width:min(94vw,700px);max-height:92vh}
+.ft-msg-photo-dialog::backdrop{background:rgba(0,0,0,.8)}
+.ft-msg-photo-dialog img{max-width:100%;max-height:76vh;display:block;margin:0 auto 12px;object-fit:contain}
+.ft-clock-pause-state{padding:12px;background:#183b52;border-radius:10px;color:#d5edfb;font-size:13px;margin:10px 0}
+.ft-clock-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.ft-clock-actions .btn{flex:1;min-width:min(100%,160px);min-height:49px}
+.ft-clock-actions .btn:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:780px){
+ .ft-msg-layout{grid-template-columns:minmax(0,1fr)}
+ .ft-msg-thread{padding:13px}
+ .ft-msg-list,.ft-msg-detail,.ft-msg-composer{padding:13px}
+ .ft-msg-heading .actions{width:100%;justify-content:space-between}
+ .ft-msg-heading .actions .btn{flex:1;min-height:46px}
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
