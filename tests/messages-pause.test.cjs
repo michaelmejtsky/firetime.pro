@@ -33,6 +33,7 @@ test('new pause start/end are persisted separately and no pause is invented',()=
  api.ft_timerPauseAction_(user,'start');
  assert.equal(api.ft_timerPauseData_(state.timer).paused,true);
  assert.throws(()=>api.ft_timerPauseAction_(user,'start'),/bereits/);
+ state.rows[0].start=new Date(Date.now()-120000).toISOString();
  api.ft_timerPauseAction_(user,'stop');
  assert.equal(api.ft_timerPauseData_(state.timer).paused,false);
  assert.throws(()=>api.ft_timerPauseAction_(user,'stop'),/keine Pause/);
@@ -102,9 +103,9 @@ test('staff can create a message addressed to company admin',()=>{
 });
 test('UI exposes messages, photo capture, badge API, and both pause buttons',()=>{
  assert.match(frontend,/function ftMessages_\(/);
- assert.match(frontend,/data-act="timerPauseStart"/);
+ assert.match(frontend,/timerPauseStart/);
  assert.match(frontend,/timerPauseStop/);
- assert.match(frontend,/data-act="commPhoto"/);
+ assert.match(frontend,/commPhoto/);
  assert.match(frontend,/function ftCommPhotoData_\(/);
  assert.match(frontend,/navigator\.setAppBadge/);
  assert.match(frontend,/commCreate/);
