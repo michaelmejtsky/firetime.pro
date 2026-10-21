@@ -104,3 +104,50 @@ test('local key generator is implemented and never stores secrets in source',()=
  assert.match(generator,/VAPID_PRIVATE_JWK/);
  assert.doesNotMatch(workerText,/BEGIN PRIVATE KEY/);
 });
+
+test('push device registration stays private, validates endpoints and unregisters own device only',()=>{
+ const start=backend.indexOf('const FT_PUSH_COLS_'),end=backend.indexOf('/** Nachrichten und Aufgaben:',start);
+ assert.ok(start>0&&end>start,'push module must be available');
+ const js=backend.slice(start,end);
+ const rows=[],users=[
+  {id:'u-a',companyId:'a',role:'STAFF',status:'ACTIVE'},
+  {id:'u-b',companyId:'b',role:'STAFF',status:'ACTIVE'}
+ ];
+ let next=0,saveCount=0,deleted=[],audits=[];
+ const props={FT_PUSH_WORKER_URL:'https://firetime-pro-api.firetime-pro.workers.dev',FT_GATEWAY_KEY:'a'.repeat(64)};
+ const sheet={deleteRow:i=>{deleted.push(i);const idx=rows.findIndex(x=>x.__row===i);
+  if(idx>=0)rows.splice(idx,1);rows.forEach((r,j)=>r.__row=j+2);}};
+ const ctx={
+  Date,JSON,Math,String,Number,Error,Utilities:{base64DecodeWebSafe:v=>Array.from(Buffer.from(v,'base64url'))},
+  ft_absenceRows_:()=>rows,ft_absenceSheet_:()=>sheet,
+  ft_absenceSave_:()=>{saveCount++},
+  ft_absenceAdd_:(_name,_cols,row)=>{row.__row=rows.length+2;rows.push(row)},
+  ft_now_:()=>new Date().toISOString(),ft_uuid_:()=>String(++next),
+  ft_company_:(actor,c)=>{if(actor.companyId!==(c||actor.companyId))throw Error('fremde Firma');
+   return {id:actor.companyId};},
+  ft_str_:(v,n)=>String(v).slice(0,n),ft_prop_:name=>props[name]||'',
+  ft_sha_:v=>require('node:crypto').createHash('sha256').update(v).digest('hex'),
+  ft_audit_:(...a)=>audits.push(a),
+  ft_hex_:bytes=>Buffer.from(bytes).toString('hex'),
+  ft_one_:()=>null,
+  ft_pushRows_:()=>rows
+ };
+ const mod=vm.runInNewContext(js+';({ft_pushRegister_,ft_pushStatus_,ft_pushUnregister_})',ctx);
+ const u=users[0],other=users[1];
+ const device={endpoint:'https://fcm.googleapis.com/fcm/send/abc',
+  keys:{p256dh:Buffer.concat([Buffer.from([4]),Buffer.alloc(64,1)]).toString('base64url'),
+   auth:Buffer.alloc(16,2).toString('base64url')}};
+ assert.equal(mod.ft_pushStatus_(u).enabled,false);
+ const first=mod.ft_pushRegister_(u,{companyId:'a',subscription:device,deviceName:'iPhone'});
+ assert.equal(first.deviceCount,1);
+ assert.equal(mod.ft_pushStatus_(u).deviceCount,1);
+ assert.equal(mod.ft_pushStatus_(other).deviceCount,0);
+ assert.throws(()=>mod.ft_pushRegister_(other,{companyId:'b',subscription:device}),/anderes Konto/);
+ assert.throws(()=>mod.ft_pushRegister_(u,{companyId:'a',subscription:{
+  ...device,endpoint:'https://example.com/evil'}}),/unterstützt/);
+ assert.equal(mod.ft_pushUnregister_(other,{deviceId:first.deviceId}).removed,false);
+ assert.equal(mod.ft_pushStatus_(u).deviceCount,1);
+ assert.equal(mod.ft_pushUnregister_(u,{deviceId:first.deviceId}).removed,true);
+ assert.equal(mod.ft_pushStatus_(u).deviceCount,0);
+ assert.ok(audits.length>=2);
+});
