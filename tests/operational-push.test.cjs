@@ -22,6 +22,7 @@ function dateString(date,zone,format){
 }
 const mock={
  Date,Math,Number,String,Set,Map,Error,
+ ft_timerConfirmedAutoClose_:a=>!!a&&String(a.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]')&&/T19:00(?::00(?:\\.000)?)?$/.test(String(a.end||'')),
  FT_TZ:'Europe/Vienna',ft_bool_:Boolean,
  ft_sha_:str=>'hash:'+str,
  Utilities:{formatDate:dateString},
@@ -63,14 +64,23 @@ test('standby reminder is within 24 hours and confirmation follows 4 hours after
  s.shifts[0].actualStatus='DONE';
  assert.ok(!kinds(events(new Date('2026-10-22T11:00:00Z'),s)).includes('PUSH_SHIFT_CONFIRM'));
 });
-test('running clock and automatic 19:00 closure generate separate one-time push types',()=>{
+test('manual finish, including after 18:30, produces no early or auto-close push',()=>{
  const s=source();
  s.timers=[{id:'timer1',companyId:'a',userId:'u1',start:'2026-10-20T12:00:00Z'}];
- assert.ok(kinds(events(new Date('2026-10-20T16:45:00Z'),s)).includes('PUSH_TIMER_RUNNING'));
+ assert.ok(!kinds(events(new Date('2026-10-20T16:45:00Z'),s)).some(x=>x.startsWith('PUSH_TIMER')));
  s.timers=[];
+ s.activities=[{id:'manual-1',companyId:'a',userId:'u1',createdAt:'2026-10-20T16:55:00Z',
+  start:'2026-10-20T12:00',end:'2026-10-20T18:55',description:'Objektkontrolle'}];
+ assert.ok(!kinds(events(new Date('2026-10-20T17:20:00Z'),s)).some(x=>x.startsWith('PUSH_TIMER')));
+});
+test('only verified auto-closed 19:00 activity generates the eventual push',()=>{
+ const s=source();
  s.activities=[{id:'act1',companyId:'a',userId:'u1',createdAt:'2026-10-20T17:15:00Z',
+  end:'2026-10-20T19:00',
   description:'Test [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'}];
  assert.ok(kinds(events(new Date('2026-10-20T17:20:00Z'),s)).includes('PUSH_TIMER_AUTO'));
+ s.activities[0].end='2026-10-20T18:55';
+ assert.ok(!kinds(events(new Date('2026-10-20T17:20:00Z'),s)).includes('PUSH_TIMER_AUTO'));
 });
 test('first of next month sends reminder only if previous month is not submitted',()=>{
  const s=source(),now=new Date('2026-11-01T08:10:00Z');
