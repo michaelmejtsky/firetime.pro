@@ -233,12 +233,12 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.match(frontend,/URL\.createObjectURL/);
  assert.match(frontend,/ft-photo-viewer/);
  assert.match(frontend,/Foto konnte nicht geöffnet werden/);
- assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.8'/);
+ assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.9'/);
  assert.match(frontend,/ft-help-header/);
  assert.match(frontend,/Stand der geladenen App-Oberfläche/);
  const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
  assert.doesNotThrow(()=>new vm.Script(sw));
  assert.match(sw,/self\.registration\.scope/);
  assert.match(sw,/cache:'no-store'/);
- assert.match(sw,/firetime-shell-20261021-v188/);
+ assert.match(sw,/firetime-shell-20261021-v189/);
 });
