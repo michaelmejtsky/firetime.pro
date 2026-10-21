@@ -185,12 +185,17 @@ async function pushInternal(request,env){
    /^PUSH_LEAVE/.test(kind)?'leave':
    /^PUSH_SICK/.test(kind)?'sick':
    /^PUSH_MONTH_/.test(kind)?'reports':'messages';
+ // Apps Script signs the exact server-side unread total. Only accept a
+ // bounded non-negative integer; never guess the badge from push frequency.
+ const count=data.notification.unreadCount;
+ const unreadCount=Number.isSafeInteger(count)&&count>=0&&count<=999?count:null;
  const notice={
   title:String(data.notification.title||'FireTime Pro').slice(0,90),
   body:String(data.notification.body||'Neue Nachricht oder Aufgabe').slice(0,160),
   url:'/firetime.pro/?tab='+tab, // only whitelisted local tabs
   kind,
-  id:String(data.notification.id||'message').slice(0,80)
+  id:String(data.notification.id||'message').slice(0,80),
+  ...(unreadCount===null?{}:{unreadCount})
  };
  const results=await Promise.all(data.devices.map(x=>pushOne(env,x,notice)));
  return output({ok:true,results},200,'');
