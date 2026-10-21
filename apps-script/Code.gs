@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.7-photo-ui-fix-20261021';
+const FT_VERSION='1.8.8-background-webpush-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1803,6 +1803,125 @@ function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Numbe
 function ft_remindOne_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=ft_user_(actor,p.userId),c=ft_company_(actor,u.companyId),m=ft_month_(p.month),kind=String(p.kind);if(u.status!=='ACTIVE')throw Error('Nur aktive Mitarbeiter können erinnert werden.');if(!['AVAILABILITY','HOURS'].includes(kind))throw Error('Ungültige Erinnerung');if(kind==='AVAILABILITY'&&ft_get_('AvailabilitySubmissions').some(s=>s.userId===u.id&&s.month===m))throw Error('Verfügbarkeit wurde bereits abgegeben.');if(kind==='HOURS'&&ft_get_('Months').some(s=>s.userId===u.id&&s.month===m&&['SUBMITTED','APPROVED','FINAL'].includes(s.status)))throw Error('Stunden sind bereits eingereicht.');const body='Hallo '+u.name+'!\n\nBitte vervollständige deine '+(kind==='HOURS'?'Stunden':'Verfügbarkeitsmeldung')+' für '+m+' in FireTime Pro.\n\n'+ft_publicGithubUrl_()+'\n\n'+c.name;return {sent:ft_notification_(c,u,kind+'-MANUAL',m+'-'+Utilities.formatDate(new Date(),FT_TZ,'yyyyMMddHHmm'), 'FireTime Pro – Erinnerung '+m,body)};}
 
 
+
+/** Optionaler Web Push: pro angemeldetem Mitarbeiter & Gerät.
+ * Keine Bearbeitung bestehender Tabellen: PushDevices entsteht erst bei Registrierung.
+ * Push-Schlüssel sind ausschließlich Worker-Secrets, niemals in Sheets oder GitHub.
+ */
+const FT_PUSH_COLS_=['id','companyId','userId','endpoint','p256dh','auth','deviceName','createdAt','updatedAt'];
+const FT_PUSH_HOSTS_=['fcm.googleapis.com','updates.push.services.mozilla.com','push.services.mozilla.com','web.push.apple.com'];
+function ft_pushRows_(){return ft_absenceRows_('PushDevices',FT_PUSH_COLS_,false);}
+function ft_pushEndpoint_(raw){
+ const endpoint=String(raw||'').trim();
+ if(endpoint.length>1800||!/^https:\/\/[a-z0-9.-]+(?:\/|\?)/i.test(endpoint))
+  throw Error('Ungültiger Push-Endpunkt.');
+ const match=/^https:\/\/([^/:?#]+)(?:[/?#]|$)/i.exec(endpoint);
+ if(!match||!FT_PUSH_HOSTS_.includes(match[1].toLowerCase()))
+  throw Error('Dieser Push-Dienst wird derzeit nicht unterstützt.');
+ if(/[?#]$/.test(endpoint))throw Error('Ungültiger Push-Endpunkt.');
+ return endpoint;
+}
+function ft_pushKey_(raw,min,max,label){
+ const value=String(raw||'');
+ if(!/^[A-Za-z0-9_-]+={0,2}$/.test(value)||value.length>max*2)
+  throw Error('Ungültiger Push-Schlüssel: '+label);
+ let bytes;try{bytes=Utilities.base64DecodeWebSafe(value);}catch(e){throw Error('Ungültiger Push-Schlüssel: '+label);}
+ if(bytes.length<min||bytes.length>max)throw Error('Ungültige Schlüssellänge: '+label);
+ return value.replace(/=+$/,'');
+}
+function ft_pushStatus_(actor){
+ const rows=ft_pushRows_().filter(x=>x.userId===actor.id&&x.companyId===actor.companyId);
+ return {enabled:rows.length>0,deviceCount:rows.length,devices:rows.map(x=>({
+  id:x.id,name:x.deviceName||'Dieses Gerät',updatedAt:x.updatedAt
+ }))};
+}
+function ft_pushRegister_(actor,p){
+ if(actor.role==='SYSADMIN'&&!actor.companyId)throw Error('Bitte zuerst eine Firma öffnen.');
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(c.id!==actor.companyId)throw Error('Bitte mit einem Mitarbeiterkonto der Firma anmelden.');
+ const endpoint=ft_pushEndpoint_(p.subscription?.endpoint);
+ const keys=p.subscription?.keys||{};
+ const p256dh=ft_pushKey_(keys.p256dh,65,65,'p256dh');
+ const auth=ft_pushKey_(keys.auth,16,32,'auth');
+ const name=ft_str_(p.deviceName||'Smartphone',70);
+ const existing=ft_pushRows_();
+ const others=existing.filter(x=>x.companyId===c.id&&x.userId===actor.id&&x.endpoint!==endpoint);
+ if(others.length>=5)throw Error('Maximal fünf Push-Geräte pro Mitarbeiter. Bitte ein altes Gerät deaktivieren.');
+ // Ein Push-Endpunkt darf innerhalb der gesamten Datenbank nur einem aktiven Account gehören.
+ const collision=existing.find(x=>x.endpoint===endpoint&&
+  !(x.companyId===c.id&&x.userId===actor.id));
+ if(collision)throw Error('Dieses Gerät ist bereits für ein anderes Konto registriert. Bitte dort deaktivieren.');
+ const old=existing.find(x=>x.companyId===c.id&&x.userId===actor.id&&x.endpoint===endpoint);
+ const now=ft_now_(),row=old||{id:ft_uuid_(),companyId:c.id,userId:actor.id,createdAt:now};
+ Object.assign(row,{endpoint,p256dh,auth,deviceName:name,updatedAt:now});
+ if(old)ft_absenceSave_('PushDevices',FT_PUSH_COLS_,row);
+ else ft_absenceAdd_('PushDevices',FT_PUSH_COLS_,row);
+ ft_audit_(actor,'PUSH_REGISTER','PushDevices',row.id,{}, {companyId:c.id,userId:actor.id,deviceName:name});
+ return {ok:true,deviceId:row.id,deviceCount:others.length+1};
+}
+function ft_pushUnregister_(actor,p){
+ const rows=ft_pushRows_();
+ const target=rows.find(x=>x.id===String(p.deviceId||'')&&x.userId===actor.id&&x.companyId===actor.companyId);
+ if(!target)return {ok:true,removed:false};
+ const sh=ft_absenceSheet_('PushDevices',FT_PUSH_COLS_,false);
+ sh.deleteRow(target.__row);
+ ft_audit_(actor,'PUSH_UNREGISTER','PushDevices',target.id,{}, {companyId:actor.companyId,userId:actor.id});
+ return {ok:true,removed:true};
+}
+function ft_pushWorkerUrl_(){
+ const raw=String(ft_prop_('FT_PUSH_WORKER_URL')||'').trim();
+ if(!/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.workers\.dev$/i.test(raw))return '';
+ return raw.replace(/\/+$/,'');
+}
+function ft_pushDispatch_(actor,kind,id,title,body){
+ const server=ft_pushWorkerUrl_(),secret=ft_prop_('FT_GATEWAY_KEY');
+ if(!server||!secret||secret.length<48)return {sent:0,reason:'not_configured'};
+ const records=ft_pushRows_().filter(x=>x.companyId===actor.companyId&&x.userId===actor.id);
+ if(!records.length)return {sent:0,reason:'no_devices'};
+ const devices=records.slice(0,5).map(x=>({id:x.id,
+  subscription:{endpoint:x.endpoint,p256dh:x.p256dh,auth:x.auth}}));
+ const payload=JSON.stringify({devices,notification:{kind,id:String(id||'').slice(0,70),
+  title:String(title||'FireTime Pro').slice(0,90),
+  // Keine vertraulichen Nachrichteninhalte auf dem Sperrbildschirm.
+  body:String(body||'Du hast eine neue Benachrichtigung.').slice(0,150)}});
+ const ts=Math.floor(Date.now()/1000),nonce=ft_uuid_().replace(/-/g,'').toLowerCase();
+ const signed=ts+'.'+nonce+'.'+payload;
+ const signature=ft_hex_(Utilities.computeHmacSha256Signature(signed,secret,Utilities.Charset.UTF_8));
+ const req={ts,nonce,payload,signature};
+ try{
+  const response=UrlFetchApp.fetch(server+'/internal/push',{method:'post',
+   contentType:'application/json',payload:JSON.stringify(req),muteHttpExceptions:true});
+  if(response.getResponseCode()!==200){
+   console.warn('Web Push HTTP '+response.getResponseCode()+' (E-Mail bleibt aktiv)');
+   return {sent:0,reason:'gateway_unavailable'};
+  }
+  const result=JSON.parse(response.getContentText());
+  if(!result.ok||!Array.isArray(result.results))return {sent:0,reason:'invalid_response'};
+  const expired=result.results.filter(x=>x.gone||x.invalid).map(x=>x.id);
+  if(expired.length){
+   const sh=ft_absenceSheet_('PushDevices',FT_PUSH_COLS_,false);
+   ft_pushRows_().filter(x=>x.companyId===actor.companyId&&x.userId===actor.id&&
+    expired.includes(x.id)).sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
+  }
+  return {sent:result.results.filter(x=>x.ok).length,
+   failed:result.results.filter(x=>!x.ok).length};
+ }catch(e){console.warn('Push nicht verschickt:',String(e.message||e).slice(0,150));
+  return {sent:0,reason:'gateway_exception'};}
+}
+function ft_pushTest_(actor,p){
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(c.id!==actor.companyId)throw Error('Bitte zuerst eine Firma wählen.');
+ const result=ft_pushDispatch_(actor,'TEST',ft_uuid_(),'FireTime Pro – Test',
+  'Push funktioniert auf diesem Gerät.');
+ return {ok:true,push:result};
+}
+function ft_pushNotice_(c,recipient,sender,thread,eventId,activity){
+ const isTask=thread.kind==='TASK',type=activity==='STATUS'?'Aufgabe aktualisiert':
+  activity==='REPLY'?'Neue Antwort':isTask?'Neue Aufgabe':'Neue Nachricht';
+ return ft_pushDispatch_(recipient,'COMM',eventId,'FireTime Pro · '+type,
+  type+' von '+sender.name);
+}
+
 /** Nachrichten und Aufgaben: mandantengetrennt, privat; bei erster Verwendung
  * drei zusätzliche Tabellen und bei Bedarf ein privater Drive-Ordner.
  * Keine Veränderung an den vorhandenen Arbeits- oder Urlaubsdaten.
@@ -1918,13 +2037,19 @@ function ft_commList_(actor,p){
 }
 function ft_commMail_(c,recipient,sender,thread,eventId,activity){
  const url=ft_clientUrl_(c);
- return ft_notification_(c,recipient,'COMM_'+activity,eventId,'FireTime Pro – '+(thread.kind==='TASK'?'Aufgabe: ':'Nachricht: ')+
+ // Mail und Web-Push sind unabhängig. Ein Fehler blockiert keine Nachrichten.
+ let mailSent=false;
+ try{mailSent=ft_notification_(c,recipient,'COMM_'+activity,eventId,'FireTime Pro – '+(thread.kind==='TASK'?'Aufgabe: ':'Nachricht: ')+
   ft_commDecode_(thread.titleEncoded),
   'Hallo '+recipient.name+'!\n\n'+sender.name+' hat dir in FireTime Pro '+
   (activity==='REPLY'?'geantwortet.':activity==='STATUS'?'den Aufgabenstatus geändert.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
   '\n\n'+ft_commDecode_(thread.titleEncoded)+
   (thread.dueDate?'\nFrist: '+thread.dueDate.slice(8,10)+'.'+thread.dueDate.slice(5,7)+'.'+thread.dueDate.slice(0,4):'')+
-  '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);
+  '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);}
+ catch(err){console.warn('Mailstatus fehlgeschlagen:',String(err.message||err).slice(0,130));}
+ try{ft_pushNotice_(c,recipient,sender,thread,eventId,activity);}
+ catch(err){console.warn('Pushbenachrichtigung fehlgeschlagen:',String(err.message||err).slice(0,130));}
+ return mailSent;
 }
 function ft_commCreate_(actor,p){
  const c=ft_commCompany_(actor,p),kind=String(p.kind||'MESSAGE');
@@ -2032,6 +2157,10 @@ function ft_api(token,action,p){
   case 'commRead':return ft_lock_(()=>ft_commMark_(u,p));
   case 'commTaskStatus':return ft_lock_(()=>ft_commTaskStatus_(u,p));
   case 'commPhoto':return ft_commPhoto_(u,p);
+  case 'pushStatus':return ft_pushStatus_(u);
+  case 'pushRegister':return ft_lock_(()=>ft_pushRegister_(u,p));
+  case 'pushUnregister':return ft_lock_(()=>ft_pushUnregister_(u,p));
+  case 'pushTest':return ft_pushTest_(u,p);
   case 'activitySave':return ft_lock_(()=>ft_activitySave_(u,p));
   case 'activityDelete':return ft_lock_(()=>ft_activityDelete_(u,p));
   case 'availabilitySave':return ft_lock_(()=>ft_availabilitySave_(u,p));
@@ -2144,6 +2273,7 @@ function ft_home_(u,p){
   balanceCutoverSupported:true,
   activityDefaultsSupported:true,
   commSupported:true,
+  backgroundPushSupported:true,
   pauseClockSupported:true,
   commUnread:c?ft_commUnread_(u,c):0,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
