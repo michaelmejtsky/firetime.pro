@@ -149,29 +149,32 @@ test('employees cannot assign tasks to each other',()=>{
   kind:'TASK',title:'Unzulässig',body:'Aufgabe'}),/Aufgaben/);
 });
 
-test('notification settings report granted, denied, pending and unsupported states',()=>{
+test('notification settings distinguish permission, registered device and configured push',()=>{
  const source=section(frontend,'function ftCommNotificationState_','function ftMessages_');
- function state(permission,installed=true,badge=true,available=true){
+ function state(permission,configured=true,registered=false,installed=true,available=true){
   const notification={permission};
   const window={Notification:available?notification:undefined,isSecureContext:true,
-   matchMedia:()=>({matches:installed})};
-  const navigator={setAppBadge:badge?()=>Promise.resolve():undefined,standalone:false};
-  const ctx={window,navigator,Notification:notification,E:x=>String(x)};
+   PushManager:()=>{},matchMedia:()=>({matches:installed})};
+  const navigator={setAppBadge:()=>Promise.resolve(),standalone:false,
+   serviceWorker:{},userAgent:'Mozilla desktop'};
+  const ST={pushSettings:{info:{configured,publicKey:'test'},
+   status:{deliveryConfigured:configured,deviceCount:registered?1:0},onThisDevice:registered}};
+  const ctx={window,navigator,Notification:notification,E:x=>String(x),ST};
   return vm.runInNewContext(source+';({ftCommNotificationState_,ftCommNotificationUI_})',ctx);
  }
  for(const [status,label] of [['default','Nicht aktiviert'],['granted','Erlaubt'],['denied','Blockiert']]){
   const context=state(status),info=context.ftCommNotificationState_();
   assert.equal(info.label,label);
   const html=context.ftCommNotificationUI_();
-  assert.match(html,new RegExp(label));
   assert.match(html,/Hintergrund-Push/);
+  assert.match(html,/Geräteberechtigung/);
  }
- assert.match(state('default').ftCommNotificationUI_(),/Mitteilungen erlauben/);
- assert.doesNotMatch(state('granted').ftCommNotificationUI_(),/data-act="commNotifications"/);
- assert.doesNotMatch(state('denied').ftCommNotificationUI_(),/data-act="commNotifications"/);
- assert.match(state('default',false).ftCommNotificationUI_(),/App muss installiert sein/);
- assert.match(state('default',true,false).ftCommNotificationUI_(),/nicht unterstützt/);
- assert.equal(state('default',true,true,false).ftCommNotificationState_().label,'Nicht verfügbar');
+ assert.match(state('default').ftCommNotificationUI_(),/Push aktivieren/);
+ assert.match(state('granted',true,true).ftCommNotificationUI_(),/Push aktiv/);
+ assert.match(state('granted',true,true).ftCommNotificationUI_(),/Testbenachrichtigung senden/);
+ assert.doesNotMatch(state('denied').ftCommNotificationUI_(),/data-act="pushEnable"/);
+ assert.match(state('default',false).ftCommNotificationUI_(),/Nicht eingerichtet/);
+ assert.match(state('default',true,false,true,false).ftCommNotificationUI_(),/Nicht verfügbar/);
 });
 test('long explanatory hints collapse, while important warnings remain visible',()=>{
  assert.match(frontend,/function hint\(t,title='Mehr Informationen'\)/);
@@ -230,12 +233,12 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.match(frontend,/URL\.createObjectURL/);
  assert.match(frontend,/ft-photo-viewer/);
  assert.match(frontend,/Foto konnte nicht geöffnet werden/);
- assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.7'/);
+ assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.8'/);
  assert.match(frontend,/ft-help-header/);
  assert.match(frontend,/Stand der geladenen App-Oberfläche/);
  const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
  assert.doesNotThrow(()=>new vm.Script(sw));
  assert.match(sw,/self\.registration\.scope/);
  assert.match(sw,/cache:'no-store'/);
- assert.match(sw,/firetime-shell-20261021-v187/);
+ assert.match(sw,/firetime-shell-20261021-v188/);
 });

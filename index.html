@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-photo-ui-cache-fix-v187"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-background-push-v188"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -710,7 +710,7 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:new URLSearchParams(location.search).get('tab')==='messages'?'messages':'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -742,7 +742,7 @@ const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.7';
+const FT_VISIBLE_VERSION='1.8.8';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -821,6 +821,7 @@ async function rpc(name,...args){
     case 'ft_logout': request={type:'logout',token:args[0]};break;
     case 'ft_changePassword': request={type:'password',token:args[0],current:args[1],next:args[2]};break;
     case 'ft_brandForLogin':request={type:'brand',slug:args[0]};break;
+    case 'pushInfo':request={type:'pushInfo'};break;
     case 'ft_api':request={type:'api',token:args[0],action:args[1],data:args[2]||{}};break;
     default:throw Error('Nicht freigegebener API-Aufruf: '+name);
   }
@@ -845,7 +846,7 @@ async function rpc(name,...args){
 function api(action,p={}){
   const startedContext=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
   const result=rpc('ft_api',ST.token,action,p);
-  const readOnly=new Set(['commPhoto','commList','home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','absenceHistory','leaveAccount','leavePolicyGet','absencePdfArchive','absencePdfChunk','planWorkflow']);
+  const readOnly=new Set(['pushStatus','commPhoto','commList','home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','absenceHistory','leaveAccount','leavePolicyGet','absencePdfArchive','absencePdfChunk','planWorkflow']);
   if(readOnly.has(action))return result;
   return result.then(value=>{
     if(['leaveRequest','leaveUpdate','leaveWithdraw','leaveReview','sickReport','sickReview','userUpdate','leavePolicySave'].includes(action))
@@ -1127,6 +1128,7 @@ function ftCommPhotoPreview_(photo){
  return dialog;
 }
 
+
 function ftCommNotificationState_(){
  const canAsk=typeof window.Notification!=='undefined'&&window.isSecureContext===true;
  const permission=canAsk?Notification.permission:'unsupported';
@@ -1138,31 +1140,99 @@ function ftCommNotificationState_(){
   kind:permission==='granted'?'on':permission==='denied'?'off':'pending'};
 }
 function ftCommNotificationUI_(){
- const n=ftCommNotificationState_();
- const icon=n.badge?(n.installed?
-  (n.permission==='granted'?'Unterstützt · Berechtigung erteilt':
-   'Unterstützt · Mitteilungen noch nicht erlaubt'):
-  'Unterstützt · App muss installiert sein'):'Auf diesem Gerät nicht unterstützt';
- const action=n.permission==='default'&&n.installed?
-   '<button class="btn primary" type="button" data-act="commNotifications">Mitteilungen erlauben</button>':
-  n.permission==='denied'?
-   '<p class="ft-notify-explainer">Blockiert: Bitte in den Mitteilungseinstellungen des Geräts für FireTime Pro wieder erlauben.</p>':
-  !n.installed?
-   '<p class="ft-notify-explainer">Für einen Zähler am App-Symbol die App zuerst zum Home-Bildschirm hinzufügen und von dort öffnen.</p>':
-  n.permission==='granted'?
-   '<p class="ft-notify-explainer">Die Berechtigung ist erteilt. Die Anzeige auf dem App-Icon hängt zusätzlich vom Gerät und der installierten App ab.</p>':
-   '<p class="ft-notify-explainer">Diese Funktion steht in diesem Browser nicht zur Verfügung.</p>';
+ const n=ftCommNotificationState_(),p=ST.pushSettings;
+ const compatible=n.canAsk&&'serviceWorker' in navigator&&'PushManager' in window;
+ const configured=Boolean(p?.info?.configured&&p?.status?.deliveryConfigured);
+ const active=Boolean(configured&&p?.onThisDevice&&n.permission==='granted');
+ const label=active?'Push aktiv':n.permission==='denied'?'Blockiert':
+  !compatible?'Nicht verfügbar':!configured?'Nicht eingerichtet':'Nicht aktiviert';
+ const kind=active?'on':n.permission==='denied'?'off':'pending';
+ const count=Number(p?.status?.deviceCount||0);
+ const explanation=!p?'Push-Status wird ermittelt …':
+  !p.info?.configured?'Push-Versand muss noch im Cloudflare Worker eingerichtet werden. E-Mail funktioniert weiterhin.':
+  !p.status?.deliveryConfigured?'Bitte FT_PUSH_WORKER_URL in den bestehenden Apps-Script-Eigenschaften ergänzen.':
+  n.permission==='denied'?'Geräteberechtigung blockiert. Bitte Mitteilungen in den Handy-Einstellungen wieder erlauben.':
+  !compatible?'Dieser Browser unterstützt Web Push nicht. Am iPhone FireTime Pro über Safari zum Home-Bildschirm hinzufügen.':
+  !n.installed&&/iPad|iPhone|iPod/i.test(navigator.userAgent)?'Am iPhone muss FireTime Pro zuerst zum Home-Bildschirm hinzugefügt und von dort gestartet werden.':
+  active?'Dieses Gerät empfängt Push-Mitteilungen – auch bei geschlossener App.':
+  'Du kannst Push jetzt auf diesem Gerät aktivieren.';
+ const canEnable=configured&&compatible&&n.permission!=='denied'&&!active&&
+  (n.installed||!/iPad|iPhone|iPod/i.test(navigator.userAgent));
+ const button=canEnable?'<button class="btn primary" type="button" data-act="pushEnable">🔔 Push aktivieren</button>':
+  active?'<button class="btn" type="button" data-act="pushDisable">Auf diesem Gerät deaktivieren</button>':'';
+ const test=active?'<button class="btn" type="button" data-act="pushTest">Testbenachrichtigung senden</button>':'';
+ const devices=count?'<p class="ft-notify-explainer">Registrierte Geräte in deinem Konto: '+count+'</p>':'';
  return '<details class="ft-notify-settings"><summary><span class="ft-notify-heading">'+
-  '<span class="ft-notify-bell" aria-hidden="true">♢</span> Benachrichtigungen</span>'+
-  '<span class="ft-notify-state ft-notify-'+n.kind+'">'+E(n.label)+'</span>'+
+  '<span class="ft-notify-bell" aria-hidden="true">🔔</span> Benachrichtigungen</span>'+
+  '<span class="ft-notify-state ft-notify-'+kind+'">'+E(label)+'</span>'+
   '<span class="ft-notify-chevron" aria-hidden="true">⌄</span></summary>'+
-  '<div class="ft-notify-inner"><div class="ft-notify-row"><b>Geräteberechtigung</b><span>'+E(n.label)+'</span></div>'+
-  '<div class="ft-notify-row"><b>Zähler am App-Symbol</b><span>'+E(icon)+'</span></div>'+
-  '<div class="ft-notify-row"><b>Hintergrund-Push</b><span>Noch nicht eingerichtet</span></div>'+
-  '<p class="ft-notify-explainer">Neue Nachrichten lösen weiterhin eine E-Mail an den Empfänger aus. Ungelesene Nachrichten siehst du direkt in FireTime Pro. Der App-Icon-Zähler wird beim Öffnen bzw. Aktualisieren synchronisiert, sofern unterstützt.</p>'+
-  action+'</div></details>';
+  '<div class="ft-notify-inner"><div class="ft-notify-row"><b>Hintergrund-Push</b><span>'+E(label)+'</span></div>'+
+  '<div class="ft-notify-row"><b>Geräteberechtigung</b><span>'+E(n.label)+'</span></div>'+
+  '<div class="ft-notify-row"><b>Dieses Gerät</b><span>'+(p?.onThisDevice?'Registriert':'Nicht registriert')+'</span></div>'+
+  '<div class="ft-notify-row"><b>App-Icon-Zähler</b><span>'+(n.badge?'Unterstützt':'Geräteabhängig')+'</span></div>'+
+  '<div class="ft-notify-row"><b>E-Mail</b><span>Weiterhin aktiv</span></div>'+
+  '<p class="ft-notify-explainer">'+E(explanation)+'</p>'+devices+
+  '<div class="actions">'+button+test+
+  '<button class="btn" type="button" data-act="pushRefresh">Status prüfen</button></div></div></details>';
 }
-
+function ftPushBase64_(str){
+ const normalized=String(str||'').replace(/-/g,'+').replace(/_/g,'/');
+ return Uint8Array.from(atob(normalized+'='.repeat((4-normalized.length%4)%4)),c=>c.charCodeAt(0));
+}
+async function ftPushHash_(value){
+ const sum=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
+ return [...new Uint8Array(sum)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+let FT_PUSH_FETCHING=false;
+async function ftPushRefresh_(force=false){
+ if(!ST.token||!firm()?.id||FT_PUSH_FETCHING||!ST.h?.backgroundPushSupported)return;
+ if(ST.pushSettings&&!force)return;
+ FT_PUSH_FETCHING=true;
+ const companyId=firm().id,userId=me()?.id;
+ try{
+  const [info,status]=await Promise.all([rpc('pushInfo'),api('pushStatus',{companyId})]);
+  let subscription=null;
+  if('serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window){
+   const reg=await navigator.serviceWorker.getRegistration();
+   subscription=reg?await reg.pushManager.getSubscription():null;
+  }
+  const hash=subscription?await ftPushHash_(subscription.endpoint):'';
+  const linked=status.devices?.find(x=>x.endpointHash===hash);
+  if(firm()?.id!==companyId||me()?.id!==userId)return;
+  ST.pushSettings={info,status,onThisDevice:Boolean(linked),deviceId:linked?.id||'',subscription};
+  if(ST.tab==='messages'&&!ST.commCompose&&!document.activeElement?.closest('form'))page();
+ }catch(err){
+  if(firm()?.id===companyId){ST.pushSettings={error:String(err.message||err)};
+   if(ST.tab==='messages')page();}
+ }finally{FT_PUSH_FETCHING=false;}
+}
+async function ftPushEnable_(){
+ const settings=ST.pushSettings,n=ftCommNotificationState_();
+ if(!settings?.info?.configured||!settings?.status?.deliveryConfigured)
+  throw Error('Der Push-Dienst ist noch nicht vollständig eingerichtet.');
+ if(!n.canAsk||!('serviceWorker' in navigator)||!('PushManager' in window))
+  throw Error('Web Push wird auf diesem Gerät nicht unterstützt.');
+ if(!n.installed&&/iPad|iPhone|iPod/i.test(navigator.userAgent))
+  throw Error('Auf dem iPhone zuerst FireTime Pro zum Home-Bildschirm hinzufügen und als App öffnen.');
+ const permission=n.permission==='granted'?'granted':await Notification.requestPermission();
+ if(permission!=='granted')throw Error('Bitte Mitteilungen in den Handy-Einstellungen erlauben.');
+ const registration=await navigator.serviceWorker.ready;
+ let current=await registration.pushManager.getSubscription();
+ const key=ftPushBase64_(settings.info.publicKey);
+ if(!current)current=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+ const json=current.toJSON();
+ await api('pushRegister',{companyId:firm().id,subscription:json,
+  deviceName:((/iPad|iPhone|iPod/i.test(navigator.userAgent))?'Apple-Gerät':
+    /Android/i.test(navigator.userAgent)?'Android-Gerät':'Browser')+' · '+new Date().toLocaleDateString('de-AT')});
+ ST.pushSettings=null;await ftPushRefresh_(true);
+}
+async function ftPushDisable_(){
+ const settings=ST.pushSettings,subscription=settings?.subscription;
+ if(!settings?.onThisDevice)return;
+ await api('pushUnregister',{companyId:firm().id,deviceId:settings.deviceId});
+ if(subscription)try{await subscription.unsubscribe();}catch(err){console.warn('Push lokal:',err);}
+ ST.pushSettings=null;await ftPushRefresh_(true);
+}
 function ftMessages_(){
  if(!ST.h?.commSupported)return '<section class="card"><h2>Nachrichten & Aufgaben</h2><p class="muted">Bitte zuerst Code.gs V1.8.5 veröffentlichen. Bestehende Module bleiben unverändert.</p></section>';
  const data=ST.comm;
@@ -1248,6 +1318,7 @@ function page(){
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
  if(ST.tab==='messages'&&ST.h?.commSupported&&!ST.comm&&!ST.commLoading)ftCommFetch_();
+ if(ST.tab==='messages'&&ST.h?.backgroundPushSupported&&!ST.pushSettings)ftPushRefresh_();
 }
 
 function ftHomeDate_(stamp){
@@ -2863,18 +2934,25 @@ async function ftCommPhotoData_(input){
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
 
 
-if(a==='commNotifications'){
- const state=ftCommNotificationState_();
- if(!state.canAsk||state.permission!=='default'||!state.installed){
-  say('Benachrichtigungen können hier gerade nicht freigeschaltet werden. Bitte den angezeigten Status prüfen.',true);return;
- }
+if(a==='pushRefresh'){
+ ST.pushSettings=null;await ftPushRefresh_(true);return;
+}
+if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
+ btn.disabled=true;
+ const label=btn.textContent;
+ btn.textContent='Bitte …';
  try{
-  const answer=await Notification.requestPermission();
-  ftCommSetBadge_(ST.comm?.unread||ST.commCount||0);
-  page();
-  say(answer==='granted'?'Geräteberechtigung erteilt. E-Mail und App-Zähler bleiben verfügbar.':
-   'Die Berechtigung wurde nicht erteilt. E-Mail-Benachrichtigungen bleiben aktiv.',answer!=='granted');
- }catch(err){say('Benachrichtigungen: '+String(err.message||err),true);}
+  if(a==='pushEnable'){await ftPushEnable_();say('Push auf diesem Gerät aktiviert. Du kannst eine Testbenachrichtigung senden.');}
+  else if(a==='pushDisable'){await ftPushDisable_();say('Push auf diesem Gerät deaktiviert.');}
+  else{
+   const result=await api('pushTest',{companyId:firm().id});
+   if(!result.push?.sent)throw Error('Der Push-Dienst hat die Testbenachrichtigung nicht zugestellt: '+
+    String(result.push?.reason||'Unbekannter Fehler'));
+   say('Test-Push versendet. Prüfe die Benachrichtigung auf deinem Gerät.');
+  }
+  if(ST.tab==='messages')page();
+ }catch(err){say('Push: '+String(err.message||err),true);}
+ finally{if(btn.isConnected){btn.disabled=false;btn.textContent=label;}}
  return;
 }
 if(a==='commNew'){ST.commCompose=true;page();return;}
@@ -2978,8 +3056,8 @@ if(a==='toggleOpeningSign'){
 }
 if(a==='normalLogin'){ST.invite=false;auth();return;}
 if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
-if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
-if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
+if(a==='back'){ST.cid='';ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
+if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='homeOpenStandby'||a==='homeOpenWork'){
  const next=a==='homeOpenStandby'?'standby':'work';
  FT_TAB_MONTHS[next]=ST.month;
@@ -3186,7 +3264,8 @@ if(form.getAttribute('id')==='loginForm'){
   const result=await rpc('ft_login',email,p.password);
   try{localStorage.setItem(FT_SAVED_EMAIL_KEY,email);}catch(e){}
   FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;
-  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';
+  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.pushSettings=null;
+  ST.tab=new URLSearchParams(location.search).get('tab')==='messages'?'messages':'dashboard';
   if(button)button.textContent='Konto bestätigt – Arbeitsbereich öffnet …';
   await ftOpenShell();
  }catch(err){
