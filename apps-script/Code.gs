@@ -1901,7 +1901,7 @@ function ft_commMail_(c,recipient,sender,thread,eventId,activity){
  return ft_notification_(c,recipient,'COMM_'+activity,eventId,'FireTime Pro – '+(thread.kind==='TASK'?'Aufgabe: ':'Nachricht: ')+
   ft_commDecode_(thread.titleEncoded),
   'Hallo '+recipient.name+'!\n\n'+sender.name+' hat dir in FireTime Pro '+
-  (activity==='REPLY'?'geantwortet.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
+  (activity==='REPLY'?'geantwortet.':activity==='STATUS'?'den Aufgabenstatus geändert.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
   '\n\n'+ft_commDecode_(thread.titleEncoded)+
   (thread.dueDate?'\nFrist: '+thread.dueDate.slice(8,10)+'.'+thread.dueDate.slice(5,7)+'.'+thread.dueDate.slice(0,4):'')+
   '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);
@@ -1918,6 +1918,8 @@ function ft_commCreate_(actor,p){
  if(title.length<3||body.length<1)throw Error('Bitte Betreff und Nachrichtentext eingeben.');
  const dueDate=kind==='TASK'?String(p.dueDate||''):'';
  if(dueDate)ft_date_(dueDate);
+ // Fristen als reinen Text speichern, niemals von Google Sheets als Datum verschieben lassen.
+ ft_absenceSheet_('CommThreads',FT_COMM_THREAD_COLS_,true).getRange('H:H').setNumberFormat('@');
  const now=ft_now_(),row={id:ft_uuid_(),companyId:c.id,kind,titleEncoded:ft_commEncode_(title),
   bodyEncoded:ft_commEncode_(body),createdBy:actor.id,recipientId:recipient.id,dueDate,
   status:kind==='TASK'?'OPEN':'MESSAGE',createdAt:now,updatedAt:now,
@@ -1957,7 +1959,7 @@ function ft_commTaskStatus_(actor,p){
  const before=thread.status;thread.status=next;thread.updatedAt=ft_now_();
  ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);ft_commRead_(actor,thread);
  const c=ft_company_(actor,thread.companyId),other=ft_one_('Users',thread.createdBy===actor.id?thread.recipientId:thread.createdBy);
- if(other&&other.status==='ACTIVE')ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'REPLY');
+ if(other&&other.status==='ACTIVE')ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');
  ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,{status:before},{status:next});
  return {ok:true};
 }
