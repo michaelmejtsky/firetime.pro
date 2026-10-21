@@ -83,7 +83,8 @@ function communications(){
 }
 test('private tasks and messages are isolated per company and sender/recipient',()=>{
  const {api,rows,users}=communications();
- const a=users[0],staff=users[1],other=users[2],adminB=users[3];
+ const a=users.find(x=>x.id==='admin-a'),staff=users.find(x=>x.id==='staff-a'),
+  other=users.find(x=>x.id==='staff-a2'),adminB=users.find(x=>x.id==='admin-b');
  const created=api.ft_commCreate_(a,{companyId:'a',recipientId:staff.id,kind:'TASK',
   title:'Wartung',body:'Bitte kontrollieren',dueDate:'2026-10-25'});
  assert.equal(created.thread.kind,'TASK');
