@@ -1831,9 +1831,10 @@ function ft_pushKey_(raw,min,max,label){
 }
 function ft_pushStatus_(actor){
  const rows=ft_pushRows_().filter(x=>x.userId===actor.id&&x.companyId===actor.companyId);
- return {enabled:rows.length>0,deviceCount:rows.length,devices:rows.map(x=>({
-  id:x.id,name:x.deviceName||'Dieses Gerät',updatedAt:x.updatedAt
- }))};
+ return {enabled:rows.length>0,deviceCount:rows.length,
+  deliveryConfigured:Boolean(ft_pushWorkerUrl_()),
+  devices:rows.map(x=>({id:x.id,name:x.deviceName||'Dieses Gerät',
+   endpointHash:ft_sha_(x.endpoint),updatedAt:x.updatedAt}))};
 }
 function ft_pushRegister_(actor,p){
  if(actor.role==='SYSADMIN'&&!actor.companyId)throw Error('Bitte zuerst eine Firma öffnen.');
