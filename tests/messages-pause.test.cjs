@@ -43,8 +43,9 @@ function communications(){
   {id:'admin-a',name:'Admin A',role:'ADMIN',companyId:'a',status:'ACTIVE',email:'aa@example.test'},
   {id:'staff-a',name:'Staff A',role:'STAFF',companyId:'a',status:'ACTIVE',email:'sa@example.test'},
   {id:'staff-a2',name:'Staff A2',role:'STAFF',companyId:'a',status:'ACTIVE',email:'sa2@example.test'},
+  {id:'staff-a3',name:'Staff A3',role:'STAFF',companyId:'a',status:'ACTIVE',email:'sa3@example.test'},
   {id:'admin-b',name:'Admin B',role:'ADMIN',companyId:'b',status:'ACTIVE',email:'bb@example.test'}];
- let id=0;
+ let id=0,mailEvents=[];
  const ctx={
   Date,Math,Number,String,Error,Set,Buffer,
   ft_absenceRows_:(name)=>rows[name]||[],
@@ -66,7 +67,9 @@ function communications(){
   ft_str_:(v,max)=>String(v||'').slice(0,max),
   ft_date_:s=>{if(!/^\d{4}-\d\d-\d\d$/.test(s))throw Error('Datum');return s;},
   ft_clientUrl_:()=> 'https://firetime.example.test/',
-  ft_notification_:()=>true,
+  ft_notification_:(company,recipient,kind,reference)=>{
+   mailEvents.push({companyId:company.id,recipientId:recipient.id,kind,reference});return true;
+  },
   Utilities:{
    Charset:{UTF_8:'UTF-8'},
    base64EncodeWebSafe:t=>Buffer.from(String(t),'utf8').toString('base64url'),
@@ -76,11 +79,12 @@ function communications(){
  };
  const src=section(backend,'const FT_COMM_THREAD_COLS_','// -----------------------------------------------------------------\n// 10_API');
  const api=vm.runInNewContext(src+';({ft_commCreate_,ft_commReply_,ft_commList_,ft_commMark_,ft_commTaskStatus_,ft_commThread_})',ctx);
- return {api,rows,users:allUsers};
+ return {api,rows,users:allUsers,mailEvents};
 }
 test('private tasks and messages are isolated per company and sender/recipient',()=>{
  const {api,rows,users}=communications();
- const a=users[0],staff=users[1],other=users[2],adminB=users[3];
+ const a=users.find(x=>x.id==='admin-a'),staff=users.find(x=>x.id==='staff-a'),
+  other=users.find(x=>x.id==='staff-a2'),adminB=users.find(x=>x.id==='admin-b');
  const created=api.ft_commCreate_(a,{companyId:'a',recipientId:staff.id,kind:'TASK',
   title:'Wartung',body:'Bitte kontrollieren',dueDate:'2026-10-25'});
  assert.equal(created.thread.kind,'TASK');
@@ -103,6 +107,81 @@ test('staff can create a message addressed to company admin',()=>{
  assert.equal(msg.thread.title,'Kurze Rückfrage');
  assert.equal(api.ft_commList_(a,{companyId:'a'}).unread,1);
 });
+test('coworkers can privately message and reply, notifying only recipient',()=>{
+ const {api,users,mailEvents}=communications();
+ const admin=users.find(x=>x.id==='admin-a');
+ const sender=users.find(x=>x.id==='staff-a');
+ const colleague=users.find(x=>x.id==='staff-a2');
+ const outsider=users.find(x=>x.id==='staff-a3');
+ const otherCompanyAdmin=users.find(x=>x.id==='admin-b');
+ const options=api.ft_commList_(sender,{companyId:'a'}).recipients;
+ assert.ok(options.some(x=>x.id===admin.id&&x.role==='ADMIN'));
+ assert.ok(options.some(x=>x.id===colleague.id&&x.role==='STAFF'));
+ assert.ok(!options.some(x=>x.id===sender.id));
+ assert.ok(!options.some(x=>x.id===otherCompanyAdmin.id));
+ const sent=api.ft_commCreate_(sender,{companyId:'a',recipientId:colleague.id,
+  kind:'MESSAGE',title:'Kollegenaustausch',body:'Bitte melde dich.'});
+ assert.equal(sent.thread.kind,'MESSAGE');
+ assert.equal(sent.mailSent,true);
+ assert.deepEqual(mailEvents.map(x=>x.recipientId),[colleague.id]);
+ assert.equal(api.ft_commList_(colleague,{companyId:'a'}).unread,1);
+ assert.equal(api.ft_commList_(sender,{companyId:'a'}).unread,0);
+ assert.equal(api.ft_commList_(admin,{companyId:'a'}).threads.length,0);
+ assert.equal(api.ft_commList_(outsider,{companyId:'a'}).threads.length,0);
+ assert.equal(api.ft_commList_(otherCompanyAdmin,{companyId:'b'}).threads.length,0);
+ assert.throws(()=>api.ft_commThread_(admin,sent.thread.id),/keine Berechtigung/);
+ assert.throws(()=>api.ft_commThread_(outsider,sent.thread.id),/keine Berechtigung/);
+ assert.throws(()=>api.ft_commThread_(otherCompanyAdmin,sent.thread.id),/keine Berechtigung/);
+ assert.throws(()=>api.ft_commCreate_(sender,{companyId:'a',recipientId:sender.id,
+  title:'An mich',body:'Unerlaubt'}),/Empfänger/);
+ assert.throws(()=>api.ft_commCreate_(sender,{companyId:'a',recipientId:otherCompanyAdmin.id,
+  title:'Fremde Firma',body:'Unerlaubt'}),/Falsche Firma/);
+ api.ft_commReply_(colleague,{threadId:sent.thread.id,body:'Ich melde mich.'});
+ assert.equal(api.ft_commList_(sender,{companyId:'a'}).unread,1);
+ assert.equal(api.ft_commList_(colleague,{companyId:'a'}).unread,0);
+ assert.deepEqual(mailEvents.map(x=>x.recipientId),[colleague.id,sender.id]);
+ assert.equal(api.ft_commList_(admin,{companyId:'a'}).threads.length,0);
+});
+test('employees cannot assign tasks to each other',()=>{
+ const {api,users}=communications(),staff=users.find(x=>x.id==='staff-a'),
+  peer=users.find(x=>x.id==='staff-a2');
+ assert.throws(()=>api.ft_commCreate_(staff,{companyId:'a',recipientId:peer.id,
+  kind:'TASK',title:'Unzulässig',body:'Aufgabe'}),/Aufgaben/);
+});
+
+test('notification settings report granted, denied, pending and unsupported states',()=>{
+ const source=section(frontend,'function ftCommNotificationState_','function ftMessages_');
+ function state(permission,installed=true,badge=true,available=true){
+  const notification={permission};
+  const window={Notification:available?notification:undefined,isSecureContext:true,
+   matchMedia:()=>({matches:installed})};
+  const navigator={setAppBadge:badge?()=>Promise.resolve():undefined,standalone:false};
+  const ctx={window,navigator,Notification:notification,E:x=>String(x)};
+  return vm.runInNewContext(source+';({ftCommNotificationState_,ftCommNotificationUI_})',ctx);
+ }
+ for(const [status,label] of [['default','Nicht aktiviert'],['granted','Erlaubt'],['denied','Blockiert']]){
+  const context=state(status),info=context.ftCommNotificationState_();
+  assert.equal(info.label,label);
+  const html=context.ftCommNotificationUI_();
+  assert.match(html,new RegExp(label));
+  assert.match(html,/Hintergrund-Push/);
+ }
+ assert.match(state('default').ftCommNotificationUI_(),/Mitteilungen erlauben/);
+ assert.doesNotMatch(state('granted').ftCommNotificationUI_(),/data-act="commNotifications"/);
+ assert.doesNotMatch(state('denied').ftCommNotificationUI_(),/data-act="commNotifications"/);
+ assert.match(state('default',false).ftCommNotificationUI_(),/App muss installiert sein/);
+ assert.match(state('default',true,false).ftCommNotificationUI_(),/nicht unterstützt/);
+ assert.equal(state('default',true,true,false).ftCommNotificationState_().label,'Nicht verfügbar');
+});
+test('long explanatory hints collapse, while important warnings remain visible',()=>{
+ assert.match(frontend,/function hint\(t,title='Mehr Informationen'\)/);
+ assert.match(frontend,/<details class="ft-page-hint">/);
+ assert.match(frontend,/Feiertagsarbeit festgestellt: gesetzliche/);
+ assert.match(frontend,/ft-plan-message ft-plan-warning/);
+ assert.match(frontend,/function ftCommNotificationState_\(/);
+ assert.doesNotMatch(frontend,/>Icon-Hinweise<\/button>/);
+});
+
 test('UI exposes messages, photo capture, badge API, and both pause buttons',()=>{
  assert.match(frontend,/function ftMessages_\(/);
  assert.match(frontend,/timerPauseStart/);
@@ -112,4 +191,6 @@ test('UI exposes messages, photo capture, badge API, and both pause buttons',()=
  assert.match(frontend,/navigator\.setAppBadge/);
  assert.match(frontend,/commCreate/);
  assert.match(frontend,/commReply/);
+ assert.match(frontend,/Kollege · /);
+ assert.match(frontend,/Administrator · /);
 });

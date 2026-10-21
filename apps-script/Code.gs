@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.5-pause-messages-20261021';
+const FT_VERSION='1.8.6-colleague-private-chat-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1820,9 +1820,12 @@ function ft_commCompany_(actor,p){
  if(actor.role==='STAFF'&&c.id!==actor.companyId)throw Error('Keine Berechtigung für diese Firma.');
  return c;
 }
+/** Direkte Unterhaltungen sind immer privat: nur Absender und Empfänger,
+ * auch Firmenadministratoren sind bei Kollegengesprächen keine Mitleser. */
 function ft_commAccessible_(actor,thread){
- if(!thread||thread.companyId!==(actor.companyId||thread.companyId))return false;
- return actor.role!=='STAFF'||String(thread.createdBy)===String(actor.id)||String(thread.recipientId)===String(actor.id);
+ if(!thread||!actor)return false;
+ if(actor.role!=='SYSADMIN'&&String(thread.companyId)!==String(actor.companyId))return false;
+ return String(thread.createdBy)===String(actor.id)||String(thread.recipientId)===String(actor.id);
 }
 function ft_commThread_(actor,id){
  const row=ft_commThreads_().find(x=>String(x.id)===String(id));
@@ -1836,9 +1839,13 @@ function ft_commPublic_(x){
  dueDate:x.dueDate||'',status:x.status,createdAt:x.createdAt,updatedAt:x.updatedAt,
  hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''};
 }
+/** Mitarbeiter können mit Firmenadmins UND Kollegen ihrer eigenen Firma schreiben.
+ * Kein Versand an eigene, inaktive oder firmenfremde Konten. */
 function ft_commRecipients_(actor,c){
- return ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE'&&x.id!==actor.id&&
- (actor.role==='STAFF'?x.role==='ADMIN':x.role==='STAFF')).map(x=>({id:x.id,name:x.name}));
+ return ft_get_('Users').filter(x=>String(x.companyId)===String(c.id)&&
+  x.status==='ACTIVE'&&String(x.id)!==String(actor.id)&&
+  (actor.role==='STAFF'?['STAFF','ADMIN'].includes(x.role):x.role==='STAFF'))
+  .map(x=>({id:x.id,name:x.name,role:x.role}));
 }
 function ft_commVisible_(actor,c){
  return ft_commThreads_().filter(x=>x.companyId===c.id&&ft_commAccessible_(actor,x));
@@ -1911,8 +1918,9 @@ function ft_commCreate_(actor,p){
  if(!['MESSAGE','TASK'].includes(kind))throw Error('Unbekannte Nachrichtenart.');
  if(kind==='TASK'&&actor.role==='STAFF')throw Error('Aufgaben werden vom Firmenadministrator vergeben.');
  const recipient=ft_user_(actor,String(p.recipientId||''));
- if(recipient.companyId!==c.id||recipient.id===actor.id||recipient.status!=='ACTIVE'||
-   !(actor.role==='STAFF'?recipient.role==='ADMIN':recipient.role==='STAFF'))
+ if(String(recipient.companyId)!==String(c.id)||String(recipient.id)===String(actor.id)||
+   recipient.status!=='ACTIVE'||!(actor.role==='STAFF'?
+    ['STAFF','ADMIN'].includes(recipient.role):recipient.role==='STAFF'))
   throw Error('Der Empfänger ist für diese Firma nicht erlaubt.');
  const title=ft_str_(p.title||'',120).trim(),body=ft_str_(p.body||'',3000).trim();
  if(title.length<3||body.length<1)throw Error('Bitte Betreff und Nachrichtentext eingeben.');
