@@ -1074,7 +1074,7 @@ function ftCommNotificationUI_(){
   n.permission==='denied'?
    '<p class="ft-notify-explainer">Blockiert: Bitte in den Mitteilungseinstellungen des Geräts für FireTime Pro wieder erlauben.</p>':
   !n.installed?
-   '<p class="ft-notify-explainer">Für iPhone-Icon-Hinweise die App zuerst über Safari zum Home-Bildschirm hinzufügen und von dort öffnen.</p>':
+   '<p class="ft-notify-explainer">Für einen Zähler am App-Symbol die App zuerst zum Home-Bildschirm hinzufügen und von dort öffnen.</p>':
   n.permission==='granted'?
    '<p class="ft-notify-explainer">Die Berechtigung ist erteilt. Die Anzeige auf dem App-Icon hängt zusätzlich vom Gerät und der installierten App ab.</p>':
    '<p class="ft-notify-explainer">Diese Funktion steht in diesem Browser nicht zur Verfügung.</p>';
@@ -1101,7 +1101,7 @@ function ftMessages_(){
  const isManager=isAdmin(),recipientOptions=(data.recipients||[]).map(x=>
   [x.id,(!isManager?(x.role==='ADMIN'?'Administrator · ':'Kollege · '):'')+x.name]);
  const composer=ST.commCompose?'<section class="card ft-msg-composer"><h3>Neue '+(isManager?'Nachricht oder Aufgabe':'Nachricht')+'</h3>'+
-  '<p class="muted small">Nur du und der ausgewählte Empfänger können diese Unterhaltung lesen. Mitarbeiter können Kollegen und Firmenadministratoren anschreiben; Aufgaben vergibt nur die Administration.</p>'+
+  hint('Nur du und der ausgewählte Empfänger können diese Unterhaltung lesen. Mitarbeiter können Kollegen und Firmenadministratoren anschreiben; Aufgaben vergibt nur die Administration.','Wer kann das lesen?')+
   '<form id="ftCommCreateForm">'+
   (isManager?select('kind','Art',[['MESSAGE','Nachricht'],['TASK','Aufgabe mit Frist']],'MESSAGE'):'')+
   select('recipientId','Empfänger',recipientOptions,recipientOptions[0]?.[0]||'')+
@@ -2695,7 +2695,7 @@ function ftRosterMonthGrid_(){
  }).join('');
  return '<section class="card ft-roster-month"><div class="ft-roster-head"><div>'+
   '<h2>Bereitschaftskalender · '+E(ftPdfMonthLabel(ST.month))+'</h2>'+
-  '<p class="muted small">Monatsübersicht nach der Einteilung · Tippe auf einen Tag für Namen und Dienstzeiten.</p>'+
+  '<p class="muted small">Tag antippen → Einteilung ansehen</p>'+
   '</div><div class="ft-roster-legend"><span>● Eingeteilt</span><span>● Mein Dienst</span></div></div>'+
   '<div class="ft-roster-grid" role="group" aria-label="Bereitschaften '+E(ftPdfMonthLabel(ST.month))+'">'+
   weekdays.map(x=>'<div class="ft-roster-weekday">'+x+'</div>').join('')+
