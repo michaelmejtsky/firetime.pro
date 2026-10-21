@@ -544,6 +544,30 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-page-hint-content{border-top:1px solid #36516a;padding:11px 13px;font-size:12px;line-height:1.6;color:#c3d9e8}
 .ft-inline-loading{padding:13px;color:#c3d9e8;font-size:13px}
 .ft-page-hint summary:focus-visible{outline:2px solid #f37850;outline-offset:2px;border-radius:10px}
+
+/* Ruhige, selbst erklärende Mitteilungs-Einstellungen mit sichtbarem Zustand. */
+.ft-notify-settings{margin:0 0 15px;border:1px solid #3c5e75;border-radius:12px;background:#152b3d;min-width:0}
+.ft-notify-settings>summary{display:flex;align-items:center;gap:10px;list-style:none;padding:12px 13px;
+ min-height:49px;cursor:pointer}
+.ft-notify-settings>summary::-webkit-details-marker{display:none}
+.ft-notify-heading{display:flex;align-items:center;gap:9px;flex:1;font-size:13px;font-weight:700;min-width:0}
+.ft-notify-bell{border-radius:9px;background:#26465e;width:27px;height:27px;display:inline-flex;align-items:center;
+ justify-content:center;font-size:19px;color:#c9e9fb}
+.ft-notify-state{font-size:11px;white-space:nowrap;border-radius:8px;padding:5px 8px;font-weight:700;
+ background:#2b4358;color:#d4e9f7}
+.ft-notify-on{background:#205841;color:#b6f1d0}
+.ft-notify-off{background:#613b30;color:#ffe0c4}
+.ft-notify-pending{background:#375067;color:#daebf5}
+.ft-notify-chevron{color:#b6ccdc;font-size:17px}
+.ft-notify-settings[open] .ft-notify-chevron{transform:rotate(180deg)}
+.ft-notify-inner{border-top:1px solid #36566f;padding:10px 14px 14px}
+.ft-notify-row{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 0;
+ border-bottom:1px solid #314c61;font-size:12px}
+.ft-notify-row b{color:#e7f1fa}
+.ft-notify-row span{color:#bed8e8}
+.ft-notify-explainer{font-size:12px;color:#b6d1e3;line-height:1.6;margin:12px 0}
+.ft-notify-settings .btn{min-height:45px}
+@media(max-width:500px){.ft-notify-inner{padding:9px 11px 14px}.ft-notify-settings>summary{padding:12px 10px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -1028,6 +1052,43 @@ function ftCommPhotoButton_(id,threadId){
  return id?'<button type="button" class="btn ft-msg-photo-btn" data-act="commPhoto" data-id="'+
   E(id)+'" data-thread="'+E(threadId)+'">📷 Foto ansehen</button>':'';
 }
+
+function ftCommNotificationState_(){
+ const canAsk=typeof window.Notification!=='undefined'&&window.isSecureContext===true;
+ const permission=canAsk?Notification.permission:'unsupported';
+ const installed=Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches||navigator.standalone);
+ const badge=typeof navigator.setAppBadge==='function';
+ return {permission,installed,badge,canAsk,
+  label:permission==='granted'?'Erlaubt':permission==='denied'?'Blockiert':
+   permission==='default'?'Nicht aktiviert':'Nicht verfügbar',
+  kind:permission==='granted'?'on':permission==='denied'?'off':'pending'};
+}
+function ftCommNotificationUI_(){
+ const n=ftCommNotificationState_();
+ const icon=n.badge?(n.installed?
+  (n.permission==='granted'?'Unterstützt · Berechtigung erteilt':
+   'Unterstützt · Mitteilungen noch nicht erlaubt'):
+  'Unterstützt · App muss installiert sein'):'Auf diesem Gerät nicht unterstützt';
+ const action=n.permission==='default'&&n.installed?
+   '<button class="btn primary" type="button" data-act="commNotifications">Mitteilungen erlauben</button>':
+  n.permission==='denied'?
+   '<p class="ft-notify-explainer">Blockiert: Bitte in den Mitteilungseinstellungen des Geräts für FireTime Pro wieder erlauben.</p>':
+  !n.installed?
+   '<p class="ft-notify-explainer">Für iPhone-Icon-Hinweise die App zuerst über Safari zum Home-Bildschirm hinzufügen und von dort öffnen.</p>':
+  n.permission==='granted'?
+   '<p class="ft-notify-explainer">Die Berechtigung ist erteilt. Die Anzeige auf dem App-Icon hängt zusätzlich vom Gerät und der installierten App ab.</p>':
+   '<p class="ft-notify-explainer">Diese Funktion steht in diesem Browser nicht zur Verfügung.</p>';
+ return '<details class="ft-notify-settings"><summary><span class="ft-notify-heading">'+
+  '<span class="ft-notify-bell" aria-hidden="true">♢</span> Benachrichtigungen</span>'+
+  '<span class="ft-notify-state ft-notify-'+n.kind+'">'+E(n.label)+'</span>'+
+  '<span class="ft-notify-chevron" aria-hidden="true">⌄</span></summary>'+
+  '<div class="ft-notify-inner"><div class="ft-notify-row"><b>Geräteberechtigung</b><span>'+E(n.label)+'</span></div>'+
+  '<div class="ft-notify-row"><b>Zähler am App-Symbol</b><span>'+E(icon)+'</span></div>'+
+  '<div class="ft-notify-row"><b>Hintergrund-Push</b><span>Noch nicht eingerichtet</span></div>'+
+  '<p class="ft-notify-explainer">Neue Nachrichten lösen weiterhin eine E-Mail an den Empfänger aus. Ungelesene Nachrichten siehst du direkt in FireTime Pro. Der App-Icon-Zähler wird beim Öffnen bzw. Aktualisieren synchronisiert, sofern unterstützt.</p>'+
+  action+'</div></details>';
+}
+
 function ftMessages_(){
  if(!ST.h?.commSupported)return '<section class="card"><h2>Nachrichten & Aufgaben</h2><p class="muted">Bitte zuerst Code.gs V1.8.5 veröffentlichen. Bestehende Module bleiben unverändert.</p></section>';
  const data=ST.comm;
@@ -1083,9 +1144,8 @@ function ftMessages_(){
  return '<div class="ft-msg-heading"><div><h2>Nachrichten & Aufgaben</h2>'+
   '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
   '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
-  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button><button class="btn" type="button" data-act="commNotifications">Icon-Hinweise</button></div></div>'+
-  '<p class="muted small">Die Zahl am App-Icon wird beim Öffnen bzw. Aktualisieren der installierten App synchronisiert. Echte Push-Benachrichtigungen bei geschlossener App benötigen zusätzlich einen Push-Dienst.</p>'+
-  composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
+  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
+  ftCommNotificationUI_()+composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
   (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
   '</section>'+detail+'</div>';
 }
@@ -2724,11 +2784,18 @@ async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
 
 
 if(a==='commNotifications'){
- if(!('Notification' in window)||!window.isSecureContext){say('Auf diesem Gerät sind App-Mitteilungen nicht verfügbar.',true);return;}
- try{const permission=await Notification.requestPermission();
+ const state=ftCommNotificationState_();
+ if(!state.canAsk||state.permission!=='default'||!state.installed){
+  say('Benachrichtigungen können hier gerade nicht freigeschaltet werden. Bitte den angezeigten Status prüfen.',true);return;
+ }
+ try{
+  const answer=await Notification.requestPermission();
   ftCommSetBadge_(ST.comm?.unread||ST.commCount||0);
-  say(permission==='granted'?'Mitteilungen erlaubt. App-Icon-Badges werden beim Öffnen aktualisiert.':'Mitteilungen nicht erlaubt. E-Mail bleibt aktiv.',permission!=='granted');}
- catch(err){say('Mitteilungen: '+String(err.message||err),true);}return;
+  page();
+  say(answer==='granted'?'Geräteberechtigung erteilt. E-Mail und App-Zähler bleiben verfügbar.':
+   'Die Berechtigung wurde nicht erteilt. E-Mail-Benachrichtigungen bleiben aktiv.',answer!=='granted');
+ }catch(err){say('Benachrichtigungen: '+String(err.message||err),true);}
+ return;
 }
 if(a==='commNew'){ST.commCompose=true;page();return;}
 if(a==='commCloseCompose'){ST.commCompose=false;page();return;}
