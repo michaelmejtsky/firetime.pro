@@ -113,10 +113,10 @@ test('backend standard activities are not inserted into customer spreadsheet',()
  assert.ok(a.some(x=>x.id==='customer-1'));
  assert.ok(!b.some(x=>x.id==='customer-1'));
 });
-test('auto stop mail contains 19:00 and edit notice, with unique activity reference',()=>{
- const body=fragment(code,'function ft_timerAutoNotice_','function ft_timerRetryNotices_');
+test('email only follows a genuine 19:00 auto-close, never a manual finish',()=>{
+ const body=fragment(code,'function ft_timerConfirmedAutoClose_','function ft_timerRetryNotices_');
  const calls=[],sent=new Set();
- const fn=vm.runInNewContext(body+';ft_timerAutoNotice_;',{
+ const api=vm.runInNewContext(body+';({ft_timerAutoNotice_,ft_timerConfirmedAutoClose_});',{
   ft_clientUrl_:()=> 'https://firetime-pro.example.test/',
   ft_publicGithubUrl_:()=> 'https://firetime-pro.example.test/',
   ft_notification_:(c,u,kind,id,subject,text)=>{
@@ -125,9 +125,14 @@ test('auto stop mail contains 19:00 and edit notice, with unique activity refere
   Utilities:{formatDate:()=> '20.10.2026 19:00'},FT_TZ:'Europe/Vienna',Date
  });
  const company={id:'c',name:'BSB3100'},user={id:'u',email:'employee@example.test',name:'Mitarbeiter'};
- const a={id:'activity-x',end:'2026-10-20T17:00:00Z'};
- assert.equal(fn(company,user,a),true);
- assert.equal(fn(company,user,a),false);
+ const manual={id:'manual-x',end:'2026-10-20T18:55',description:'Objektkontrolle'};
+ assert.equal(api.ft_timerConfirmedAutoClose_(manual),false);
+ assert.equal(api.ft_timerAutoNotice_(company,user,manual),false);
+ const auto={id:'activity-x',end:'2026-10-20T19:00',
+  description:'Objektkontrolle [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'};
+ assert.equal(api.ft_timerConfirmedAutoClose_(auto),true);
+ assert.equal(api.ft_timerAutoNotice_(company,user,auto),true);
+ assert.equal(api.ft_timerAutoNotice_(company,user,auto),false);
  assert.equal(calls.length,1);
  assert.equal(calls[0].kind,'TIMER_AUTO_CLOSE');
  assert.match(calls[0].text,/19:00 Uhr/);
