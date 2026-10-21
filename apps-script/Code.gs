@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.6-colleague-private-chat-20261021';
+const FT_VERSION='1.8.7-photo-ui-fix-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1885,12 +1885,25 @@ function ft_commPhotoSave_(actor,c,picture){
  const file=folder.createFile(blob);return file.getId();
 }
 function ft_commPhoto_(actor,p){
- const t=ft_commThread_(actor,p.threadId),attachmentId=String(p.attachmentId||'');
- const allowed=[t.attachmentId,...ft_commReplies_().filter(r=>r.threadId===t.id&&r.companyId===t.companyId).map(r=>r.attachmentId)];
+ const t=ft_commThread_(actor,p.threadId),attachmentId=String(p.attachmentId||'').trim();
+ const allowed=[t.attachmentId,...ft_commReplies_().filter(r=>
+  r.threadId===t.id&&r.companyId===t.companyId).map(r=>r.attachmentId)];
  if(!attachmentId||!allowed.includes(attachmentId))throw Error('Foto gehört nicht zu dieser Nachricht.');
- const file=DriveApp.getFileById(attachmentId),blob=file.getBlob(),type=blob.getContentType();
- if(!['image/jpeg','image/png'].includes(type)||blob.getSize()>700000)throw Error('Dieses Fotoformat kann nicht geöffnet werden.');
- return {mime:type,data:Utilities.base64Encode(blob.getBytes())};
+ let blob;
+ try{blob=DriveApp.getFileById(attachmentId).getBlob();}
+ catch(err){throw Error('Das gespeicherte Foto konnte in Google Drive nicht gelesen werden. Bitte Drive-Zugriff der Web-App kontrollieren.');}
+ const bytes=blob.getBytes(),size=bytes.length;
+ if(size<4||size>800000)throw Error('Das gespeicherte Foto ist leer oder zu groß für die Vorschau.');
+ const u8=bytes.slice(0,12).map(x=>x&255);
+ // Ältere Drive-Fotos können einen ungenauen Content-Type besitzen.
+ // Format anhand der tatsächlichen Datei prüfen, nicht nur Metadaten vertrauen.
+ const jpeg=u8[0]===255&&u8[1]===216&&u8[2]===255;
+ const png=u8[0]===137&&u8[1]===80&&u8[2]===78&&u8[3]===71&&u8[4]===13&&u8[5]===10;
+ const webp=u8[0]===82&&u8[1]===73&&u8[2]===70&&u8[3]===70&&
+  u8[8]===87&&u8[9]===69&&u8[10]===66&&u8[11]===80;
+ const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':'';
+ if(!mime)throw Error('Die Bilddatei wurde gefunden, hat aber kein unterstütztes Bildformat.');
+ return {mime,data:Utilities.base64Encode(bytes),size};
 }
 function ft_commList_(actor,p){
  const c=ft_commCompany_(actor,p);
