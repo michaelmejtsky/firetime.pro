@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-month-report-mobile-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-ios-nav-scroll-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -652,6 +652,26 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  }
 }
 .ft-home-metrics .metric{overflow-wrap:normal;word-break:normal;hyphens:none}
+/* Mobile navigation: preserve fixed positioning when shown, reveal content while scrolling. */
+@media(max-width:800px){
+ .ft-mobile-bar{
+  position:fixed!important;inset:auto 0 0 0!important;
+  width:100%!important;max-width:none!important;margin:0!important;
+  transform:translate3d(0,0,0);
+  transition:transform .2s ease-out;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+ }
+ .ft-mobile-bar.ft-nav-scroll-hidden{
+  transform:translate3d(0,110%,0)!important;
+  pointer-events:none!important;
+ }
+ .ft-mobile-sheet.is-open~.ft-mobile-bar,
+ .ft-mobile-bar:focus-within{transform:translate3d(0,0,0)!important;pointer-events:auto!important}
+}
+@media(prefers-reduced-motion:reduce){
+ .ft-mobile-bar{transition:none!important}
+}
 /* Monthly report KPIs: compact precision, readable on small iPhones. */
 .ft-report-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}
 .ft-report-kpis .ft-report-kpi{margin:0;min-width:0;max-width:100%;padding:clamp(12px,2.5vw,19px)}
@@ -1060,6 +1080,37 @@ async function load(){
   }
 }
 function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers','profile'];const tabs=['dashboard','messages'];if(me().role==='SYSADMIN')tabs.push('customers','license');if(isAdmin())tabs.push('staff');if(has('TIME'))tabs.push('time');if(has('REPORTS'))tabs.push('reports');if(has('LEAVE'))tabs.push('leave');if(has('SICK'))tabs.push('sick');if(has('WORKPLAN'))tabs.push('work');if(has('STANDBY'))tabs.push('standby');if(has('AVAILABILITY'))tabs.push('availability');if(isAdmin()&&has('REPORTS'))tabs.push('rules');if(isAdmin())tabs.push('settings');tabs.push('profile');return tabs;}
+/** Keeps calendar/day lists visible while scrolling down on iPhones.
+ * Bottom navigation reappears on upward scrolling, or when near the top.
+ * Drawer remains usable, and no content/working hours are changed.
+ */
+(function ftMobileNavAutoHide_(){
+ let lastY=0,gestureY=0,hidden=false,queued=false;
+ window.addEventListener('scroll',()=>{
+  if(queued)return;
+  queued=true;
+  requestAnimationFrame(()=>{
+   queued=false;
+   if(window.matchMedia('(min-width:801px)').matches)return;
+   const y=Math.max(0,window.scrollY||document.documentElement.scrollTop||0);
+   const nav=document.querySelector('.ft-mobile-bar');
+   if(!nav){lastY=y;gestureY=y;return;}
+   const drawer=document.querySelector('.ft-mobile-sheet.is-open');
+   if(drawer||nav.matches(':focus-within')||y<100){
+    hidden=false;nav.classList.remove('ft-nav-scroll-hidden');
+    lastY=y;gestureY=y;return;
+   }
+   const diff=y-lastY;
+   if((diff>0&&y-gestureY>28)||(diff<0&&gestureY-y>20)){
+    hidden=diff>0;
+    nav.classList.toggle('ft-nav-scroll-hidden',hidden);
+    gestureY=y;
+   }
+   if((diff>0&&gestureY>y)||(diff<0&&gestureY<y))gestureY=y;
+   lastY=y;
+  });
+ },{passive:true});
+})();
 function mobileNav(){
  const tabs=nav(),top=['dashboard','time','standby','messages'].filter(t=>tabs.includes(t));
  const groups=[['Zeit & Berichte',['reports']],['Nachrichten & Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
