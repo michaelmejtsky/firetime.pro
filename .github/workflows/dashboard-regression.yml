@@ -4,12 +4,14 @@ on:
     paths:
       - 'index.html'
       - 'tests/dashboard.test.cjs'
+      - 'tests/monthly-report-ui.test.cjs'
       - '.github/workflows/dashboard-regression.yml'
   push:
     branches: [main]
     paths:
       - 'index.html'
       - 'tests/dashboard.test.cjs'
+      - 'tests/monthly-report-ui.test.cjs'
       - '.github/workflows/dashboard-regression.yml'
   workflow_dispatch:
 
@@ -27,4 +29,4 @@ jobs:
         with:
           node-version: '22'
       - name: Dashboard-Regressionstest
-        run: node --test tests/dashboard.test.cjs
+        run: node --test tests/dashboard.test.cjs tests/monthly-report-ui.test.cjs
