@@ -1797,6 +1797,7 @@ function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Numbe
  catch(e){console.warn('Urlaubskonto Jahreslauf:',e);}
  // PDF-Warteschlange NACH dem Erinnerungs-Lock reparieren, niemals darin.
  try{ft_pdfRecoverApproved_();}catch(e){console.warn('PDF-Wiederaufnahme:',e);}
+ try{ft_pushDueTick_();}catch(e){console.warn('Aufgaben-Push-Erinnerung:',e);}
  return tickResult;
 }
 
@@ -1909,6 +1910,35 @@ function ft_pushDispatch_(actor,kind,id,title,body){
  }catch(e){console.warn('Push nicht verschickt:',String(e.message||e).slice(0,150));
   return {sent:0,reason:'gateway_exception'};}
 }
+
+/** Erinnerung am Vortag offener Aufgaben: einmalig um ca. 09 Uhr (Triggerintervall
+ * 15 Minuten). Bei fehlender Konfiguration wird keine Erinnerung als zugestellt
+ * markiert. Bestehende Notifications-Tabelle dient nur zur Deduplizierung. */
+function ft_pushDueTick_(){
+ const now=new Date(),hour=Number(Utilities.formatDate(now,FT_TZ,'H'));
+ if(hour!==9||!ft_pushWorkerUrl_())return {sent:0};
+ const tomorrow=Utilities.formatDate(new Date(now.getTime()+86400000),FT_TZ,'yyyy-MM-dd');
+ const pending=ft_commThreads_().filter(x=>x.kind==='TASK'&&x.status==='OPEN'&&
+  String(x.dueDate||'')===tomorrow);
+ if(!pending.length)return {sent:0};
+ let sent=0;
+ for(const t of pending.slice(0,100)){
+  const recipient=ft_one_('Users',t.recipientId);
+  if(!recipient||recipient.status!=='ACTIVE'||recipient.companyId!==t.companyId)continue;
+  const reference='due-'+t.id+'-'+t.dueDate;
+  const key=ft_sha_(t.companyId+'|'+recipient.id+'|PUSH_TASK_DUE|'+reference);
+  if(ft_one_('Notifications',key)?.status==='SENT')continue;
+  const result=ft_pushDispatch_(recipient,'TASK_DUE',reference,
+   'FireTime Pro · Aufgabe morgen fällig','Bitte deine offene Aufgabe in FireTime Pro prüfen.');
+  if(result.sent>0){
+   ft_add_('Notifications',{id:key,companyId:t.companyId,userId:recipient.id,
+    kind:'PUSH_TASK_DUE',reference,sentAt:ft_now_(),status:'SENT',error:''});
+   sent+=result.sent;
+  }
+ }
+ return {sent};
+}
+
 function ft_pushTest_(actor,p){
  const c=ft_company_(actor,p.companyId||actor.companyId);
  if(c.id!==actor.companyId)throw Error('Bitte zuerst eine Firma wählen.');
