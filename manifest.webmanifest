@@ -1,23 +1,23 @@
 {
   "name": "FireTime Pro",
   "short_name": "FireTime",
-  "description": "Arbeitszeiten, Bereitschaft, Urlaubsanträge und Dienstplanung für FireTime Pro",
-  "id": "/",
-  "start_url": "/",
-  "scope": "/",
+  "description": "Arbeitszeiten, Bereitschaft, Dienstplanung und sichere Nachrichten mit Push-Benachrichtigungen",
+  "id": "/firetime.pro/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0a1523",
   "theme_color": "#172c44",
   "lang": "de-AT",
   "icons": [
     {
-      "src": "/assets/firetime-192.png",
+      "src": "assets/firetime-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/assets/firetime-512.png",
+      "src": "assets/firetime-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
