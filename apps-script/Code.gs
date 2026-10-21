@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.9-operational-webpush-20261021';
+const FT_VERSION='1.8.10-background-app-badge-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1951,10 +1951,19 @@ function ft_pushDispatch_(actor,kind,id,title,body){
  if(!records.length)return {sent:0,reason:'no_devices'};
  const devices=records.slice(0,5).map(x=>({id:x.id,
   subscription:{endpoint:x.endpoint,p256dh:x.p256dh,auth:x.auth}}));
+ // The iOS Home Screen badge must be updated from the trusted server-side
+ // unread-thread count, even when the PWA is closed. Never count notifications
+ // locally or expose messages belonging to another user/company.
+ let unreadCount=null;
+ try{
+  const count=ft_commUnread_(actor,{id:actor.companyId});
+  if(Number.isSafeInteger(count)&&count>=0)unreadCount=Math.min(999,count);
+ }catch(err){console.warn('Push-Badgezaehler nicht verfuegbar:',String(err.message||err).slice(0,100));}
  const payload=JSON.stringify({devices,notification:{kind,id:String(id||'').slice(0,70),
   title:String(title||'FireTime Pro').slice(0,90),
   // Keine vertraulichen Nachrichteninhalte auf dem Sperrbildschirm.
-  body:String(body||'Du hast eine neue Benachrichtigung.').slice(0,150)}});
+  body:String(body||'Du hast eine neue Benachrichtigung.').slice(0,150),
+  ...(unreadCount===null?{}:{unreadCount})}});
  const ts=Math.floor(Date.now()/1000),nonce=ft_uuid_().replace(/-/g,'').toLowerCase();
  const signed=ts+'.'+nonce+'.'+payload;
  const signature=ft_hex_(Utilities.computeHmacSha256Signature(signed,secret,Utilities.Charset.UTF_8));
