@@ -1691,7 +1691,7 @@ function ft_timerAutoNotice_(company,user,activity){
   'Hallo '+user.name+'!\n\nDeine Arbeitszeit vom '+stamp+
   ' Uhr wurde automatisch mit 19:00 Uhr beendet, weil kein manuelles Arbeitsende erfasst wurde.'+
   '\n\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
-  '\nDie automatische Endzeit und eine Pause von 0 Minuten sind nur vorläufige Werte – es wurde keine Pause erfunden.'+
+  '\nDie automatische Endzeit ist vorläufig. Bitte auch protokollierte oder nicht abgeschlossene Pausen prüfen; es wird keine Pause erfunden.'+
   '\n\n'+url+'\n\n'+company.name);
 }
 function ft_timerRetryNotices_(){
@@ -2121,6 +2121,7 @@ function ft_home_(u,p){
   balanceCutoverSupported:true,
   activityDefaultsSupported:true,
   commSupported:true,
+  pauseClockSupported:true,
   commUnread:c?ft_commUnread_(u,c):0,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
