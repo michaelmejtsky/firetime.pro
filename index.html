@@ -913,6 +913,105 @@ function ftFitFormControls(root){
   }
  }
 }
+
+/* Nachrichten und Aufgaben: UI-Daten bleiben nur für die geöffnete Firma im RAM. */
+function ftCommSetBadge_(count){
+ ST.commCount=Math.max(0,Math.min(999,Number(count)||0));
+ ftCommUpdateBadges_();
+ if('setAppBadge' in navigator){
+  Promise.resolve(ST.commCount?navigator.setAppBadge(ST.commCount):
+   typeof navigator.clearAppBadge==='function'?navigator.clearAppBadge():navigator.setAppBadge(0))
+   .catch(()=>{});
+ }
+}
+function ftCommUpdateBadges_(){
+ const count=Number(ST.commCount||0);
+ document.querySelectorAll('.ft-msg-badge').forEach(x=>{
+  x.textContent=count>99?'99+':String(count);
+  x.style.display=count?'inline-flex':'none';
+  x.setAttribute('aria-label',count+' ungelesene Nachrichten');
+ });
+}
+async function ftCommFetch_(force){
+ if(!ST.token||!firm()?.id||ST.commLoading)return;
+ if(ST.comm&&!force)return;
+ ST.commLoading=true;
+ try{
+  const companyId=firm().id;
+  const rows=await api('commList',{companyId});
+  if(firm()?.id!==companyId)return;
+  ST.comm=rows;ST.commError='';
+  ftCommSetBadge_(rows.unread);
+  if(ST.tab==='messages')page();
+ }catch(e){
+  ST.commError=String(e.message||e);
+  if(ST.tab==='messages')page();
+ }finally{ST.commLoading=false;}
+}
+function ftCommPhotoButton_(id,threadId){
+ return id?'<button type="button" class="btn ft-msg-photo-btn" data-act="commPhoto" data-id="'+
+  E(id)+'" data-thread="'+E(threadId)+'">📷 Foto ansehen</button>':'';
+}
+function ftMessages_(){
+ if(!ST.h?.commSupported)return '<section class="card"><h2>Nachrichten & Aufgaben</h2><p class="muted">Bitte zuerst Code.gs V1.8.5 veröffentlichen. Bestehende Module bleiben unverändert.</p></section>';
+ const data=ST.comm;
+ if(!data)return '<section class="card"><h2>Nachrichten & Aufgaben</h2><p class="muted">'+
+  (ST.commError?E(ST.commError):'Nachrichten werden geladen …')+'</p>'+
+  '<button type="button" class="btn" data-act="commRefresh">Erneut laden</button></section>';
+ const users=new Map((data.users||[]).map(x=>[String(x.id),x.name]));
+ const label=id=>E(users.get(String(id))||'Mitarbeiter');
+ const chosen=(data.threads||[]).find(x=>x.id===ST.commOpen);
+ const isManager=isAdmin(),recipientOptions=(data.recipients||[]).map(x=>[x.id,x.name]);
+ const composer=ST.commCompose?'<section class="card ft-msg-composer"><h3>Neue '+(isManager?'Nachricht oder Aufgabe':'Nachricht')+'</h3>'+
+  '<form id="ftCommCreateForm">'+
+  (isManager?select('kind','Art',[['MESSAGE','Nachricht'],['TASK','Aufgabe mit Frist']],'MESSAGE'):'')+
+  select('recipientId','Empfänger',recipientOptions,recipientOptions[0]?.[0]||'')+
+  input('Betreff','title','','text','required maxlength="120"')+
+  '<label class="field"><span>Nachricht / Aufgabenbeschreibung</span><textarea name="body" maxlength="3000" rows="4" required></textarea></label>'+
+  (isManager?input('Frist (nur für Aufgaben)','dueDate','','date'):'')+
+  '<label class="field"><span>Foto anhängen (optional, JPG/PNG)</span><input type="file" name="photo" accept="image/jpeg,image/png"></label>'+
+  '<div class="actions"><button type="submit" class="btn primary">Senden</button>'+
+  '<button type="button" class="btn" data-act="commCloseCompose">Abbrechen</button></div></form></section>':'';
+ const threads=(data.threads||[]).map(x=>{
+  const task=x.kind==='TASK',done=x.status==='DONE',selected=x.id===ST.commOpen;
+  return '<button type="button" class="ft-msg-thread'+(x.unread?' is-unread':'')+
+   (selected?' is-selected':'')+'" data-act="commOpen" data-id="'+E(x.id)+'">'+
+   '<span class="ft-msg-thread-top"><strong>'+E(x.title)+'</strong>'+
+   (x.unread?'<span class="ft-msg-dot">Neu</span>':'')+'</span>'+
+   '<span class="ft-msg-thread-meta">'+(task?'Aufgabe':'Nachricht')+' · '+
+   (task?(done?'✓ Erledigt':'Offen')+' · ':'')+
+   label(x.createdBy===me().id?x.recipientId:x.createdBy)+
+   (x.dueDate?' · bis '+E(x.dueDate.split('-').reverse().join('.')):'')+'</span></button>';
+ }).join('');
+ const replies=chosen?(data.replies||[]).filter(x=>x.threadId===chosen.id).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))):[];
+ const detail=chosen?'<section class="card ft-msg-detail"><div class="ft-msg-detail-title"><h3>'+E(chosen.title)+'</h3>'+
+  (chosen.kind==='TASK'?'<span class="ft-msg-task-status">'+(chosen.status==='DONE'?'✓ Erledigt':'Offene Aufgabe')+'</span>':'')+'</div>'+
+  '<p class="ft-msg-body">'+E(chosen.body)+'</p>'+
+  '<p class="muted small">Von '+label(chosen.createdBy)+' an '+label(chosen.recipientId)+
+  (chosen.dueDate?' · Frist: '+E(chosen.dueDate.split('-').reverse().join('.')):'')+'</p>'+
+  ftCommPhotoButton_(chosen.attachmentId,chosen.id)+
+  replies.map(x=>'<div class="ft-msg-reply"><strong>'+label(x.authorId)+'</strong>'+
+   '<p>'+E(x.body)+'</p><small>'+E(ftViennaDateTime(x.createdAt))+'</small>'+
+   ftCommPhotoButton_(x.attachmentId,chosen.id)+'</div>').join('')+
+  (chosen.kind==='TASK'?'<div class="actions">'+
+    (chosen.status==='OPEN'?(isManager||chosen.recipientId===me().id?
+      '<button class="btn primary" type="button" data-act="commDone" data-id="'+E(chosen.id)+'">✓ Als erledigt melden</button>':''):
+    isManager?'<button class="btn" type="button" data-act="commReopen" data-id="'+E(chosen.id)+'">Aufgabe wieder öffnen</button>':'')+
+   '</div>':'')+
+  '<form id="ftCommReplyForm" data-thread="'+E(chosen.id)+'">'+
+  '<label class="field"><span>Antwort</span><textarea name="body" required maxlength="3000" rows="3"></textarea></label>'+
+  '<label class="field"><span>Foto zur Antwort (optional)</span><input type="file" accept="image/jpeg,image/png" name="photo"></label>'+
+  '<button class="btn primary" type="submit">Antwort senden</button></form></section>':'';
+ return '<div class="ft-msg-heading"><div><h2>Nachrichten & Aufgaben</h2>'+
+  '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
+  '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
+  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
+  '<p class="muted small">Die Zahl am App-Icon wird beim Öffnen bzw. Aktualisieren der installierten App synchronisiert. Echte Push-Benachrichtigungen bei geschlossener App benötigen zusätzlich einen Push-Dienst.</p>'+
+  composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
+  (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
+  '</section>'+detail+'</div>';
+}
+
 function page(){
  const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};
  if(!ST.h?.me)return;
