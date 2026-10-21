@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261021-v188';
+const FT_SHELL_CACHE='firetime-shell-20261021-v189';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
@@ -40,6 +40,17 @@ self.addEventListener('fetch',event=>{
 
 // Echte Hintergrund-Push-Mitteilungen, auch wenn die Web-App geschlossen ist.
 // Keine Zugangstoken oder vertraulichen Nachrichtentexte im Payload.
+// Keep push navigation inside this PWA and only to known application tabs.
+const FT_PUSH_TABS=new Set(['messages','availability','standby','leave','time','reports','sick','work']);
+function ftPushSafeUrl_(value){
+ const root=new URL('./',self.registration.scope);
+ let proposed;
+ try{proposed=new URL(value||'',root);}catch{return new URL('?tab=messages',root).href;}
+ if(proposed.origin!==root.origin||proposed.pathname!==root.pathname)
+  return new URL('?tab=messages',root).href;
+ const tab=proposed.searchParams.get('tab');
+ return new URL('?tab='+(FT_PUSH_TABS.has(tab)?tab:'messages'),root).href;
+}
 self.addEventListener('push',event=>{
  event.waitUntil((async()=>{
   let info={};
@@ -52,8 +63,8 @@ self.addEventListener('push',event=>{
    tag:String(info.tag||'firetime-neu').slice(0,80),
    renotify:true,
    timestamp:Date.now(),
-   data:{url:new URL('?tab=messages',self.registration.scope).href},
-   actions:[{action:'open',title:'Nachrichten öffnen'}]
+   data:{url:ftPushSafeUrl_(info.url)},
+   actions:[{action:'open',title:'In FireTime Pro öffnen'}]
   };
   await self.registration.showNotification(title,options);
   // Der exakte Ungelesenzähler wird bei der nächsten App-Aktualisierung gesetzt.
@@ -65,7 +76,7 @@ self.addEventListener('push',event=>{
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
  event.waitUntil((async()=>{
-  const target=new URL('?tab=messages',self.registration.scope).href;
+  const target=ftPushSafeUrl_(event.notification?.data?.url);
   const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
   const existing=windows.find(c=>new URL(c.url).origin===new URL(target).origin);
   if(existing){
