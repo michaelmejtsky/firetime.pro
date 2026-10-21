@@ -242,3 +242,18 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.match(sw,/cache:'no-store'/);
  assert.match(sw,/firetime-shell-20261021-v188/);
 });
+
+
+test('page info stays within the visible smartphone viewport in an accessible dialog',()=>{
+ assert.match(frontend,/function ftPageInfoRender_\(/);
+ assert.match(frontend,/createElement\('dialog'\)/);
+ assert.match(frontend,/dialog\.showModal\(\)/);
+ assert.match(frontend,/ft-page-info-dialog/);
+ assert.match(frontend,/aria-labelledby/);
+ assert.match(frontend,/max-width:calc\(100vw - 24px\)/);
+ assert.match(frontend,/max-height:calc\(100dvh - 32px\)/);
+ assert.match(frontend,/overflow-y:auto/);
+ assert.match(frontend,/ftPageInfoRender_\(helpHeader,intro,ST\.tab\)/);
+ assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.8\.1'/);
+ assert.match(frontend,/if\(a==='closePageInfo'\)/);
+});
