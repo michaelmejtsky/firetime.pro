@@ -2531,25 +2531,28 @@ if(a==='timerStart'){
  finally{if(btn.isConnected)btn.disabled=false;}
  return;
 }
-if(a==='timerStop'){
- const running=ST.h?.runningTimer;
- const pauseInput=document.getElementById('ftTimerBreakMinutes');
- const pauseRaw=pauseInput?.value?.trim()||'0',pause=Number(pauseRaw);
- if(!/^\d+$/.test(pauseRaw)||!Number.isInteger(pause)||pause<0||pause>1440){
-  say('Bitte die tatsächliche Pause in ganzen Minuten eingeben.',true);pauseInput?.focus();return;
- }
- if(running?.type==='OBJECT'&&ftTimePauseRequired_('OBJECT',running.start,new Date())&&pause<30){
-  say('Objektkontrolle über 6 Stunden: Bitte mindestens 30 Minuten tatsächliche Pause angeben. Sonst keine Zeit kürzen und mit dem Arbeitgeber klären.',true);
-  pauseInput?.focus();return;
- }
- if(!confirm('Arbeitszeit jetzt beenden? Tatsächliche Pause: '+pause+' Minuten. Falls du über 19:00 Uhr gearbeitet hast, kannst du anschließend korrigieren.'))return;
+if(a==='timerPauseStart'||a==='timerPauseStop'){
+ if(!ST.h?.pauseClockSupported){say('Bitte Code.gs V1.8.5 aktualisieren.',true);return;}
  btn.disabled=true;
- try{
-  const result=await api('timerStop',{companyId:firm().id,breakMinutes:pause});
-  await load();say('Arbeitszeit gespeichert bis '+ftViennaDateTime(result.closedAt)+' Uhr.');
- }catch(err){say('Arbeitsende fehlgeschlagen: '+String(err.message||err),true);}
- finally{if(btn.isConnected)btn.disabled=false;}
- return;
+ try{await api(a==='timerPauseStart'?'timerPauseStart':'timerPauseStop',{companyId:firm().id});
+  await load();say(a==='timerPauseStart'?'Pause begonnen.':'Pause beendet und gespeichert.');}
+ catch(err){say('Pause fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}return;
+}
+if(a==='timerStop'){
+ const running=ST.h?.runningTimer,modern=Boolean(ST.h?.pauseClockSupported);
+ if(modern&&running?.paused){say('Bitte zuerst die Pause beenden.',true);return;}
+ const input=document.getElementById('ftTimerBreakMinutes');
+ const pause=modern?Number(running?.completedPauseMinutes||0):Number(input?.value||0);
+ if(!Number.isInteger(pause)||pause<0||pause>1440){say('Ungültige Pausendauer.',true);return;}
+ if(running?.type==='OBJECT'&&ftTimePauseRequired_('OBJECT',running.start,new Date())&&pause<30){
+  say('Objektkontrolle über 6 Stunden: Mindestens 30 Minuten tatsächlich genommene Pause angeben. Keine Pause fingieren.',true);return;}
+ if(!confirm('Arbeitszeit beenden? Erfasste Pause: '+pause+' Minuten.'))return;
+ btn.disabled=true;
+ try{const result=await api('timerStop',{companyId:firm().id,breakMinutes:modern?0:pause});await load();
+  say('Arbeitszeit gespeichert bis '+ftViennaDateTime(result.closedAt)+' Uhr.');}
+ catch(err){say('Arbeitsende fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}return;
 }
 if(a==='activityTypeCancel'){
  const f=document.getElementById('ftActivityTypeForm');if(f){f.reset();f.elements.namedItem('id').value='';}
