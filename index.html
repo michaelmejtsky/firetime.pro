@@ -2364,11 +2364,11 @@ function ftBalanceExplainer_(r){
  if(!r.balanceStartMonth)return '<p class="ft-balance-warning">Dieser Bericht enthält einen gespeicherten Saldo nach der bisherigen Berechnung. Bereits freigegebene Berichte bleiben unverändert und benötigen gegebenenfalls eine dokumentierte Korrektur.</p>';
  const entries=Array.isArray(r.balanceBreakdown)?r.balanceBreakdown:[];
  const rows=entries.map(x=>'<tr><td>'+E(ftPdfMonthLabel(x.month))+'</td><td>'+
-  N(x.target)+' h</td><td>'+N(x.worked)+' h</td><td>'+
-  N((Number(x.leaveCredit)||0)+(Number(x.sickCredit)||0))+' h</td>'+
-  '<td><b>'+N(x.saldo)+' h</b></td></tr>').join('');
+  ftReportHours_(x.target)+' h</td><td>'+ftReportHours_(x.worked)+' h</td><td>'+
+  ftReportHours_((Number(x.leaveCredit)||0)+(Number(x.sickCredit)||0))+' h</td>'+
+  '<td><b>'+ftReportHours_(x.saldo)+' h</b></td></tr>').join('');
  return '<details class="ft-balance-breakdown"><summary>Saldo-Rechenweg anzeigen ('+entries.length+
-  ' Monate)</summary><p>Übernommener Anfangssaldo: <b>'+N(r.opening)+' h</b>. Verrechnung ab: <b>'+
+  ' Monate)</summary><p>Übernommener Anfangssaldo: <b>'+ftReportHours_(r.opening)+' h</b>. Verrechnung ab: <b>'+
   E(ftPdfMonthLabel(r.balanceStartMonth))+'</b>.</p>'+
   (r.balanceBeforeStart?'<p>Dieser Berichtsmonat liegt vor dem Beginn der Stundenabrechnung.</p>':
    '<div class="table"><table><thead><tr><th>Monat</th><th>Soll</th><th>Ist</th>'+
