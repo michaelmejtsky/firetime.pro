@@ -3039,7 +3039,7 @@ function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return
 function profile(){
  return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p></div>`+
   (ST.h?.backgroundPushSupported?`<section class="card ft-account-push"><h2>🔔 Benachrichtigungen</h2><p class="muted small">Push-Mitteilungen und registrierte Geräte für dein persönliches Konto verwalten.</p>${ftCommNotificationUI_()}</section>`:'')+
-  `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;
+  `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;
 }
 
 async function ftCommPhotoData_(input){
