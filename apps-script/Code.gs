@@ -1880,6 +1880,27 @@ function ft_pushUnregister_(actor,p){
  ft_audit_(actor,'PUSH_UNREGISTER','PushDevices',target.id,{}, {companyId:actor.companyId,userId:actor.id});
  return {ok:true,removed:true};
 }
+/**
+ * EINMAL im Apps-Script-Editor aufrufen und Googles Zugriff genehmigen.
+ * Keine Einrichtung, keine Datenbankmigration, keine Testnachricht.
+ * Legt ausschließlich die öffentliche Push-Worker-URL an, falls sie fehlt.
+ * Ein HTTP 403 beim anschließenden GET ist NORMAL (private API).
+ */
+function ft_pushBerechtigung_EINMAL(){
+ const props=PropertiesService.getScriptProperties();
+ const defaultWorker='https://firetime-pro-api.firetime-pro.workers.dev';
+ let url=String(props.getProperty('FT_PUSH_WORKER_URL')||'').trim();
+ if(!url){url=defaultWorker;props.setProperty('FT_PUSH_WORKER_URL',url);}
+ if(!/^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(url))throw Error('FT_PUSH_WORKER_URL ist keine gültige Worker-URL.');
+ const response=UrlFetchApp.fetch(url+'/api',{method:'get',muteHttpExceptions:true,followRedirects:false});
+ const status=response.getResponseCode();
+ Logger.log('Google UrlFetchApp autorisiert. Cloudflare erreichbar: HTTP '+status+'.');
+ Logger.log('Hinweis: HTTP 403 ist bei diesem GET ohne Origin völlig normal; kein fehlgeschlagener Push-Test.');
+ Logger.log('FT_PUSH_WORKER_URL: '+url+' – keine Skript- oder Datenbankinstallation ausgeführt.');
+ return {ok:true,cloudflareHttpStatus:status,workerUrl:url,
+  hinweis:'Google-Zugriff erteilt; VAPID und Worker-Veröffentlichung separat erforderlich.'};
+}
+
 function ft_pushWorkerUrl_(){
  const raw=String(ft_prop_('FT_PUSH_WORKER_URL')||'').trim();
  if(!/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.workers\.dev$/i.test(raw))return '';
