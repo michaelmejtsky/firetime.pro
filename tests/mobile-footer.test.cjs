@@ -13,8 +13,8 @@ test('mobile navigation is fixed to screen bottom and can hide during downward s
  assert.match(html,/nav\.classList\.toggle\('ft-nav-scroll-hidden',hidden\)/);
  assert.match(html,/nav\.classList\.remove\('ft-nav-scroll-hidden'\)/);
 });
-test('ios standalone status-bar safe area shields page content',()=>{
+test('ios standalone status area uses padding without an opaque overlay',()=>{
  assert.match(html,/display-mode:standalone/);
- assert.match(html,/body::before\{[^}]*position:fixed;[^}]*z-index:70/);
- assert.match(html,/height:max\(48px,env\(safe-area-inset-top,0px\)\)/);
+ assert.match(html,/padding-top:calc\(16px \+ max\(env\(safe-area-inset-top, 0px\), 48px\)\)/);
+ assert.doesNotMatch(html,/body::before\s*\{/);
 });
