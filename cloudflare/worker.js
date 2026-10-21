@@ -176,11 +176,19 @@ async function pushInternal(request,env){
   !data.notification||typeof data.notification!=='object')
   return output({ok:false,error:'Invalid push request'},400,'');
  // IMPORTANT: restrict notification content; GAS generated this HMAC payload.
+ // Only authenticated Apps Script can select a push category. Restrict navigation
+ // to known tabs; never use a client-provided URL or arbitrary external origin.
+ const kind=String(data.notification.kind||'COMM').slice(0,50);
+ const tab=/^PUSH_(AVAILABILITY)$/.test(kind)?'availability':
+   /^PUSH_(SHIFT|HANDOVER|PLAN|TIMER_RUNNING)/.test(kind)?'standby':
+   /^PUSH_TIMER_/.test(kind)?'time':
+   /^PUSH_(LEAVE|SICK)/.test(kind)?'leave':
+   /^PUSH_MONTH_/.test(kind)?'reports':'messages';
  const notice={
   title:String(data.notification.title||'FireTime Pro').slice(0,90),
   body:String(data.notification.body||'Neue Nachricht oder Aufgabe').slice(0,160),
-  url:'/firetime.pro/?tab=messages', // never accept a user-controlled external URL
-  kind:'COMM',
+  url:'/firetime.pro/?tab='+tab, // only whitelisted local tabs
+  kind,
   id:String(data.notification.id||'message').slice(0,80)
  };
  const results=await Promise.all(data.devices.map(x=>pushOne(env,x,notice)));
