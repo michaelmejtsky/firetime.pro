@@ -1798,6 +1798,7 @@ function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Numbe
  // PDF-Warteschlange NACH dem Erinnerungs-Lock reparieren, niemals darin.
  try{ft_pdfRecoverApproved_();}catch(e){console.warn('PDF-Wiederaufnahme:',e);}
  try{ft_pushDueTick_();}catch(e){console.warn('Aufgaben-Push-Erinnerung:',e);}
+ try{ft_pushOperationsTick_();}catch(e){console.warn('Betriebs-Push-Erinnerungen:',e);}
  return tickResult;
 }
 
@@ -2014,6 +2015,167 @@ function ft_pushDueTick_(){
   }
  }
  return {sent};
+}
+
+
+/**
+ * FireTime Pro – betriebliche Web-Push-Erinnerungen.
+ * Bestehenden ft_tick (alle 15 Minuten) wiederverwenden; keine neuen Trigger,
+ * keine Änderungen an Mitarbeiter-, Dienst- oder Zeitbuchungen.
+ * Die bereits bestehende Notifications-Tabelle dedupliziert Push unabhängig von E-Mails.
+ */
+function ft_pushOperationalOnce_(company,user,kind,reference,title,body){
+ if(!company||!user||user.status!=='ACTIVE'||!ft_pushWorkerUrl_())return false;
+ if(!ft_pushRows_().some(x=>String(x.companyId)===String(company.id)&&String(x.userId)===String(user.id)))return false;
+ const id=ft_sha_(company.id+'|'+user.id+'|'+kind+'|'+reference);
+ const reserved=ft_lock_(()=>{
+  const existing=ft_one_('Notifications',id),nowMs=Date.now();
+  if(existing){
+   const age=nowMs-(new Date(existing.sentAt).getTime()||0);
+   if(existing.status==='SENT'||existing.status==='PENDING'&&age<10*60000||
+      existing.status==='ERROR'&&age<60*60000)return false;
+   existing.status='PENDING';existing.sentAt=ft_now_();existing.error='';
+   ft_save_('Notifications',existing);
+  }else ft_add_('Notifications',{id,companyId:company.id,userId:user.id,
+   kind,reference,sentAt:ft_now_(),status:'PENDING',error:''});
+  return true;
+ });
+ if(!reserved)return false;
+ let outcome={sent:0,reason:'Keine Zustellung bestätigt.'};
+ try{outcome=ft_pushDispatch_(user,kind,reference,title,body);}
+ catch(err){outcome={sent:0,reason:'Worker-Anfrage fehlgeschlagen.'};console.warn('Betriebs-Push:',String(err.message||err));}
+ const successful=Number(outcome.sent||0)>0;
+ ft_lock_(()=>{
+  const record=ft_one_('Notifications',id);
+  if(!record)return;
+  record.status=successful?'SENT':'ERROR';
+  record.sentAt=ft_now_();
+  record.error=successful?'':String(outcome.reason||'Push nicht zugestellt').slice(0,450);
+  ft_save_('Notifications',record);
+ });
+ return successful;
+}
+function ft_pushOperationalEvents_(now,source){
+ const MS_H=3600000,clock=Utilities.formatDate(now,FT_TZ,'HH:mm'),
+  current=Utilities.formatDate(now,FT_TZ,'yyyy-MM'),
+  day=Number(Utilities.formatDate(now,FT_TZ,'d')),
+  yesterdayMonth=Utilities.formatDate(new Date(Date.UTC(
+   Number(current.slice(0,4)),Number(current.slice(5,7))-2,15,12)),FT_TZ,'yyyy-MM'),
+  nextMonth=Utilities.formatDate(new Date(Date.UTC(
+   Number(current.slice(0,4)),Number(current.slice(5,7)),15,12)),FT_TZ,'yyyy-MM'),
+  nowMs=now.getTime();
+ const companies=source.companies.filter(c=>ft_bool_(c.active));
+ const companyIds=new Set(companies.map(c=>String(c.id)));
+ const employees=source.users.filter(u=>u.status==='ACTIVE'&&u.role!=='SYSADMIN'&&companyIds.has(String(u.companyId)));
+ const userById=new Map(employees.map(u=>[String(u.id),u]));
+ const companyById=new Map(companies.map(c=>[String(c.id),c]));
+ const events=[];
+ const add=(c,u,kind,ref,title,body)=>{if(c&&u)events.push({company:c,user:u,kind,reference:ref,title,body});};
+ const hasModule=(c,m)=>Boolean(source.modules?.[c.id]?.includes(m));
+ if(day===20&&clock>='09:00'){
+  const submitted=new Set(source.submissions.filter(x=>String(x.month)===nextMonth)
+   .map(x=>String(x.companyId)+'|'+String(x.userId)));
+  for(const u of employees){
+   const c=companyById.get(String(u.companyId));
+   if(!ft_bool_(c.remindAvailability)||!hasModule(c,'AVAILABILITY')||
+      submitted.has(c.id+'|'+u.id))continue;
+   add(c,u,'PUSH_AVAILABILITY',nextMonth,
+    'FireTime Pro · Verfügbarkeit fehlt',
+    'Bitte deine Verfügbarkeit für '+nextMonth+' bis heute abgeben.');
+  }
+ }
+ const segmentsByShift=new Map();
+ for(const x of source.segments){
+  const id=String(x.shiftId);
+  if(!segmentsByShift.has(id))segmentsByShift.set(id,[]);
+  segmentsByShift.get(id).push(x);
+ }
+ const sick=source.sickLeaves||[];
+ for(const shift of source.shifts){
+  if(shift.status!=='PUBLISHED')continue;
+  const c=companyById.get(String(shift.companyId));
+  if(!c||!hasModule(c,'STANDBY')||!ft_bool_(c.remindShift))continue;
+  const segments=segmentsByShift.get(String(shift.id));
+  const assignments=segments?.length?segments:[shift];
+  for(const item of assignments){
+   const u=userById.get(String(item.userId));
+   if(!u||String(u.companyId)!==String(c.id))continue;
+   const start=Date.parse(item.start),end=Date.parse(item.end);
+   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)continue;
+   const ref=String(item.id)+'|'+String(item.start);
+   const beginsIn=start-nowMs;
+   if(beginsIn>0&&beginsIn<=24*MS_H)
+    add(c,u,'PUSH_SHIFT_REMINDER',ref,
+     'FireTime Pro · Bereitschaft in 24 Stunden',
+     'Dein Bereitschaftsdienst beginnt am '+Utilities.formatDate(new Date(start),FT_TZ,'dd.MM. HH:mm')+' Uhr.');
+   const endedAgo=nowMs-end;
+   const absence=sick.some(x=>x.companyId===c.id&&x.userId===u.id&&x.status!=='REJECTED'&&
+    Date.parse(x.from)<end&&Date.parse(x.to)>start);
+   if(item.actualStatus!=='DONE'&&endedAgo>=4*MS_H&&endedAgo<=7*24*MS_H&&!absence)
+    add(c,u,'PUSH_SHIFT_CONFIRM',String(item.id)+'|'+String(item.end),
+     'FireTime Pro · Bereitschaft bestätigen',
+     'Dein Bereitschaftsdienst ist seit über 4 Stunden beendet und noch nicht bestätigt.');
+  }
+ }
+ if(hasModule){
+  for(const timer of source.timers){
+   const c=companyById.get(String(timer.companyId)),u=userById.get(String(timer.userId));
+   if(!c||!u||!hasModule(c,'TIME')||clock<'18:30'||clock>='19:00')continue;
+   // Nur Timer von heute; frühere Tage übernimmt die automatische Schließung.
+   if(Utilities.formatDate(new Date(timer.start),FT_TZ,'yyyy-MM-dd')!==
+      Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd'))continue;
+   add(c,u,'PUSH_TIMER_RUNNING',String(timer.id),
+    'FireTime Pro · Stempeluhr läuft',
+    'Deine Arbeitszeit läuft noch. Bitte vor 19:00 Uhr kontrollieren und beenden.');
+  }
+  for(const activity of source.activities){
+   const c=companyById.get(String(activity.companyId)),u=userById.get(String(activity.userId));
+   if(!c||!u||!hasModule(c,'TIME')||
+      !String(activity.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'))continue;
+   const created=Date.parse(activity.createdAt);
+   if(!Number.isFinite(created)||nowMs-created<0||nowMs-created>48*MS_H)continue;
+   add(c,u,'PUSH_TIMER_AUTO',String(activity.id),
+    'FireTime Pro · Stempeluhr automatisch beendet',
+    'Deine Stempeluhr wurde um 19:00 Uhr automatisch beendet. Bitte Arbeitszeit und Pause kontrollieren.');
+  }
+ }
+ if(day===1&&clock>='09:00'){
+  const done=new Set(source.months.filter(m=>String(m.month)===yesterdayMonth&&
+   ['SUBMITTED','APPROVED','FINAL'].includes(m.status))
+   .map(m=>String(m.companyId)+'|'+String(m.userId)));
+  for(const u of employees){
+   const c=companyById.get(String(u.companyId));
+   if(!ft_bool_(c.remindHours)||!hasModule(c,'REPORTS')||
+      String(u.startDate||'').slice(0,7)>yesterdayMonth||
+      done.has(c.id+'|'+u.id))continue;
+   add(c,u,'PUSH_MONTH_OPEN',yesterdayMonth,
+    'FireTime Pro · Monatsbericht offen',
+    'Bitte deinen Monatsbericht für '+yesterdayMonth+' abschließen und einreichen.');
+  }
+ }
+ return events;
+}
+function ft_pushOperationsTick_(){
+ if(!ft_pushWorkerUrl_())return {sent:0,checked:0};
+ const now=new Date();
+ const companies=ft_get_('Companies').filter(c=>ft_bool_(c.active));
+ const modules={};for(const c of companies)modules[c.id]=ft_license_(c);
+ const source={
+  companies,modules,users:ft_get_('Users'),
+  submissions:ft_get_('AvailabilitySubmissions'),months:ft_get_('Months'),
+  shifts:ft_get_('Shifts'),segments:ft_get_('ShiftSegments'),
+  sickLeaves:ft_get_('SickLeaves'),
+  timers:ft_db_().getSheetByName('ActivityTimers')?ft_get_('ActivityTimers'):[],
+  activities:ft_get_('Activities')
+ };
+ const events=ft_pushOperationalEvents_(now,source);
+ let sent=0,processed=0;
+ for(const e of events.slice(0,80)){
+  try{if(ft_pushOperationalOnce_(e.company,e.user,e.kind,e.reference,e.title,e.body))sent++;}
+  catch(err){console.warn('Betriebs-Push '+e.kind+':',String(err.message||err));}
+  processed++;
+ }
+ return {sent,checked:events.length,processed};
 }
 
 function ft_pushTest_(actor,p){
