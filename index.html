@@ -582,6 +582,31 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-photo-viewer img{max-width:100%;max-height:calc(94dvh - 90px);width:auto;height:auto;
  display:block;object-fit:contain;margin:0 auto;border-radius:8px}
 @media(max-width:580px){.ft-photo-viewer{padding:9px}.ft-photo-header strong{font-size:12px}}
+
+/* Kontextsensitive Hilfe im Seitenkopf statt Textkästen vor jedem Formular. */
+.ft-page-head{display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-width:0}
+.ft-page-head h1{font-size:clamp(21px,3vw,26px)}
+.ft-help-header:empty{display:none}
+.ft-help-header{position:relative;align-self:center}
+.ft-help-header>.ft-page-hint{margin:0;border:0;background:transparent}
+.ft-help-header>.ft-page-hint>summary{font-size:0;gap:0;padding:4px;
+ display:flex;align-items:center;justify-content:center;min-height:32px;
+ width:32px;height:32px;border-radius:50%;background:#213c52;border:1px solid #507794}
+.ft-help-header>.ft-page-hint .ft-page-hint-icon{font-size:13px;width:20px;height:20px;
+ background:#305a76;color:#fff;border-color:#6394ad}
+.ft-help-header>.ft-page-hint .ft-page-hint-arrow{display:none}
+.ft-help-header>.ft-page-hint[open]>summary{background:#416c8a}
+.ft-help-header>.ft-page-hint>.ft-page-hint-content{position:absolute;top:39px;left:0;
+ z-index:40;width:min(360px,calc(100vw - 44px));box-shadow:0 15px 36px #0009;
+ background:#203d53;color:#e7f4fc;border:1px solid #6386a0;border-radius:12px;
+ font-size:13px;padding:13px 14px;line-height:1.55}
+.ft-build-version{font-size:10px;font-weight:800;letter-spacing:.03em;color:#aac4d5;
+ border:1px solid #345b76;padding:5px 8px;border-radius:8px;white-space:nowrap}
+@media(max-width:650px){
+ .ft-page-head{gap:8px}
+ .ft-build-version{font-size:9px}
+ .ft-help-header>.ft-page-hint>.ft-page-hint-content{left:auto;right:-35px}
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -717,6 +742,7 @@ const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
+const FT_VISIBLE_VERSION='1.8.7';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -858,7 +884,7 @@ function hint(t,title='Mehr Informationen'){
 function monthPick(){return `<div class="actions"><label>Monat: <input type="month" id="monthPick" style="width:180px" value="${E(ST.month)}"></label></div>`;}
 function chk(name,label,checked,desc=''){return `<label class="cbox"><input type="checkbox" name="${E(name)}" ${checked?'checked':''}><span><b>${E(label)}</b>${desc?`<div class="muted small">${E(desc)}</div>`:''}</span></label>`;}
 function fields(form){const p=Object.fromEntries(new FormData(form).entries());form.querySelectorAll('input[type=checkbox]').forEach(x=>{if(!['module','nightTypes','sundayTypes','holidayTypes'].includes(x.name))p[x.name]=x.checked;});return p;}
-function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div><div id="ft-login-brand" aria-live="polite">${ftLoginBrandHtml()}</div><p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky</p></div></div>`;}
+function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div><div id="ft-login-brand" aria-live="polite">${ftLoginBrandHtml()}</div><p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</p></div></div>`;}
 // Schneller, authentifizierter App-Start ohne teure Monatsabrechnung.
 // Der echte Monatsbericht wird danach aus dem Backend nachgeladen.
 async function ftOpenShell(){
@@ -988,7 +1014,7 @@ function mobileNav(){
  const grouped=groups.map(([title,items])=>{const visible=items.filter(t=>remaining.includes(t));return visible.length?`<section class="ft-mobile-group"><h3>${E(title)}</h3>${visible.map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</section>`:'';}).join('');
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
-function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();ftCommStartPoll_();}
+function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div class="ft-page-head"><h1>${E(LABELS[ST.tab])}</h1><div class="ft-help-header" id="ft-help-header"></div></div><span class="ft-build-version" title="Stand der geladenen App-Oberfläche">V${FT_VISIBLE_VERSION}</span>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();ftCommStartPoll_();}
 // Date inputs in mobile Safari can exceed CSS width due to native control sizing.
 // Measure the real box and clamp only inputs that cross their card's inner edge.
 function ftFitFormControls(root){
@@ -1210,6 +1236,12 @@ function page(){
  const el=document.getElementById('content');
  if(el){
   el.innerHTML=(views[ST.tab]||dashboard)();
+  const helpHeader=document.getElementById('ft-help-header');
+  if(helpHeader){
+   helpHeader.replaceChildren();
+   const intro=el.querySelector(':scope > .ft-page-hint');
+   if(intro)helpHeader.appendChild(intro);
+  }
   requestAnimationFrame(()=>{if(el.isConnected)ftFitFormControls(el);});
  }
  if(ST.tab==='reports')ftResumePdfJob();
