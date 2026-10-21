@@ -607,6 +607,15 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-build-version{font-size:9px}
  .ft-help-header>.ft-page-hint>.ft-page-hint-content{left:auto;right:-35px}
 }
+
+/* Fix: mobile help popover never falls outside the visible viewport. */
+.ft-help-header>.ft-page-hint>.ft-page-hint-content{
+ position:fixed;left:12px;right:auto;top:60px;
+ width:min(380px,calc(100vw - 24px));max-width:calc(100vw - 24px);
+ max-height:calc(100dvh - 24px);overflow-y:auto;overflow-x:hidden;
+ overflow-wrap:anywhere;overscroll-behavior:contain;
+ z-index:9999;box-sizing:border-box;
+}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -1293,6 +1302,33 @@ function ftMessages_(){
   (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
   '</section>'+detail+'</div>';
 }
+
+
+/** Repositioniert die Kontext-Hilfe bei kleinen Displays und langem Text. */
+function ftPositionHelpPopup_(){
+ const details=document.querySelector('#ft-help-header > details.ft-page-hint');
+ if(!details?.open)return;
+ const summary=details.querySelector('summary'),content=details.querySelector('.ft-page-hint-content');
+ if(!summary||!content)return;
+ const r=summary.getBoundingClientRect();
+ const vw=window.innerWidth,vh=window.innerHeight;
+ const width=Math.min(380,Math.max(160,vw-24));
+ const left=Math.max(12,Math.min(r.left-10,vw-width-12));
+ const below=vh-r.bottom-16,above=r.top-16;
+ const onTop=below<170&&above>below;
+ const space=Math.max(88,onTop?above-8:below-8);
+ const height=Math.min(380,space);
+ const top=onTop?Math.max(8,r.top-height-8):Math.max(8,Math.min(r.bottom+8,vh-height-8));
+ Object.assign(content.style,{
+  left:left+'px',right:'auto',top:top+'px',width:width+'px',maxHeight:height+'px'
+ });
+}
+document.addEventListener('toggle',event=>{
+ if(event.target?.matches?.('#ft-help-header > details.ft-page-hint'))
+  ftPositionHelpPopup_();
+},true);
+window.addEventListener('resize',ftPositionHelpPopup_);
+window.addEventListener('scroll',ftPositionHelpPopup_,true);
 
 function page(){
  const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};
