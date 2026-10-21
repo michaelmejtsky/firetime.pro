@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.12-view-specific-faster-home-20261021';
+const FT_VERSION='1.8.13-timer-auto-notifications-only-20261022';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1678,12 +1678,21 @@ function ft_timerStop_(actor,p){
  const pause=ft_number_(p.breakMinutes||0,0,1440,'Pause in Minuten');
  return ft_timerClose_(row,actor,false,pause);
 }
+/** Nur nach tatsächlich erfolgtem Auto-Abschluss um 19:00 Uhr benachrichtigen.
+ * Manuelles Ende und ein zwischendurch aktiver Timer dürfen nie auslösen.
+ * Eingetragene Pause bzw. Tätigkeitsart bleiben unverändert.
+ */
+function ft_timerConfirmedAutoClose_(activity){
+ return Boolean(activity&&
+  String(activity.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]')&&
+  /T19:00(?::00(?:\.000)?)?$/.test(String(activity.end||'')));
+}
 /** Automatische Schließung: genau eine Benachrichtigung pro Arbeitszeiteintrag.
  * Status ERROR wird beim nächsten 15-Minuten-Trigger erneut versucht.
  * Keine E-Mail bei manueller Stopptaste.
  */
 function ft_timerAutoNotice_(company,user,activity){
- if(!company||!user||!activity||!user.email)return false;
+ if(!company||!user||!user.email||!ft_timerConfirmedAutoClose_(activity))return false;
  const stamp=Utilities.formatDate(new Date(activity.end),FT_TZ,'dd.MM.yyyy HH:mm');
  const url=ft_clientUrl_(company)||ft_publicGithubUrl_();
  return ft_notification_(company,user,'TIMER_AUTO_CLOSE',activity.id,
@@ -1698,7 +1707,8 @@ function ft_timerRetryNotices_(){
  let retried=0;
  for(const n of ft_get_('Notifications').filter(x=>x.kind==='TIMER_AUTO_CLOSE'&&x.status==='ERROR').slice(0,25)){
   const c=ft_one_('Companies',n.companyId),u=ft_one_('Users',n.userId),a=ft_one_('Activities',n.reference);
-  if(c&&u&&a&&a.companyId===c.id&&a.userId===u.id&&ft_timerAutoNotice_(c,u,a))retried++;
+  if(c&&u&&a&&a.companyId===c.id&&a.userId===u.id&&
+     ft_timerConfirmedAutoClose_(a)&&ft_timerAutoNotice_(c,u,a))retried++;
  }
  return retried;
 }
@@ -1711,7 +1721,10 @@ function ft_timerSweep_(){
  ready.sort((a,b)=>b.__row-a.__row);
  for(const t of ready){
   try{const user=ft_one_('Users',t.userId);if(!user)throw Error('Mitarbeiter fehlt.');
-   const result=ft_timerClose_(t,user,true);closed++;
+   const result=ft_timerClose_(t,user,true);
+   if(!result.autoClosed||!ft_timerConfirmedAutoClose_(result.activity))
+    throw Error('Automatischer Abschluss nicht bestätigt; keine Benachrichtigung.');
+   closed++;
    try{
     const company=ft_one_('Companies',t.companyId);
     ft_timerAutoNotice_(company,user,result.activity);
@@ -2126,21 +2139,13 @@ function ft_pushOperationalEvents_(now,source){
      'Dein Bereitschaftsdienst ist seit über 4 Stunden beendet und noch nicht bestätigt.');
   }
  }
+ // Keine Vorwarnung vor 19 Uhr: wer manuell beendet, bekommt keine
+ // 'Stempeluhr läuft' Benachrichtigung. Nur echte Auto-Abschlüsse melden.
  if(hasModule){
-  for(const timer of source.timers){
-   const c=companyById.get(String(timer.companyId)),u=userById.get(String(timer.userId));
-   if(!c||!u||!hasModule(c,'TIME')||clock<'18:30'||clock>='19:00')continue;
-   // Nur Timer von heute; frühere Tage übernimmt die automatische Schließung.
-   if(Utilities.formatDate(new Date(timer.start),FT_TZ,'yyyy-MM-dd')!==
-      Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd'))continue;
-   add(c,u,'PUSH_TIMER_RUNNING',String(timer.id),
-    'FireTime Pro · Stempeluhr läuft',
-    'Deine Arbeitszeit läuft noch. Bitte vor 19:00 Uhr kontrollieren und beenden.');
-  }
   for(const activity of source.activities){
    const c=companyById.get(String(activity.companyId)),u=userById.get(String(activity.userId));
    if(!c||!u||!hasModule(c,'TIME')||
-      !String(activity.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'))continue;
+      !ft_timerConfirmedAutoClose_(activity))continue;
    const created=Date.parse(activity.createdAt);
    if(!Number.isFinite(created)||nowMs-created<0||nowMs-created>48*MS_H)continue;
    add(c,u,'PUSH_TIMER_AUTO',String(activity.id),
