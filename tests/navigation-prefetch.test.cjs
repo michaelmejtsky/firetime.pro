@@ -64,7 +64,8 @@ test('unrelated views no longer fetch communication unread spreadsheets',()=>{
  assert.match(home,/const need=\(\.\.\.names\)=>requested==='all'\|\|names.includes\(requested\)/);
 });
 test('backend/frontend scripts retain valid syntax',()=>{
- const script=part('<script>','</script>',html);
+ const script=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
+ assert.ok(script.length>1000,'Expected full inline application');
  assert.doesNotThrow(()=>new vm.Script(script));
  assert.doesNotThrow(()=>new vm.Script(backend));
 });
