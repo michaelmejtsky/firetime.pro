@@ -1925,10 +1925,10 @@ function ft_pushFailureReason_(results){
   return 'Cloudflare-Kryptografiefehler. VAPID-Schlüsselpaar bzw. Web-Push-Verschlüsselung prüfen.';
  if(/network connection lost|connection reset|connection refused|failed to fetch|fetch failed|dns|tls|ssl|certificate|socket/i.test(error))
   return 'Cloudflare konnte keine stabile Verbindung zum Push-Anbieter aufbauen (Netzwerk/TLS).';
- if(/timeout|abort/i.test(error))
-  return 'Cloudflare hat die Verbindung zum Push-Anbieter wegen einer Zeitüberschreitung abgebrochen.';
  if(/not a function|not supported|unsupported|not implemented/i.test(error))
   return 'Cloudflare-Laufzeit unterstützt eine benötigte Web-Push-Funktion nicht.';
+ if(/timeout|abort/i.test(error))
+  return 'Cloudflare hat die Verbindung zum Push-Anbieter wegen einer Zeitüberschreitung abgebrochen.';
  // Redact URL endpoints, email addresses and long identifiers from runtime errors.
  // Never show any subscription token, JWK secret, endpoint or personal address.
  const detail=String(failed.error||'')
