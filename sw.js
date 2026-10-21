@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261021-v1810';
+const FT_SHELL_CACHE='firetime-shell-20261021-v1811';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
@@ -81,6 +81,15 @@ self.addEventListener('push',event=>{
      await self.navigator.setAppBadge(0);
    }catch(err){console.warn('Badge konnte nicht aktualisiert werden.');}
   }
+  // Tell existing visible FireTime windows that fresh data is available.
+  // No message content, access token or personal data is passed to the page.
+  try{
+   const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});
+   for(const client of windows){
+    if(client.url.startsWith(self.registration.scope))
+     client.postMessage({type:'FT_PUSH_RECEIVED',kind:String(info.kind||'COMM').slice(0,50)});
+   }
+  }catch(err){console.warn('Client-Aktualisierung nicht möglich.');}
  })());
 });
 self.addEventListener('notificationclick',event=>{
