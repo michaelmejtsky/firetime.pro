@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.10-background-app-badge-20261021';
+const FT_VERSION='1.8.12-view-specific-faster-home-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2764,7 +2764,9 @@ function ft_home_(u,p){
   commSupported:true,
   backgroundPushSupported:true,
   pauseClockSupported:true,
-  commUnread:c?ft_commUnread_(u,c):0,
+  // Messages have their own 30-second foreground poll and push wakeup.
+  // Avoid scanning CommThreads and CommReads when opening unrelated menus.
+  commUnread:c&&need('dashboard','messages')?ft_commUnread_(u,c):null,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
