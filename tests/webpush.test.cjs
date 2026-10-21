@@ -23,7 +23,8 @@ function expand(prk,info,size){return h(prk,Buffer.concat([Buffer.from(info),Buf
 test('worker VAPID auth and message payload use native WebCrypto in verified format',async()=>{
  const api=runWorker();
  const vapid=await webcrypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
- const jwk=await webcrypto.subtle.exportKey('jwk',vapid.privateKey);
+ const full=await webcrypto.subtle.exportKey('jwk',vapid.privateKey);
+ const jwk={kty:full.kty,crv:full.crv,x:full.x,y:full.y,d:full.d};
  const rawPub=new Uint8Array(await webcrypto.subtle.exportKey('raw',vapid.publicKey));
  const env={VAPID_PRIVATE_JWK:JSON.stringify(jwk),VAPID_PUBLIC_KEY:Buffer.from(rawPub).toString('base64url'),
   VAPID_SUBJECT:'mailto:test@example.org',GAS_SHARED_KEY:'x'.repeat(64)};
@@ -150,4 +151,12 @@ test('push device registration stays private, validates endpoints and unregister
  assert.equal(mod.ft_pushUnregister_(u,{deviceId:first.deviceId}).removed,true);
  assert.equal(mod.ft_pushStatus_(u).deviceCount,0);
  assert.ok(audits.length>=2);
+});
+
+test('PWA manifest opens the installed GitHub Pages app, not the domain root',()=>{
+ const manifest=JSON.parse(fs.readFileSync(path.join(root,'manifest.webmanifest'),'utf8'));
+ assert.equal(manifest.id,'/firetime.pro/');
+ assert.equal(manifest.start_url,'./');
+ assert.equal(manifest.scope,'./');
+ for(const icon of manifest.icons)assert.ok(!icon.src.startsWith('/'));
 });
