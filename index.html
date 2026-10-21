@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-ios-nav-scroll-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-profile-push-statusbar-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -672,16 +672,6 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 @media(prefers-reduced-motion:reduce){
  .ft-mobile-bar{transition:none!important}
 }
-/* Opaque iOS status-bar backdrop: scrolling calendar cards cannot overlap the clock. */
-@media(max-width:800px) and (display-mode:standalone){
- @supports (-webkit-touch-callout:none){
-  body::before{
-   content:"";display:block;position:fixed;
-   top:0;left:0;right:0;height:max(48px,env(safe-area-inset-top,0px));
-   z-index:70;pointer-events:none;background:#0b1725;
-  }
- }
-}
 /* Monthly report KPIs: compact precision, readable on small iPhones. */
 .ft-report-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}
 .ft-report-kpis .ft-report-kpi{margin:0;min-width:0;max-width:100%;padding:clamp(12px,2.5vw,19px)}
@@ -1315,10 +1305,10 @@ async function ftPushRefresh_(force=false){
   const linked=status.devices?.find(x=>x.endpointHash===hash);
   if(firm()?.id!==companyId||me()?.id!==userId)return;
   ST.pushSettings={info,status,onThisDevice:Boolean(linked),deviceId:linked?.id||'',subscription};
-  if(ST.tab==='messages'&&!ST.commCompose&&!document.activeElement?.closest('form'))page();
+  if(ST.tab==='profile'&&!document.activeElement?.closest('form'))page();
  }catch(err){
   if(firm()?.id===companyId){ST.pushSettings={error:String(err.message||err)};
-   if(ST.tab==='messages')page();}
+   if(ST.tab==='profile')page();}
  }finally{FT_PUSH_FETCHING=false;}
 }
 async function ftPushEnable_(){
@@ -1404,7 +1394,7 @@ function ftMessages_(){
   '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
   '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
   '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
-  ftCommNotificationUI_()+composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
+  composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
   (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
   '</section>'+detail+'</div>';
 }
@@ -1460,7 +1450,7 @@ function page(){
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
  if(ST.tab==='messages'&&ST.h?.commSupported&&!ST.comm&&!ST.commLoading)ftCommFetch_();
- if(ST.tab==='messages'&&ST.h?.backgroundPushSupported&&!ST.pushSettings)ftPushRefresh_();
+ if(ST.tab==='profile'&&ST.h?.backgroundPushSupported&&!ST.pushSettings)ftPushRefresh_();
 }
 
 function ftHomeDate_(stamp){
@@ -3046,7 +3036,11 @@ function ftActivityTypesAdminPanel_(){
 }
 
 function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return hint('Der Firmenadministrator kann Name, Logo, Farben, Arbeitszeitmodell und Kalender pflegen. Gekaufte Module kann nur der FireTime-Pro-Systemadministrator freischalten. Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.')+`<div class="cols"><div class="card"><h2>Firmendesign</h2>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}<div class="drop" data-pick="existingLogo">Firmenlogo hochladen oder ersetzen<input type="file" id="existingLogo" accept="image/png,image/jpeg,image/webp"></div><div class="muted small" id="existingLogoLabel"></div><form id="settingsForm">${input('Firmenname','name',c.name,'text','required')}${input('Primärfarbe','color',c.color,'color')}${input('Google-Kalender-ID','calendarId',c.calendarId||'')}${chk('calendarOn','Google-Kalender aktivieren',c.calendarOn===true||c.calendarOn==='TRUE','Nur verfügbar, wenn du das Kalendermodul gekauft/freigeschaltet hast.')}${chk('remindHours','Monatsabschluss erinnern',c.remindHours===true||c.remindHours==='TRUE')}${chk('remindAvailability','Verfügbarkeit erinnern',c.remindAvailability===true||c.remindAvailability==='TRUE')}${chk('remindShift','Bereitschaft erinnern',c.remindShift===true||c.remindShift==='TRUE')}${input('Stichtag der Verfügbarkeit (Tag im Monat)','availabilityDay',c.availabilityDay||20,'number','min="1" max="28"')}${input('Nachtbeginn (0–23 Uhr)','nightStart',c.nightStart??22,'number','min="0" max="23"')}${input('Nachtende (0–23 Uhr)','nightEnd',c.nightEnd??6,'number','min="0" max="23"')}<button class="btn primary">Firmenangaben speichern</button>${has('CALENDAR')?'<button class="btn" type="button" data-act="calendarTest">Kalender testen</button>':''}</form></div><div class="card"><h2>Arbeitszeitmodell</h2><form id="profileForm">${profileFields(p)}<button class="btn primary">Arbeitszeitmodell speichern</button></form>${ftActivityTypesAdminPanel_()}<hr><h3>Kundenlink</h3><p class="small muted" style="word-break:break-word">${E(ST.h.loginUrl)}</p><button class="btn" data-act="copyUrl">Link kopieren</button></div></div>`;}
-function profile(){return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;}
+function profile(){
+ return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p></div>`+
+  (ST.h?.backgroundPushSupported?`<section class="card ft-account-push"><h2>🔔 Benachrichtigungen</h2><p class="muted small">Push-Mitteilungen und registrierte Geräte für dein persönliches Konto verwalten.</p>${ftCommNotificationUI_()}</section>`:'')+
+  `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;
+}
 
 async function ftCommPhotoData_(input){
  const file=input?.files?.[0];
@@ -3092,7 +3086,7 @@ if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
     String(result.push?.reason|| (result.push?.failed?'Der Push-Anbieter hat die Zustellung abgelehnt (Fehlerdiagnose im Apps Script aktualisieren).':'Keine Zustellung bestätigt.')));
    say('Test-Push versendet. Prüfe die Benachrichtigung auf deinem Gerät.');
   }
-  if(ST.tab==='messages')page();
+  if(ST.tab==='profile')page();
  }catch(err){say('Push: '+String(err.message||err),true);}
  finally{if(btn.isConnected){btn.disabled=false;btn.textContent=label;}}
  return;
