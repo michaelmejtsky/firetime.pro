@@ -194,3 +194,48 @@ test('UI exposes messages, photo capture, badge API, and both pause buttons',()=
  assert.match(frontend,/Kollege · /);
  assert.match(frontend,/Administrator · /);
 });
+
+
+test('existing Drive photos open by file signature even if content type is generic',()=>{
+ const code=section(backend,'function ft_commPhoto_(actor,p)','function ft_commList_');
+ const actor={id:'staff-a',role:'STAFF',companyId:'company-a'};
+ const thread={id:'thread-1',companyId:'company-a',createdBy:'staff-a',recipientId:'staff-b',
+  attachmentId:'photo-1'};
+ const jpeg=[255,216,255,224,0,1,3,5];
+ const png=[137,80,78,71,13,10,26,10,0,0,0,0];
+ const webp=[82,73,70,70,5,0,0,0,87,69,66,80,0];
+ let bytes=jpeg;
+ const ctx={
+  String,Error,
+  ft_commThread_:()=>thread,
+  ft_commReplies_:()=>[],
+  DriveApp:{getFileById:id=>{
+   assert.equal(id,'photo-1');
+   return {getBlob:()=>({getContentType:()=> 'application/octet-stream',getBytes:()=>bytes})};
+  }},
+  Utilities:{base64Encode:list=>Buffer.from(list.map(x=>x&255)).toString('base64')}
+ };
+ const fn=vm.runInNewContext(code+';ft_commPhoto_',ctx);
+ for(const [sample,type] of [[jpeg,'image/jpeg'],[png,'image/png'],[webp,'image/webp']]){
+  bytes=sample;const out=fn(actor,{threadId:'thread-1',attachmentId:'photo-1'});
+  assert.equal(out.mime,type);
+  assert.equal(out.data,Buffer.from(sample).toString('base64'));
+ }
+ assert.throws(()=>fn(actor,{threadId:'thread-1',attachmentId:'other'}),/gehört nicht/);
+ bytes=[60,115,99,114,105,112,116,62];
+ assert.throws(()=>fn(actor,{threadId:'thread-1',attachmentId:'photo-1'}),/unterstütztes Bildformat/);
+});
+test('image viewer and contextual UI are current, and PWA cache works in subpaths',()=>{
+ assert.match(frontend,/function ftCommPhotoPreview_\(/);
+ assert.match(frontend,/URL\.createObjectURL/);
+ assert.match(frontend,/ft-photo-viewer/);
+ assert.match(frontend,/Foto konnte nicht geöffnet werden/);
+ assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.7'/);
+ assert.match(frontend,/ft-help-header/);
+ assert.match(frontend,/Stand der geladenen App-Oberfläche/);
+ const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
+ assert.doesNotThrow(()=>new vm.Script(sw));
+ assert.match(sw,/self\.registration\.scope/);
+ assert.match(sw,/cache:'no-store'/);
+ assert.match(sw,/firetime-shell-20261021-v187/);
+});
