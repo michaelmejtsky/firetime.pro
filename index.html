@@ -932,7 +932,7 @@ function mobileNav(){
  const grouped=groups.map(([title,items])=>{const visible=items.filter(t=>remaining.includes(t));return visible.length?`<section class="ft-mobile-group"><h3>${E(title)}</h3>${visible.map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</section>`:'';}).join('');
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
-function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();}
+function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div><h1>${E(LABELS[ST.tab])}</h1></div>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();ftCommStartPoll_();}
 // Date inputs in mobile Safari can exceed CSS width due to native control sizing.
 // Measure the real box and clamp only inputs that cross their card's inner edge.
 function ftFitFormControls(root){
@@ -990,6 +990,22 @@ async function ftCommFetch_(force){
   if(ST.tab==='messages')page();
  }finally{ST.commLoading=false;}
 }
+let FT_COMM_POLL_TIMER=null;
+async function ftCommPoll_(){
+ if(!ST.token||!firm()?.id||!ST.h?.commSupported||document.visibilityState==='hidden'||ST.commLoading)return;
+ if(ST.tab==='messages'&&(ST.commCompose||document.activeElement?.closest('form')))return;
+ const cid=firm().id;
+ try{const result=await api('commList',{companyId:cid});
+  if(firm()?.id!==cid)return;
+  ST.comm=result;ftCommSetBadge_(result.unread);
+  if(ST.tab==='messages')page();}
+ catch(err){console.warn('Nachrichten-Aktualisierung:',String(err.message||err));}
+}
+function ftCommStartPoll_(){
+ if(FT_COMM_POLL_TIMER)return;
+ FT_COMM_POLL_TIMER=setInterval(()=>ftCommPoll_(),120000);
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')ftCommPoll_();});
 function ftCommPhotoButton_(id,threadId){
  return id?'<button type="button" class="btn ft-msg-photo-btn" data-act="commPhoto" data-id="'+
   E(id)+'" data-thread="'+E(threadId)+'">📷 Foto ansehen</button>':'';
@@ -1047,7 +1063,7 @@ function ftMessages_(){
  return '<div class="ft-msg-heading"><div><h2>Nachrichten & Aufgaben</h2>'+
   '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
   '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
-  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
+  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button><button class="btn" type="button" data-act="commNotifications">Icon-Hinweise</button></div></div>'+
   '<p class="muted small">Die Zahl am App-Icon wird beim Öffnen bzw. Aktualisieren der installierten App synchronisiert. Echte Push-Benachrichtigungen bei geschlossener App benötigen zusätzlich einen Push-Dienst.</p>'+
   composer+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
   (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
@@ -2687,6 +2703,13 @@ async function ftCommPhotoData_(input){
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
 
 
+if(a==='commNotifications'){
+ if(!('Notification' in window)||!window.isSecureContext){say('Auf diesem Gerät sind App-Mitteilungen nicht verfügbar.',true);return;}
+ try{const permission=await Notification.requestPermission();
+  ftCommSetBadge_(ST.comm?.unread||ST.commCount||0);
+  say(permission==='granted'?'Mitteilungen erlaubt. App-Icon-Badges werden beim Öffnen aktualisiert.':'Mitteilungen nicht erlaubt. E-Mail bleibt aktiv.',permission!=='granted');}
+ catch(err){say('Mitteilungen: '+String(err.message||err),true);}return;
+}
 if(a==='commNew'){ST.commCompose=true;page();return;}
 if(a==='commCloseCompose'){ST.commCompose=false;page();return;}
 if(a==='commRefresh'){ST.comm=null;await ftCommFetch_(true);return;}
