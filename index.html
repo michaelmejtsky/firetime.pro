@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-ios-ui-push-diagnostics-v188"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-operations-push-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -755,7 +755,7 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:new URLSearchParams(location.search).get('tab')==='messages'?'messages':'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:['messages','availability','standby','leave','time','reports','sick','work'].includes(new URLSearchParams(location.search).get('tab'))?new URLSearchParams(location.search).get('tab'):'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -788,7 +788,7 @@ const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.8';
+const FT_VISIBLE_VERSION='1.8.9';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
