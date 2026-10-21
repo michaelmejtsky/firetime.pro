@@ -672,6 +672,16 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 @media(prefers-reduced-motion:reduce){
  .ft-mobile-bar{transition:none!important}
 }
+/* Opaque iOS status-bar backdrop: scrolling calendar cards cannot overlap the clock. */
+@media(max-width:800px) and (display-mode:standalone){
+ @supports (-webkit-touch-callout:none){
+  body::before{
+   content:"";display:block;position:fixed;
+   top:0;left:0;right:0;height:max(48px,env(safe-area-inset-top,0px));
+   z-index:70;pointer-events:none;background:#0b1725;
+  }
+ }
+}
 /* Monthly report KPIs: compact precision, readable on small iPhones. */
 .ft-report-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0 18px}
 .ft-report-kpis .ft-report-kpi{margin:0;min-width:0;max-width:100%;padding:clamp(12px,2.5vw,19px)}
