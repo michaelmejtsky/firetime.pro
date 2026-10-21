@@ -2106,12 +2106,22 @@ function ft_commCreate_(actor,p){
  ft_audit_(actor,'COMM_CREATE','CommThreads',row.id,{}, {companyId:c.id,kind,recipientId:recipient.id,dueDate});
  return {thread:ft_commPublic_(row),mailSent:ft_commMail_(c,recipient,actor,row,row.id,'NEW')};
 }
+/** Strictly monotonic thread timestamps: on very fast replies/changes a new
+ * event must be newer than the last read receipt, even within one millisecond.
+ */
+function ft_commNextUpdateTime_(thread){
+ const reads=ft_commReads_().filter(x=>x.threadId===thread.id&&x.companyId===thread.companyId);
+ const lastRead=reads.reduce((max,x)=>Math.max(max,Date.parse(x.seenAt)||0),0);
+ const previous=Date.parse(thread.updatedAt)||0;
+ return new Date(Math.max(Date.now(),previous,lastRead)+1).toISOString();
+}
+
 function ft_commReply_(actor,p){
  const thread=ft_commThread_(actor,p.threadId),c=ft_commCompany_(actor,{companyId:thread.companyId});
  const body=ft_str_(p.body||'',3000).trim();
  if(!body)throw Error('Bitte eine Antwort eingeben.');
  const reply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
-  bodyEncoded:ft_commEncode_(body),createdAt:ft_now_(),attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
+  bodyEncoded:ft_commEncode_(body),createdAt:ft_commNextUpdateTime_(thread),attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
  ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,reply);
  thread.updatedAt=reply.createdAt;ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);
  ft_commRead_(actor,thread);
@@ -2133,7 +2143,7 @@ function ft_commTaskStatus_(actor,p){
  if(actor.role==='STAFF'&&(next!=='DONE'||thread.recipientId!==actor.id))
   throw Error('Du kannst nur deine eigenen Aufgaben als erledigt melden.');
  if(thread.status===next)return {ok:true};
- const before=thread.status;thread.status=next;thread.updatedAt=ft_now_();
+ const before=thread.status;thread.status=next;thread.updatedAt=ft_commNextUpdateTime_(thread);
  ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);ft_commRead_(actor,thread);
  const c=ft_company_(actor,thread.companyId),other=ft_one_('Users',thread.createdBy===actor.id?thread.recipientId:thread.createdBy);
  if(other&&other.status==='ACTIVE')ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');
