@@ -1964,7 +1964,7 @@ function ftTimerPanel_(){
  (modern?
  '<div class="ft-clock-pause-state">'+(running.paused?'⏸ Pause läuft seit '+E(ftViennaDateTime(running.pauseStartedAt))+' Uhr':'✓ Abgeschlossene Pausen: '+recorded+' Minuten')+'</div>'+
  '<div class="ft-clock-actions"><button type="button" class="btn" data-act="'+(running.paused?'timerPauseStop':'timerPauseStart')+'">'+(running.paused?'▶ Pause beenden':'⏸ Pause beginnen')+'</button>'+
- '<button type="button" class="btn primary" data-act="timerStop"'+(running.paused?' disabled':'')+'>Arbeit beenden</button></div>'+
+ '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button></div>'+
  '<p class="muted small">Nur tatsächlich gestartete und beendete Pausen werden abgezogen.</p>':
  '<label class="field"><span>Tatsächliche Pause (Minuten)</span><input type="number" id="ftTimerBreakMinutes" min="0" max="1440" step="1" value="0"></label>'+
  '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button>')+'</div>':
@@ -3279,15 +3279,18 @@ if(a==='timerPauseStart'||a==='timerPauseStop'){
 }
 if(a==='timerStop'){
  const running=ST.h?.runningTimer,modern=Boolean(ST.h?.pauseClockSupported);
- if(modern&&running?.paused){say('Bitte zuerst die Pause beenden.',true);return;}
+ // End is allowed even during a running pause. Apps Script then closes
+ // both using the actual server timestamps, without inventing break minutes.
  const input=document.getElementById('ftTimerBreakMinutes');
  const pause=modern?Number(running?.completedPauseMinutes||0):Number(input?.value||0);
  if(!Number.isInteger(pause)||pause<0||pause>1440){say('Ungültige Pausendauer.',true);return;}
  const pausePending=running?.type==='OBJECT'&&
   ftTimePauseRequired_('OBJECT',running.start,new Date())&&pause<30;
- const question=pausePending
-  ?'Achtung: Objektkontrolle über 6 Stunden, aber weniger als 30 Minuten Pause erfasst. Die tatsächlich genommene Pause fehlt möglicherweise.\n\nArbeit trotzdem JETZT beenden? Die echte Arbeitszeit wird gespeichert und die Pausenangabe zur Prüfung markiert. Es wird keine Pause erfunden.'
-  :'Arbeitszeit beenden? Erfasste Pause: '+pause+' Minuten.';
+ const question=running?.paused
+  ?'Arbeit jetzt beenden? Deine laufende Pause wird gleichzeitig mit dem tatsächlichen Arbeitsende abgeschlossen und bis dahin als Pause gerechnet.'
+  :pausePending
+   ?'Achtung: Objektkontrolle über 6 Stunden, aber weniger als 30 Minuten Pause erfasst. Die tatsächlich genommene Pause fehlt möglicherweise.\n\nArbeit trotzdem JETZT beenden? Die echte Arbeitszeit wird gespeichert und die Pausenangabe zur Prüfung markiert. Es wird keine Pause erfunden.'
+   :'Arbeitszeit beenden? Erfasste Pause: '+pause+' Minuten.';
  if(!confirm(question))return;
  btn.disabled=true;
  try{const result=await api('timerStop',{companyId:firm().id,breakMinutes:modern?0:pause});await load();
