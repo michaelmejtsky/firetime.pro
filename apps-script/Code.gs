@@ -2010,7 +2010,8 @@ function ft_commUnread_(actor,c){
 function ft_commRead_(actor,t){
  const rows=ft_commReads_(),existing=rows.find(x=>x.companyId===t.companyId&&x.threadId===t.id&&x.userId===actor.id);
  const row=existing||{id:ft_uuid_(),companyId:t.companyId,threadId:t.id,userId:actor.id};
- row.seenAt=ft_now_();
+ // Wer gerade geantwortet hat, hat seinen eigenen neuesten Stand gelesen.
+ row.seenAt=new Date(Math.max(Date.now(),Date.parse(t.updatedAt)||0)).toISOString();
  if(existing)ft_absenceSave_('CommReads',FT_COMM_READ_COLS_,row);
  else ft_absenceAdd_('CommReads',FT_COMM_READ_COLS_,row);
  return true;
