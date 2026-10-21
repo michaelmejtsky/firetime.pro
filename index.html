@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-pause-messages-tasks-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-private-colleague-messages-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -1019,8 +1019,10 @@ function ftMessages_(){
  const users=new Map((data.users||[]).map(x=>[String(x.id),x.name]));
  const label=id=>E(users.get(String(id))||'Mitarbeiter');
  const chosen=(data.threads||[]).find(x=>x.id===ST.commOpen);
- const isManager=isAdmin(),recipientOptions=(data.recipients||[]).map(x=>[x.id,x.name]);
+ const isManager=isAdmin(),recipientOptions=(data.recipients||[]).map(x=>
+  [x.id,(!isManager?(x.role==='ADMIN'?'Administrator · ':'Kollege · '):'')+x.name]);
  const composer=ST.commCompose?'<section class="card ft-msg-composer"><h3>Neue '+(isManager?'Nachricht oder Aufgabe':'Nachricht')+'</h3>'+
+  '<p class="muted small">Nur du und der ausgewählte Empfänger können diese Unterhaltung lesen. Mitarbeiter können Kollegen und Firmenadministratoren anschreiben; Aufgaben vergibt nur die Administration.</p>'+
   '<form id="ftCommCreateForm">'+
   (isManager?select('kind','Art',[['MESSAGE','Nachricht'],['TASK','Aufgabe mit Frist']],'MESSAGE'):'')+
   select('recipientId','Empfänger',recipientOptions,recipientOptions[0]?.[0]||'')+
