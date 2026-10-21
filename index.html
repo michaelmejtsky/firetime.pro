@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-background-push-v188"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-help-popup-fix-v189"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -600,6 +600,34 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  z-index:40;width:min(360px,calc(100vw - 44px));box-shadow:0 15px 36px #0009;
  background:#203d53;color:#e7f4fc;border:1px solid #6386a0;border-radius:12px;
  font-size:13px;padding:13px 14px;line-height:1.55}
+/* FireTime Pro 1.8.9: Infofenster bleibt in jedem mobilen Viewport sichtbar. */
+.ft-help-header>.ft-page-hint[open]>.ft-page-hint-content{
+ position:fixed!important;
+ top:clamp(64px,12dvh,110px)!important;
+ left:50%!important;
+ right:auto!important;
+ transform:translateX(-50%)!important;
+ width:min(380px,calc(100vw - 24px))!important;
+ max-width:calc(100vw - 24px)!important;
+ max-height:min(65dvh,550px)!important;
+ overflow-y:auto!important;
+ overscroll-behavior:contain;
+ overflow-wrap:anywhere;
+ z-index:9999!important;
+ box-shadow:0 20px 60px #000b;
+ -webkit-overflow-scrolling:touch;
+}
+@supports not (height:100dvh){
+ .ft-help-header>.ft-page-hint[open]>.ft-page-hint-content{max-height:65vh!important}
+}
+@media(max-width:580px){
+ .ft-help-header>.ft-page-hint[open]>.ft-page-hint-content{
+  top:72px!important;
+  width:calc(100vw - 20px)!important;
+  max-width:calc(100vw - 20px)!important;
+  max-height:calc(100dvh - 100px)!important;
+ }
+}
 .ft-build-version{font-size:10px;font-weight:800;letter-spacing:.03em;color:#aac4d5;
  border:1px solid #345b76;padding:5px 8px;border-radius:8px;white-space:nowrap}
 @media(max-width:650px){
