@@ -42,6 +42,10 @@ FT_PUSH_WORKER_URL = https://firetime-pro-api.firetime-pro.workers.dev
 
 Die Worker-Adresse ohne \`/api\` oder \`/internal/push\` eintragen. Falls deine öffentliche API-Worker-URL anders heißt, nimm dieselbe Origin wie in \`config.js\`, jedoch ohne \`/api\`. \`FT_GATEWAY_KEY\` und alle bestehenden Einstellungen **nicht verändern**.
 
+**Wichtig: Apps-Script-Manifest:** Weil Web Push `UrlFetchApp.fetch` verwendet, benötigt dein Apps Script den zusätzlichen OAuth-Scope `https://www.googleapis.com/auth/script.external_request`. Die vollständige korrigierte `apps-script/appsscript.json` liegt im Repository. Im Apps Script unter **Projekteinstellungen → Appsscript.json-Manifestdatei im Editor anzeigen** aktivieren, im Editor `appsscript.json` öffnen und die komplette Datei aus GitHub übernehmen. Die anderen Berechtigungen nicht löschen.
+
+**Berechtigung einmalig bestätigen:** Nach dem Speichern im Apps Script die harmlose Funktion `ft_pushBerechtigungPruefen_EINMAL` im Funktionsmenü wählen und über **Ausführen** starten. Wenn Google eine neue Berechtigung verlangt, als Eigentümer zulassen. Diese Funktion bereitet nur eine Beispielanfrage auf und verschickt **keine** Nachricht oder Netzwerkanfrage und ändert keine Tabellen. Anschließend im Bereitstellungsmenü eine **neue Web-App-Version** veröffentlichen.
+
 **Keine Setup-, Installations- oder Upgrade-Funktion ausführen.** Die optionale Tabelle \`PushDevices\` entsteht erst bei der ersten Geräteaktivierung.
 
 ### 4. Mitarbeiter richten Push selbst ein
