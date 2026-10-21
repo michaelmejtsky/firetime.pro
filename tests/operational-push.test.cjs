@@ -97,7 +97,7 @@ test('leave approved, cancellation approved and cancellation denied have distinc
  for(const list of [approved,cancelled,denied])assert.deepEqual(Array.from(list,x=>x.userId),['u1']);
  assert.match(approved[0].title,/genehmigt/);
  assert.match(cancelled[0].title,/storniert/);
- assert.match(denied[0].title,/Stornierung abgelehnt/);
+ assert.match(denied[0].title,/Urlaubsstornierung abgelehnt/);
 });
 test('publishing many duties sends one consolidated push per employee',()=>{
  const actor={id:'admin',companyId:'a',role:'ADMIN'};
