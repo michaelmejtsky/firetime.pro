@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-20-roster-timer-types-date-polish-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-pause-messages-tasks-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -1303,13 +1303,18 @@ function ftTimerPanel_(){
  if(ST.h?.workflowReady!==true)return '<section class="card ft-timer-card"><h2>Arbeit beginnen / beenden</h2>'+
  '<p class="ft-plan-message ft-plan-warning">Die Stempeluhr wird nach dem Apps-Script-Update und dem einmaligen Ausführen von ft_workflowUpgrade freigeschaltet. Manuelle Arbeitszeiterfassung funktioniert weiterhin.</p></section>';
  const running=ST.h?.runningTimer;
+ const recorded=Number(running?.completedPauseMinutes||0);
+ const modern=Boolean(ST.h?.pauseClockSupported);
  const live=running?
- '<div class="ft-timer-active"><strong>Arbeitszeit läuft seit '+E(ftViennaDateTime(running.start))+' Uhr</strong>'+
- '<div>Die Endzeit wird beim Beenden übernommen. Ohne Stopp endet der Eintrag am selben Tag um 19:00 Uhr.</div>'+
- '<label class="field ft-timer-break"><span>Tatsächlich genommene Pause (Minuten)</span>'+
- '<input type="number" inputmode="numeric" id="ftTimerBreakMinutes" min="0" max="1440" step="1" value="0" required>'+
- '<small>Bei Objektkontrollen über 6 Stunden mindestens 30 Minuten angeben. Die Pause wird nicht automatisch eingetragen.</small></label>'+
- '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button></div>':
+ '<div class="ft-timer-active"><strong>Arbeit läuft seit '+E(ftViennaDateTime(running.start))+' Uhr</strong>'+
+ '<p class="muted small">Automatische Schließung am selben Tag um 19:00 Uhr.</p>'+
+ (modern?
+ '<div class="ft-clock-pause-state">'+(running.paused?'⏸ Pause läuft seit '+E(ftViennaDateTime(running.pauseStartedAt))+' Uhr':'✓ Abgeschlossene Pausen: '+recorded+' Minuten')+'</div>'+
+ '<div class="ft-clock-actions"><button type="button" class="btn" data-act="'+(running.paused?'timerPauseStop':'timerPauseStart')+'">'+(running.paused?'▶ Pause beenden':'⏸ Pause beginnen')+'</button>'+
+ '<button type="button" class="btn primary" data-act="timerStop"'+(running.paused?' disabled':'')+'>Arbeit beenden</button></div>'+
+ '<p class="muted small">Nur tatsächlich gestartete und beendete Pausen werden abgezogen.</p>':
+ '<label class="field"><span>Tatsächliche Pause (Minuten)</span><input type="number" id="ftTimerBreakMinutes" min="0" max="1440" step="1" value="0"></label>'+
+ '<button type="button" class="btn primary" data-act="timerStop">Arbeit beenden</button>')+'</div>':
  '<form id="ftTimerForm"><div class="cols">'+
  ftActivityPicker_('OBJECT','',true)+
  input('Objekt / Einsatzort (optional)','timerObject','')+
