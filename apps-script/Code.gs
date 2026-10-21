@@ -1654,16 +1654,20 @@ function ft_viennaWallDate_(value){
 function ft_timerClose_(timer,actor,auto,actualPauseMinutes){
  const beginning=new Date(timer.start),day=ft_localDate_(beginning),endOfDay=ft_viennaWallDate_(day+'T19:00');
  const pauses=ft_timerPauseData_(timer);
- if(pauses.paused&&!auto)throw Error('Bitte zuerst die laufende Pause beenden und dann die Arbeitszeit stoppen.');
- const minutes=pauses.rows.length?pauses.completedMinutes:Number(actualPauseMinutes)||0;
  let finish=new Date();if(finish>endOfDay)finish=endOfDay;
+ // Pressing End while paused also ends that *real, started* pause at End.
+ // It must not leave an open timer which might auto-close at 19:00.
+ const pendingPauseMinutes=pauses.paused&&pauses.active?
+  Math.max(0,(finish.getTime()-Date.parse(pauses.active.start))/60000):0;
+ const minutes=pauses.rows.length?
+  Math.round(pauses.completedMinutes+pendingPauseMinutes):Number(actualPauseMinutes)||0;
  if(finish<=beginning)throw Error('Endzeit muss nach dem Arbeitsbeginn liegen.');
  const out=ft_activitySave_(actor,{userId:timer.userId,companyId:timer.companyId,
   type:timer.type,activityOptionId:timer.activityOptionId||'',
   start:Utilities.formatDate(beginning,FT_TZ,"yyyy-MM-dd'T'HH:mm"),end:Utilities.formatDate(finish,FT_TZ,"yyyy-MM-dd'T'HH:mm"),
   object:timer.object||'',description:(timer.description||'')+
    (auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':'')+
-   (pauses.paused?' [Laufende Pause beim Abschluss ungeklärt – bitte korrigieren.]':''),
+   (pauses.paused?' [Laufende Pause mit Arbeitsende abgeschlossen.]':''),
   // A pressed Stop must really finish the timer. If the legally required pause
   // is missing, save the real minutes and flag the row for correction instead
   // of blocking manual Stop and accidentally forcing a 19:00 auto-close.
