@@ -6,6 +6,7 @@ on:
       - 'tests/dashboard.test.cjs'
       - 'tests/monthly-report-ui.test.cjs'
       - 'tests/mobile-footer.test.cjs'
+      - 'tests/navigation-prefetch.test.cjs'
       - '.github/workflows/dashboard-regression.yml'
   push:
     branches: [main]
@@ -14,6 +15,7 @@ on:
       - 'tests/dashboard.test.cjs'
       - 'tests/monthly-report-ui.test.cjs'
       - 'tests/mobile-footer.test.cjs'
+      - 'tests/navigation-prefetch.test.cjs'
       - '.github/workflows/dashboard-regression.yml'
   workflow_dispatch:
 
@@ -31,4 +33,4 @@ jobs:
         with:
           node-version: '22'
       - name: Dashboard-Regressionstest
-        run: node --test tests/dashboard.test.cjs tests/monthly-report-ui.test.cjs tests/mobile-footer.test.cjs
+        run: node --test tests/dashboard.test.cjs tests/monthly-report-ui.test.cjs tests/mobile-footer.test.cjs tests/navigation-prefetch.test.cjs
