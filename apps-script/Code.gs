@@ -2179,7 +2179,8 @@ function ft_pushOperationsTick_(){
   submissions:ft_get_('AvailabilitySubmissions'),months:ft_get_('Months'),
   shifts:ft_get_('Shifts'),segments:ft_get_('ShiftSegments'),
   sickLeaves:ft_get_('SickLeaves'),
-  timers:ft_db_().getSheetByName('ActivityTimers')?ft_get_('ActivityTimers'):[],
+  // Only completed auto-close activities can generate timer reminders.
+  // Do not read/notify running timers in the reminder sweep.
   activities:ft_get_('Activities')
  };
  const events=ft_pushOperationalEvents_(now,source);
