@@ -2985,6 +2985,16 @@ if(form.id==='ftCommCreateForm'){
  }catch(err){say('Senden fehlgeschlagen: '+String(err.message||err),true);}
  finally{if(button?.isConnected)button.disabled=false;}return;
 }
+if(form.id==='ftCommReplyForm'){
+ const button=form.querySelector('button[type=submit]');if(button)button.disabled=true;
+ try{
+  const photo=await ftCommPhotoData_(form.elements.namedItem('photo'));
+  const result=await api('commReply',{companyId:firm().id,threadId:form.dataset.thread,body:p.body,photo});
+  await ftCommFetch_(true);
+  say(result.mailSent?'Antwort und E-Mail versendet.':'Antwort gespeichert. E-Mail-Versand bitte prüfen.',!result.mailSent);
+ }catch(err){say('Antwort fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(button?.isConnected)button.disabled=false;}return;
+}
 if(form.getAttribute('id')==='staffForm'){
   if(form.dataset.saving==='1')return;
   form.dataset.saving='1';
