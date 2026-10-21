@@ -1923,9 +1923,24 @@ function ft_pushFailureReason_(results){
  const error=String(failed.error||'').toLowerCase();
  if(/jwk|key|ecdh|ecdsa|crypto|encrypt|decrypt|signature/.test(error))
   return 'Cloudflare-Kryptografiefehler. VAPID-Schlüsselpaar bzw. Web-Push-Verschlüsselung prüfen.';
- if(/fetch|network|timeout|abort/.test(error))
-  return 'Cloudflare konnte den Push-Anbieter nicht erreichen (Netzwerk oder Zeitüberschreitung).';
- return 'Cloudflare-Worker konnte die Push-Nachricht nicht zustellen (Status 0).';
+ if(/network connection lost|connection reset|connection refused|failed to fetch|fetch failed|dns|tls|ssl|certificate|socket/i.test(error))
+  return 'Cloudflare konnte keine stabile Verbindung zum Push-Anbieter aufbauen (Netzwerk/TLS).';
+ if(/timeout|abort/i.test(error))
+  return 'Cloudflare hat die Verbindung zum Push-Anbieter wegen einer Zeitüberschreitung abgebrochen.';
+ if(/not a function|not supported|unsupported|not implemented/i.test(error))
+  return 'Cloudflare-Laufzeit unterstützt eine benötigte Web-Push-Funktion nicht.';
+ // Redact URL endpoints, email addresses and long identifiers from runtime errors.
+ // Never show any subscription token, JWK secret, endpoint or personal address.
+ const detail=String(failed.error||'')
+  .replace(/https?:\/\/[^\s,;)}]+/gi,'[URL]')
+  .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi,'[E-Mail]')
+  .replace(/[A-Za-z0-9_/-]{24,}/g,'[Wert]')
+  .replace(/[{}[\]<>"'`]/g,'')
+  .replace(/[^A-Za-z0-9äöüÄÖÜß .,:;()_/-]/g,'')
+  .slice(0,110);
+ return detail
+  ? 'Cloudflare-Laufzeitfehler (Status 0): '+detail
+  : 'Cloudflare hat keine Fehlerdetails geliefert (Status 0).';
 }
 
 function ft_pushDispatch_(actor,kind,id,title,body){
