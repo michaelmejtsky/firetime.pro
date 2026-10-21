@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-warm-navigation-v1812"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-22-timer-end-consistent-v1813"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -873,7 +873,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.12';
+const FT_VISIBLE_VERSION='1.8.13';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -3283,9 +3283,12 @@ if(a==='timerStop'){
  const input=document.getElementById('ftTimerBreakMinutes');
  const pause=modern?Number(running?.completedPauseMinutes||0):Number(input?.value||0);
  if(!Number.isInteger(pause)||pause<0||pause>1440){say('Ungültige Pausendauer.',true);return;}
- if(running?.type==='OBJECT'&&ftTimePauseRequired_('OBJECT',running.start,new Date())&&pause<30){
-  say('Objektkontrolle über 6 Stunden: Mindestens 30 Minuten tatsächlich genommene Pause angeben. Keine Pause fingieren.',true);return;}
- if(!confirm('Arbeitszeit beenden? Erfasste Pause: '+pause+' Minuten.'))return;
+ const pausePending=running?.type==='OBJECT'&&
+  ftTimePauseRequired_('OBJECT',running.start,new Date())&&pause<30;
+ const question=pausePending
+  ?'Achtung: Objektkontrolle über 6 Stunden, aber weniger als 30 Minuten Pause erfasst. Die tatsächlich genommene Pause fehlt möglicherweise.\n\nArbeit trotzdem JETZT beenden? Die echte Arbeitszeit wird gespeichert und die Pausenangabe zur Prüfung markiert. Es wird keine Pause erfunden.'
+  :'Arbeitszeit beenden? Erfasste Pause: '+pause+' Minuten.';
+ if(!confirm(question))return;
  btn.disabled=true;
  try{const result=await api('timerStop',{companyId:firm().id,breakMinutes:modern?0:pause});await load();
   say('Arbeitszeit gespeichert bis '+ftViennaDateTime(result.closedAt)+' Uhr.');}
