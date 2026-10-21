@@ -2178,6 +2178,117 @@ function ft_pushOperationsTick_(){
  return {sent,checked:events.length,processed};
 }
 
+
+/**
+ * Push for status changes. Only after successful ft_lock_ transaction:
+ * a push exception must never alter or rollback a leave, handover or approval.
+ * Recipients are resolved by company and user ID, not supplied by clients.
+ * Existing email notifications remain unchanged.
+ */
+function ft_pushEventSpecs_(actor,action,result,p,details){
+ const specs=[], data=result?.row||result?.request||result||{},info=details||{};
+ const add=(cid,uid,kind,reference,title,body,notifySelf)=>{
+  if(!cid||!uid||(!notifySelf&&String(actor.id)===String(uid)))return;
+  specs.push({companyId:String(cid),userId:String(uid),kind,reference:String(reference||''),
+   title:String(title),body:String(body)});
+ };
+ const affectedManagers=(companyId,kind,reference,title,body)=>{
+  ft_get_('Users').filter(x=>String(x.companyId)===String(companyId)&&
+   x.status==='ACTIVE'&&x.role==='ADMIN'&&x.id!==actor.id).slice(0,20)
+   .forEach(x=>add(companyId,x.id,kind,reference,title,body));
+ };
+ const cId=String(data.companyId||actor.companyId||'');
+ const date=v=>{
+  const d=new Date(v);
+  return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'dd.MM. HH:mm')+' Uhr':'';
+ };
+ const range=(from,to)=>[date(from),date(to)].filter(Boolean).join(' – ');
+ if(action==='handoverRequest'){
+  add(cId,data.toUserId,'PUSH_HANDOVER_REQUEST',data.id,
+   'FireTime Pro · Anfrage zur Dienstübergabe',
+   'Ein Kollege möchte dir Bereitschaft übertragen ('+range(data.start,data.end)+'). Bitte annehmen oder ablehnen.');
+ }else if(action==='handoverRespond'){
+  add(cId,data.fromUserId,'PUSH_HANDOVER_ANSWER',data.id+'|'+data.status,
+   'FireTime Pro · Dienstübergabe '+(data.status==='ACCEPTED'?'angenommen':'abgelehnt'),
+   data.status==='ACCEPTED'
+    ?'Dein Diensttausch wurde angenommen. Der Bereitschaftsplan wurde entsprechend geändert.'
+    :'Deine Anfrage zur Dienstübernahme wurde abgelehnt.');
+ }else if(action==='planAssign'&&info.previous&&
+   info.previous.status==='PUBLISHED'&&String(info.previous.userId||'')!==String(data.userId||'')){
+  // Explicit reassignment of a published duty; both former and new holder are affected.
+  add(cId,info.previous.userId,'PUSH_PLAN_REASSIGN',data.id+'|'+data.userId+'|old',
+   'FireTime Pro · Bereitschaft geändert',
+   'Deine bisherige Bereitschaft am '+String(data.day)+' wurde neu zugeteilt.');
+  add(cId,data.userId,'PUSH_PLAN_REASSIGN',data.id+'|'+data.userId+'|new',
+   'FireTime Pro · Bereitschaft zugeteilt',
+   'Du wurdest für die Bereitschaft am '+String(data.day)+' eingeteilt.');
+ }else if(action==='leaveRequest'){
+  affectedManagers(cId,'PUSH_LEAVE_REQUEST',data.id,
+   'FireTime Pro · Neuer Urlaubsantrag',
+   'Ein Mitarbeiter hat Urlaub beantragt ('+String(data.from)+' bis '+String(data.to)+').');
+ }else if(action==='leaveUpdate'){
+  affectedManagers(cId,'PUSH_LEAVE_UPDATE',data.id+'|'+String(data.from)+'|'+String(data.to),
+   'FireTime Pro · Urlaubsantrag geändert',
+   'Ein offener Urlaubsantrag wurde angepasst ('+String(data.from)+' bis '+String(data.to)+').');
+ }else if(action==='leaveWithdraw'){
+  affectedManagers(cId,'PUSH_LEAVE_WITHDRAW',data.id+'|'+data.status,
+   'FireTime Pro · Urlaubsantrag zurückgezogen',
+   data.status==='CANCEL_PENDING'
+    ?'Ein Mitarbeiter beantragt die Stornierung eines genehmigten Urlaubs. Bitte prüfen.'
+    :'Ein offener Urlaubsantrag wurde zurückgezogen.');
+ }else if(action==='leaveReview'){
+  let title='',body='';
+  if(data.status==='CANCELLED'){
+   title='FireTime Pro · Urlaub storniert';
+   body='Deine Urlaubsstornierung wurde bestätigt ('+String(data.from)+' bis '+String(data.to)+').';
+  }else if(info.previousStatus==='CANCEL_PENDING'){
+   title='FireTime Pro · Urlaubsstornierung abgelehnt';
+   body='Dein Antrag zur Urlaubsstornierung wurde abgelehnt. Der Urlaub bleibt genehmigt.';
+  }else if(data.status==='APPROVED'){
+   title='FireTime Pro · Urlaub genehmigt';
+   body='Dein Urlaubsantrag wurde genehmigt ('+String(data.from)+' bis '+String(data.to)+').';
+  }else if(data.status==='REJECTED'){
+   title='FireTime Pro · Urlaubsantrag abgelehnt';
+   body='Dein Urlaubsantrag wurde abgelehnt ('+String(data.from)+' bis '+String(data.to)+').';
+  }
+  if(title)add(cId,data.userId,'PUSH_LEAVE_REVIEW',data.id+'|'+info.previousStatus+'|'+data.status,title,body,true);
+ }else if(action==='sickReport'){
+  affectedManagers(cId,'PUSH_SICK_REPORT',data.id,
+   'FireTime Pro · Krankenstand gemeldet',
+   'Ein Mitarbeiter hat einen Krankenstand gemeldet. Bitte prüfen und nötige Dienste umplanen.');
+ }else if(action==='sickReview'){
+  add(cId,data.userId,'PUSH_SICK_REVIEW',data.id+'|'+data.status,
+   'FireTime Pro · Krankenstand '+(data.status==='APPROVED'?'bestätigt':'abgelehnt'),
+   'Deine Krankenstandsmeldung wurde '+(data.status==='APPROVED'?'bestätigt.':'abgelehnt.'),true);
+ }else if(action==='monthSubmit'){
+  affectedManagers(cId,'PUSH_MONTH_SUBMITTED',data.id,
+   'FireTime Pro · Monatsbericht eingereicht',
+   'Ein Monatsbericht für '+data.month+' wurde zur Freigabe eingereicht.');
+ }else if(action==='monthReview'){
+  add(cId,data.userId,'PUSH_MONTH_REVIEW',data.id+'|'+data.status,
+   'FireTime Pro · Monatsbericht '+(data.status==='APPROVED'?'freigegeben':'zurückgegeben'),
+   'Dein Monatsbericht '+data.month+' wurde '+(data.status==='APPROVED'?'freigegeben.':'zur Korrektur zurückgegeben.'),true);
+ }else if(action==='shiftConfirm'||action==='segmentConfirm'){
+  if(actor.role!=='STAFF'){
+   add(cId,data.userId,'PUSH_SHIFT_CONFIRMED',data.id,
+    'FireTime Pro · Bereitschaft bestätigt',
+    'Dein Bereitschaftsdienst wurde vom Administrator bestätigt.');
+  }
+ }
+ return specs;
+}
+function ft_pushAfterActionSafe_(actor,action,result,p,details){
+ try{
+  const specs=ft_pushEventSpecs_(actor,action,result,p,details);
+  for(const e of specs.slice(0,25)){
+   const c=ft_one_('Companies',e.companyId),u=ft_one_('Users',e.userId);
+   if(!c||!u||String(u.companyId)!==String(c.id)||u.status!=='ACTIVE')continue;
+   try{ft_pushOperationalOnce_(c,u,e.kind,e.reference,e.title,e.body);}
+   catch(err){console.warn('Ereignis-Push '+action+':',String(err.message||err).slice(0,150));}
+  }
+ }catch(err){console.warn('Ereignis-Push fehlgeschlagen '+action+':',String(err.message||err).slice(0,150));}
+}
+
 function ft_pushTest_(actor,p){
  const c=ft_company_(actor,p.companyId||actor.companyId);
  if(c.id!==actor.companyId)throw Error('Bitte zuerst eine Firma wählen.');
@@ -2450,16 +2561,43 @@ function ft_api(token,action,p){
   case 'planFinalize':return ft_lock_(()=>ft_planFinalize_(u,p));
   case 'planCalendarShare':return ft_lock_(()=>ft_planCalendarShare_(u,p));
   case 'planSuggest':return ft_lock_(()=>ft_planSuggest_(u,p));
-  case 'planAssign':return ft_lock_(()=>ft_planAssign_(u,p));
+  case 'planAssign':{
+   const old=ft_get_('Shifts').find(s=>s.companyId===String(p.companyId||u.companyId)&&s.day===p.day);
+   const previous=old?{userId:old.userId,status:old.status}:null;
+   const changed=ft_lock_(()=>ft_planAssign_(u,p));
+   ft_pushAfterActionSafe_(u,'planAssign',changed,p,{previous});
+   return changed;
+  }
   case 'planPublish':return ft_lock_(()=>ft_planPublishOnly_(u,p));
-  case 'shiftConfirm':return ft_lock_(()=>ft_shiftConfirm_(u,p));
+  case 'shiftConfirm':{
+   const result=ft_lock_(()=>ft_shiftConfirm_(u,p));
+   ft_pushAfterActionSafe_(u,'shiftConfirm',result,p);
+   return result;
+  }
   case 'workSave':return ft_lock_(()=>ft_workSave_(u,p));
   case 'workDelete':return ft_lock_(()=>ft_workDelete_(u,p));
   case 'workPublish':return ft_lock_(()=>ft_workPublish_(u,p));
-  case 'leaveRequest':return ft_lock_(()=>ft_leaveRequest_(u,p));
-  case 'leaveUpdate':return ft_lock_(()=>ft_leaveUpdate_(u,p));
-  case 'leaveWithdraw':return ft_lock_(()=>ft_leaveWithdraw_(u,p));
-  case 'leaveReview':return ft_lock_(()=>ft_leaveReview_(u,p));
+  case 'leaveRequest':{
+   const result=ft_lock_(()=>ft_leaveRequest_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveRequest',result,p);
+   return result;
+  }
+  case 'leaveUpdate':{
+   const result=ft_lock_(()=>ft_leaveUpdate_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveUpdate',result,p);
+   return result;
+  }
+  case 'leaveWithdraw':{
+   const result=ft_lock_(()=>ft_leaveWithdraw_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveWithdraw',result,p);
+   return result;
+  }
+  case 'leaveReview':{
+   const previousStatus=ft_one_('Leaves',p.id)?.status||'';
+   const reviewed=ft_lock_(()=>ft_leaveReview_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveReview',reviewed,p,{previousStatus});
+   return reviewed;
+  }
   case 'leaveAccount':return ft_absenceHistory_(u,p);
   case 'leavePolicyGet':return ft_leavePolicyGet_(u,p);
   case 'leavePolicySave':return ft_lock_(()=>ft_leavePolicySave_(u,p));
@@ -2467,9 +2605,14 @@ function ft_api(token,action,p){
   case 'absencePdfCreate':return ft_absencePdfCreate_(u,p);
   case 'absencePdfArchive':return ft_absencePdfArchive_(u,p);
   case 'absencePdfChunk':return ft_absencePdfChunk_(u,p);
-  case 'monthSubmit':return ft_lock_(()=>ft_monthSubmit_(u,p));
+  case 'monthSubmit':{
+   const result=ft_lock_(()=>ft_monthSubmit_(u,p));
+   ft_pushAfterActionSafe_(u,'monthSubmit',result,p);
+   return result;
+  }
   case 'monthReview':{
    const reviewed=ft_lock_(()=>ft_monthReview_(u,p));
+   ft_pushAfterActionSafe_(u,'monthReview',reviewed,p);
    if(String(reviewed.status)==='APPROVED'){
     // Approval is permanent even when a Google trigger is temporarily unavailable.
     try{reviewed.pdfArchive=ft_pdfAutoQueueApproved_(u,reviewed);}
@@ -2493,11 +2636,31 @@ function ft_api(token,action,p){
   case 'calendarTest':return ft_calendarTest_(u,p.companyId||u.companyId);
   case 'audit':return ft_auditApi_(u,p);
   case 'remindOne':return ft_lock_(()=>ft_remindOne_(u,p));
-  case 'handoverRequest':return ft_lock_(()=>ft_handoverRequest_(u,p));
-  case 'handoverRespond':return ft_lock_(()=>ft_handoverRespond_(u,p));
-  case 'segmentConfirm':return ft_lock_(()=>ft_segmentConfirm_(u,p));
-  case 'sickReport':return ft_lock_(()=>ft_sickReport_(u,p));
-  case 'sickReview':return ft_lock_(()=>ft_sickReview_(u,p));
+  case 'handoverRequest':{
+   const result=ft_lock_(()=>ft_handoverRequest_(u,p));
+   ft_pushAfterActionSafe_(u,'handoverRequest',result,p);
+   return result;
+  }
+  case 'handoverRespond':{
+   const result=ft_lock_(()=>ft_handoverRespond_(u,p));
+   ft_pushAfterActionSafe_(u,'handoverRespond',result,p);
+   return result;
+  }
+  case 'segmentConfirm':{
+   const result=ft_lock_(()=>ft_segmentConfirm_(u,p));
+   ft_pushAfterActionSafe_(u,'segmentConfirm',result,p);
+   return result;
+  }
+  case 'sickReport':{
+   const result=ft_lock_(()=>ft_sickReport_(u,p));
+   ft_pushAfterActionSafe_(u,'sickReport',result,p);
+   return result;
+  }
+  case 'sickReview':{
+   const result=ft_lock_(()=>ft_sickReview_(u,p));
+   ft_pushAfterActionSafe_(u,'sickReview',result,p);
+   return result;
+  }
   case 'shiftPeriodSummary':return ft_shiftPeriodSummary_(u,p);
   case 'calendarResync':return ft_lock_(()=>ft_calendarResync_(u,p));
   default:throw Error('Unbekannte Funktion: '+action);
