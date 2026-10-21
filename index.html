@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-background-app-badge-v1810"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-fast-auto-refresh-v1811"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -816,7 +816,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.10';
+const FT_VISIBLE_VERSION='1.8.11';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -994,8 +994,9 @@ async function ftOpenShell(){
   await load();
  }
 }
-async function load(){
+async function load(options={}){
   if(!ST.token){ST.h=null;auth();return;}
+  const background=Boolean(options.background);
   const loadSeq=++FT_LOAD_SEQ, loadStart=performance.now();
   const requestedTab=ST.tab, requestedMonth=ST.month, requestedCid=ST.cid;
   // Ein einziges signiertes home-Paket fuer die eigene Mitarbeiteroberflaeche.
@@ -1029,6 +1030,9 @@ async function load(){
         if(!fresh.includes(k))home[k]=ST.h[k];
       }
     } else if(!same){FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();}
+    // Detect meaningful changes before replacing live state. An unchanged response
+    // should not remount forms, scroll positions, expanded plans, or dialogs.
+    const before=background&&same?JSON.stringify(ST.h):null;
     FT_LAST_CONTEXT=context;
     ST.h=home;
     if(!same)ST.comm=null;
@@ -1066,17 +1070,22 @@ async function load(){
     }); 
     theme(firm()?.color||ST.brand?.color||'#f37850',ST.h.profile?.secondaryColor||ST.brand?.secondaryColor||'#172c44');
     if(requestedTab==='dashboard')FT_DASHBOARD_LOADING=false;
-    render();
+    if(background&&same){
+      if(before!==JSON.stringify(ST.h)&&ftAutoCanRender_())page();
+      else ftCommUpdateBadges_();
+    }else render();
   }catch(err){
     if(loadSeq!==FT_LOAD_SEQ)return;
     const message=String(err?.message||'Unbekannter Fehler.');
     if(/Sitzung abgelaufen|Bitte anmelden|Zugang nicht aktiv|Sitzung oder Benutzerdaten ungültig/i.test(message)){
       ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();
     }else if(ST.h?.me){
-      const pane=document.getElementById('content');
-      if(pane)pane.innerHTML='<div class="card">Die Ansicht konnte nicht geladen werden. '+E(message)+'</div>';
+      if(!background){
+       const pane=document.getElementById('content');
+       if(pane)pane.innerHTML='<div class="card">Die Ansicht konnte nicht geladen werden. '+E(message)+'</div>';
+      }else console.warn('FireTime Hintergrund-Aktualisierung:',message);
     }else auth();
-    say(message,true);
+    if(!background)say(message,true);
   }
 }
 function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers','profile'];const tabs=['dashboard','messages'];if(me().role==='SYSADMIN')tabs.push('customers','license');if(isAdmin())tabs.push('staff');if(has('TIME'))tabs.push('time');if(has('REPORTS'))tabs.push('reports');if(has('LEAVE'))tabs.push('leave');if(has('SICK'))tabs.push('sick');if(has('WORKPLAN'))tabs.push('work');if(has('STANDBY'))tabs.push('standby');if(has('AVAILABILITY'))tabs.push('availability');if(isAdmin()&&has('REPORTS'))tabs.push('rules');if(isAdmin())tabs.push('settings');tabs.push('profile');return tabs;}
@@ -1111,6 +1120,42 @@ function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers
   });
  },{passive:true});
 })();
+/**
+ * Auto-refresh lives only in the foreground and reuses existing authorized
+ * 'home' requests. No new Apps Script triggers or access scopes.
+ */
+let FT_AUTO_TIMER=null,FT_AUTO_RUNNING=false,FT_AUTO_LAST_TRY=0;
+function ftAutoCanRender_(){
+ if(document.visibilityState==='hidden'||!ST.token||!ST.h?.me)return false;
+ if(ST.edit||ST.commCompose||document.querySelector('dialog[open],.ft-mobile-sheet.is-open'))return false;
+ const root=document.getElementById('content');
+ const focus=document.activeElement;
+ if(root?.contains(focus)&&focus?.closest('form,[contenteditable="true"],textarea,input,select'))return false;
+ // Never collapse a calendar, an opened editor, or a detailed monthly balance.
+ if(root?.querySelector('details[open]'))return false;
+ return true;
+}
+async function ftAutoCheck_(force=false){
+ if(FT_AUTO_RUNNING||!ftAutoCanRender_()||ST.tab==='rules')return false;
+ const now=performance.now();
+ if(now-FT_AUTO_LAST_TRY<12000)return false; // avoid focus/visibility event bursts
+ const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
+ const age=now-(FT_VIEW_FETCHED_AT.get(key)||0);
+ if(!force&&age<60000)return false;
+ FT_AUTO_RUNNING=true;FT_AUTO_LAST_TRY=now;
+ try{await load({background:true});return true;}
+ finally{FT_AUTO_RUNNING=false;}
+}
+function ftAutoStart_(){
+ if(FT_AUTO_TIMER)return;
+ FT_AUTO_TIMER=setInterval(()=>{ftAutoCheck_().catch(err=>console.warn('Auto-Refresh:',err));},12000);
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible')ftAutoCheck_().catch(()=>{});
+});
+window.addEventListener('pageshow',()=>{
+ if(ST.h?.me)ftAutoCheck_().catch(()=>{});
+});
 function mobileNav(){
  const tabs=nav(),top=['dashboard','time','standby','messages'].filter(t=>tabs.includes(t));
  const groups=[['Zeit & Berichte',['reports']],['Nachrichten & Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
@@ -1120,7 +1165,7 @@ function mobileNav(){
  const grouped=groups.map(([title,items])=>{const visible=items.filter(t=>remaining.includes(t));return visible.length?`<section class="ft-mobile-group"><h3>${E(title)}</h3>${visible.map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</section>`:'';}).join('');
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
-function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div class="ft-page-head"><h1>${E(LABELS[ST.tab])}</h1><div class="ft-help-header" id="ft-help-header"></div></div><span class="ft-build-version" title="Stand der geladenen App-Oberfläche">V${FT_VISIBLE_VERSION}</span>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();ftCommStartPoll_();}
+function render(){const c=firm(),central=me().role==='SYSADMIN'&&!c;app.innerHTML=`<div class="shell"><aside class="side"><div class="brand"><em>♨</em> FireTime Pro</div><div class="muted small">${central?'Systemzentrale':E(c?.name)}</div>${me().role==='SYSADMIN'&&c?'<button class="btn" data-act="back">← Systemzentrale</button>':''}<div class="nav">${nav().map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}${t==='messages'?'<span class="ft-msg-badge" aria-label="Ungelesene Nachrichten"></span>':''}</button>`).join('')}</div><div class="muted small">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</div><button class="btn" data-act="logout">Abmelden</button></aside><main class="main"><header class="top"><div class="ft-page-head"><h1>${E(LABELS[ST.tab])}</h1><div class="ft-help-header" id="ft-help-header"></div></div><span class="ft-build-version" title="Stand der geladenen App-Oberfläche">V${FT_VISIBLE_VERSION}</span>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}</header><div class="content" id="content"></div></main>${mobileNav()}</div>`;page();ftCommUpdateBadges_();ftCommStartPoll_();ftAutoStart_();}
 // Date inputs in mobile Safari can exceed CSS width due to native control sizing.
 // Measure the real box and clamp only inputs that cross their card's inner edge.
 function ftFitFormControls(root){
@@ -3551,6 +3596,10 @@ document.addEventListener('click',e=>{const more=e.target.closest?.('[data-mobil
       }).catch(err=>say(err.message,true));
     return;
   }
+  // Account and messages can render from authenticated memory immediately.
+  // A first message view loads its inbox separately, without an extra 'home'.
+  const lightweight=ST.h?.me&&['profile','messages'].includes(ST.tab);
+  if(lightweight){page();return;}
   // First visit to a view only loads its own data; subsequent navigation is instant.
   const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
   const cached=FT_VIEWS_LOADED.has(key);
