@@ -143,7 +143,8 @@ async function pushOne(env,entry,notification){
     'Urgency':'normal'
    },
    body:encrypted,
-   redirect:'error',
+   // Cloudflare Workers only supports 'follow' and 'manual'; never follow push redirects.
+   redirect:'manual',
    signal:AbortSignal.timeout(9000)
   });
   return {id:entry.id,ok:res.status===201||res.status===202||res.status===200,
