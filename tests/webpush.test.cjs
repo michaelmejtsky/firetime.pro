@@ -63,6 +63,10 @@ test('worker VAPID auth and message payload use native WebCrypto in verified for
  assert.equal(result.at(-1),2); // RFC 8291 delimiter
  assert.equal(result.subarray(0,-1).toString(),plain);
 });
+test('Cloudflare push delivery never selects unsupported redirect error mode',()=>{
+ assert.match(workerText,/redirect:\s*'manual'/);
+ assert.doesNotMatch(workerText,/redirect:\s*'error'/);
+});
 test('internal push rejects missing or invalid signed requests and arbitrary destinations',async()=>{
  const api=runWorker();
  assert.equal(api.pushDestination('http://127.0.0.1/'),null);
