@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.4-roster-time-mail-20261020';
+const FT_VERSION='1.8.5-pause-messages-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1568,10 +1568,53 @@ function ft_activityTypesSave_(actor,p){
  ft_audit_(actor,'ACTIVITY_TYPE_SAVE','ActivityTypes',row.id,before,ft_publicRow_(row));
  return {id:row.id,type:row.type,label:row.label,active:ft_bool_(row.active)};
 }
+
+/** Separate Pausen-Ereignisse ohne Migration der bestehenden ActivityTimers-Tabelle. */
+const FT_TIMER_PAUSE_COLS_=['id','companyId','userId','timerId','start','end'];
+function ft_timerPauseRows_(){return ft_absenceRows_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,false);}
+function ft_timerPauseData_(timer){
+ const rows=ft_timerPauseRows_().filter(x=>x.companyId===timer.companyId&&x.userId===timer.userId&&x.timerId===timer.id);
+ const now=Date.now(),active=rows.find(x=>!x.end);
+ const completed=rows.filter(x=>x.end).reduce((sum,x)=>sum+Math.max(0,(Date.parse(x.end)-Date.parse(x.start))/60000),0);
+ return {rows,paused:Boolean(active),active,completedMinutes:Math.round(completed),
+  currentPauseStart:active?.start||'',pauseStartedAt:active?.start||''};
+}
+function ft_timerPauseAction_(actor,action){
+ const u=actor.role==='STAFF'?actor:ft_user_(actor,actor.id);
+ const timer=ft_get_('ActivityTimers').find(x=>x.companyId===u.companyId&&x.userId===u.id);
+ if(!timer)throw Error('Keine laufende Arbeitszeit. Bitte zuerst Arbeit beginnen.');
+ const company=ft_company_(actor,timer.companyId);ft_need_(actor,company,'TIME');
+ const info=ft_timerPauseData_(timer),now=new Date();
+ const deadline=ft_viennaWallDate_(ft_localDate_(new Date(timer.start))+'T19:00');
+ if(now>=deadline)throw Error('Die Arbeitszeit ist bereits bei 19:00 Uhr angekommen. Bitte den automatischen Abschluss abwarten und die tatsächliche Pause danach nachtragen.');
+ if(action==='start'){
+  if(info.paused)throw Error('Die Pause läuft bereits. Bitte erst Pause beenden.');
+  // Do not create any guessed pause. The recorded start is the actual server timestamp.
+  ft_absenceAdd_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,{id:ft_uuid_(),companyId:timer.companyId,
+   userId:timer.userId,timerId:timer.id,start:now.toISOString(),end:''});
+  ft_audit_(actor,'TIMER_PAUSE_START','ActivityTimers',timer.id,{}, {at:now.toISOString()});
+ }else if(action==='stop'){
+  if(!info.paused)throw Error('Es läuft derzeit keine Pause.');
+  const row=info.active;row.end=now.toISOString();
+  if(Date.parse(row.end)<=Date.parse(row.start))throw Error('Pause kann erst nach ihrem tatsächlichen Beginn beendet werden.');
+  ft_absenceSave_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,row);
+  ft_audit_(actor,'TIMER_PAUSE_STOP','ActivityTimers',timer.id,{}, {start:row.start,end:row.end});
+ }else throw Error('Unbekannte Pausenaktion.');
+ return ft_timerActive_(timer.companyId,timer.userId);
+}
+function ft_timerPauseClear_(rows){
+ const sh=ft_db_().getSheetByName('TimerPauseEvents');if(!sh)return;
+ rows.slice().sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
+}
+
 function ft_timerActive_(companyId,userId){
  const db=ft_db_();if(!db.getSheetByName('ActivityTimers'))return null;
  const r=ft_get_('ActivityTimers').find(x=>x.companyId===companyId&&x.userId===userId);
- return r?{id:r.id,start:r.start,type:r.type,activityOptionId:r.activityOptionId||'',object:r.object||'',description:r.description||''}:null;
+ if(!r)return null;
+ const state=ft_timerPauseData_(r);
+ return {id:r.id,start:r.start,type:r.type,activityOptionId:r.activityOptionId||'',
+  object:r.object||'',description:r.description||'',paused:state.paused,
+  pauseStartedAt:state.pauseStartedAt,completedPauseMinutes:state.completedMinutes};
 }
 function ft_timerStatus_(actor,p){
  const userId=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),u=ft_user_(actor,userId);
@@ -1610,13 +1653,19 @@ function ft_viennaWallDate_(value){
 }
 function ft_timerClose_(timer,actor,auto,actualPauseMinutes){
  const beginning=new Date(timer.start),day=ft_localDate_(beginning),endOfDay=ft_viennaWallDate_(day+'T19:00');
+ const pauses=ft_timerPauseData_(timer);
+ if(pauses.paused&&!auto)throw Error('Bitte zuerst die laufende Pause beenden und dann die Arbeitszeit stoppen.');
+ const minutes=pauses.rows.length?pauses.completedMinutes:Number(actualPauseMinutes)||0;
  let finish=new Date();if(finish>endOfDay)finish=endOfDay;
  if(finish<=beginning)throw Error('Endzeit muss nach dem Arbeitsbeginn liegen.');
  const out=ft_activitySave_(actor,{userId:timer.userId,companyId:timer.companyId,
   type:timer.type,activityOptionId:timer.activityOptionId||'',
   start:Utilities.formatDate(beginning,FT_TZ,"yyyy-MM-dd'T'HH:mm"),end:Utilities.formatDate(finish,FT_TZ,"yyyy-MM-dd'T'HH:mm"),
-  object:timer.object||'',description:(timer.description||'')+(auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':''),
-  breakMinutes:auto?0:actualPauseMinutes||0},Boolean(auto));
+  object:timer.object||'',description:(timer.description||'')+
+   (auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':'')+
+   (pauses.paused?' [Laufende Pause beim Abschluss ungeklärt – bitte korrigieren.]':''),
+  breakMinutes:minutes},Boolean(auto));
+ ft_timerPauseClear_(pauses.rows);
  ft_sheet_('ActivityTimers').deleteRow(timer.__row);ft_invalidate_('ActivityTimers');
  ft_audit_(actor,auto?'TIMER_AUTO_CLOSE':'TIMER_STOP','ActivityTimers',timer.id,timer,{activityId:out.id,end:finish.toISOString()});
  return {activity:out,autoClosed:auto||false,closedAt:finish.toISOString()};
@@ -1792,6 +1841,8 @@ function ft_api(token,action,p){
   case 'timerStart':return ft_lock_(()=>ft_timerStart_(u,p));
   case 'timerStop':return ft_lock_(()=>ft_timerStop_(u,p));
   case 'timerStatus':return ft_timerStatus_(u,p);
+  case 'timerPauseStart':return ft_lock_(()=>ft_timerPauseAction_(u,'start'));
+  case 'timerPauseStop':return ft_lock_(()=>ft_timerPauseAction_(u,'stop'));
   case 'activitySave':return ft_lock_(()=>ft_activitySave_(u,p));
   case 'activityDelete':return ft_lock_(()=>ft_activityDelete_(u,p));
   case 'availabilitySave':return ft_lock_(()=>ft_availabilitySave_(u,p));
@@ -2002,7 +2053,7 @@ function ft_licApi_(actor,p){
 }
 function ft_requireAction_(actor,action,p){
  const dict={
-  activitySave:'TIME',activityDelete:'TIME',activityTypesGet:'TIME',activityTypesSave:'TIME',timerStart:'TIME',timerStop:'TIME',timerStatus:'TIME',
+  activitySave:'TIME',activityDelete:'TIME',activityTypesGet:'TIME',activityTypesSave:'TIME',timerStart:'TIME',timerStop:'TIME',timerStatus:'TIME',timerPauseStart:'TIME',timerPauseStop:'TIME',
   monthSubmit:'REPORTS',monthReview:'REPORTS',report:'REPORTS',pdf:'REPORTS',pdfPrepare:'REPORTS',pdfJobStatus:'REPORTS',pdfArchive:'REPORTS',pdfChunk:'REPORTS',pdfStore:'REPORTS',pdfBatchStore:'REPORTS',pdfBatchArchive:'REPORTS',pdfBatchChunk:'REPORTS',
   leaveRequest:'LEAVE',leaveUpdate:'LEAVE',leaveWithdraw:'LEAVE',leaveReview:'LEAVE',
   leaveAccount:'LEAVE',leavePolicyGet:'LEAVE',leavePolicySave:'LEAVE',
