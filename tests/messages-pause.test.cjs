@@ -51,6 +51,7 @@ function communications(){
   ft_absenceSheet_:()=>({getRange:()=>({setNumberFormat:()=>{}})}),
   ft_absenceAdd_:(name,_cols,r)=>{r.__row=rows[name].length+2;rows[name].push(r);},
   ft_absenceSave_:()=>true,
+  ft_absenceSheet_:()=>({getRange:()=>({setNumberFormat:()=>true})}),
   ft_uuid_:()=>String(++id),ft_now_:()=>new Date().toISOString(),ft_audit_:()=>true,
   ft_company_:(actor,companyId)=>{const cid=companyId||actor.companyId;
    if(actor.role!=='SYSADMIN'&&cid!==actor.companyId)throw Error('Falsche Firma');
