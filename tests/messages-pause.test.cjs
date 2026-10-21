@@ -149,6 +149,39 @@ test('employees cannot assign tasks to each other',()=>{
   kind:'TASK',title:'Unzulässig',body:'Aufgabe'}),/Aufgaben/);
 });
 
+test('notification settings report granted, denied, pending and unsupported states',()=>{
+ const source=section(frontend,'function ftCommNotificationState_','function ftMessages_');
+ function state(permission,installed=true,badge=true,available=true){
+  const notification={permission};
+  const window={Notification:available?notification:undefined,isSecureContext:true,
+   matchMedia:()=>({matches:installed})};
+  const navigator={setAppBadge:badge?()=>Promise.resolve():undefined,standalone:false};
+  const ctx={window,navigator,Notification:notification,E:x=>String(x)};
+  return vm.runInNewContext(source+';({ftCommNotificationState_,ftCommNotificationUI_})',ctx);
+ }
+ for(const [status,label] of [['default','Nicht aktiviert'],['granted','Erlaubt'],['denied','Blockiert']]){
+  const context=state(status),info=context.ftCommNotificationState_();
+  assert.equal(info.label,label);
+  const html=context.ftCommNotificationUI_();
+  assert.match(html,new RegExp(label));
+  assert.match(html,/Hintergrund-Push/);
+ }
+ assert.match(state('default').ftCommNotificationUI_(),/Mitteilungen erlauben/);
+ assert.doesNotMatch(state('granted').ftCommNotificationUI_(),/data-act="commNotifications"/);
+ assert.doesNotMatch(state('denied').ftCommNotificationUI_(),/data-act="commNotifications"/);
+ assert.match(state('default',false).ftCommNotificationUI_(),/App muss installiert sein/);
+ assert.match(state('default',true,false).ftCommNotificationUI_(),/nicht unterstützt/);
+ assert.equal(state('default',true,true,false).ftCommNotificationState_().label,'Nicht verfügbar');
+});
+test('long explanatory hints collapse, while important warnings remain visible',()=>{
+ assert.match(frontend,/function hint\(t,title='Mehr Informationen'\)/);
+ assert.match(frontend,/<details class="ft-page-hint">/);
+ assert.match(frontend,/Feiertagsarbeit festgestellt: gesetzliche/);
+ assert.match(frontend,/ft-plan-message ft-plan-warning/);
+ assert.match(frontend,/function ftCommNotificationState_\(/);
+ assert.doesNotMatch(frontend,/>Icon-Hinweise<\/button>/);
+});
+
 test('UI exposes messages, photo capture, badge API, and both pause buttons',()=>{
  assert.match(frontend,/function ftMessages_\(/);
  assert.match(frontend,/timerPauseStart/);
