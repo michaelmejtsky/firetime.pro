@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-background-push-v188"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-background-push-responsive-info-v1881"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -607,6 +607,35 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-build-version{font-size:9px}
  .ft-help-header>.ft-page-hint>.ft-page-hint-content{left:auto;right:-35px}
 }
+
+/* Accessible, viewport-safe explanation. Never place long text in a floating
+ * absolute-positioned header element; native <dialog> stays inside viewport. */
+.ft-info-trigger{display:inline-flex;align-items:center;justify-content:center;
+ flex:none;width:34px;height:34px;padding:0;border:1px solid #628caa;
+ background:#24445f;color:#eff7ff;border-radius:50%;
+ font-weight:900;font-size:16px;cursor:pointer;line-height:1}
+.ft-info-trigger:hover,.ft-info-trigger:focus-visible{background:#365e7c;
+ outline:2px solid #e7ab70;outline-offset:2px}
+.ft-page-info-modal{box-sizing:border-box;position:fixed;inset:0;margin:auto;
+ width:min(520px,calc(100vw - 24px));max-width:calc(100vw - 24px);
+ max-height:calc(100dvh - 32px);overflow-y:auto;overflow-x:hidden;
+ padding:0;background:#182e43;border:1px solid #6689a7;border-radius:16px;
+ box-shadow:0 16px 55px rgba(0,0,0,.55);color:#ecf5fc;overscroll-behavior:contain}
+.ft-page-info-modal::backdrop{background:rgba(2,10,20,.78)}
+.ft-page-info-top{position:sticky;top:0;z-index:1;display:flex;align-items:center;
+ justify-content:space-between;gap:12px;background:#1d3a52;border-bottom:1px solid #466985;
+ padding:11px 14px}
+.ft-page-info-top strong{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.ft-page-info-top .btn{flex:none;min-height:39px}
+.ft-page-info-body{padding:16px;font-size:14px;line-height:1.65;overflow-wrap:anywhere;
+ overflow-x:hidden;white-space:normal}
+.ft-page-info-body img,.ft-page-info-body table,.ft-page-info-body video{
+ max-width:100%;height:auto}
+.ft-page-info-body a{overflow-wrap:anywhere}
+.ft-page-info-body p{margin:8px 0}
+@media(max-width:650px){.ft-page-info-body{padding:13px;font-size:13px}
+ .ft-page-info-top{padding:9px 11px}
+ .ft-page-info-modal{max-height:calc(100dvh - 20px)}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -742,7 +771,7 @@ const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.8';
+const FT_VISIBLE_VERSION='1.8.8.1';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1294,6 +1323,51 @@ function ftMessages_(){
   '</section>'+detail+'</div>';
 }
 
+
+/** A native modal keeps longer help on screen, independent of header width,
+ * side navigation, scroll containers, device zoom and mobile viewport size.
+ */
+function ftPageInfoRender_(header,source,tab){
+ document.getElementById('ft-page-info-dialog')?.remove();
+ header.replaceChildren();
+ if(!source)return;
+ const raw=source.querySelector('.ft-page-hint-content');
+ if(!raw)return;
+ const trigger=document.createElement('button');
+ trigger.type='button';
+ trigger.dataset.act='pageInfo';
+ trigger.className='ft-info-trigger';
+ trigger.textContent='i';
+ trigger.setAttribute('aria-label','Informationen zu '+(LABELS[tab]||'dieser Seite'));
+ trigger.title='Informationen anzeigen';
+ header.appendChild(trigger);
+ const dialog=document.createElement('dialog');
+ dialog.id='ft-page-info-dialog';
+ dialog.className='ft-page-info-modal';
+ dialog.setAttribute('aria-labelledby','ft-page-info-title');
+ const heading=document.createElement('div');
+ heading.className='ft-page-info-top';
+ const title=document.createElement('strong');
+ title.id='ft-page-info-title';
+ title.textContent='Informationen · '+(LABELS[tab]||'FireTime Pro');
+ const close=document.createElement('button');
+ close.type='button';
+ close.className='btn';
+ close.dataset.act='closePageInfo';
+ close.textContent='Schließen';
+ heading.append(title,close);
+ const body=document.createElement('div');
+ body.className='ft-page-info-body';
+ while(raw.firstChild)body.appendChild(raw.firstChild);
+ dialog.append(heading,body);
+ document.body.appendChild(dialog);
+ dialog.addEventListener('click',event=>{
+  // The native dialog backdrop is the only clickable area where target===dialog.
+  if(event.target===dialog)dialog.close();
+ });
+ source.remove();
+}
+
 function page(){
  const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};
  if(!ST.h?.me)return;
@@ -1308,9 +1382,8 @@ function page(){
   el.innerHTML=(views[ST.tab]||dashboard)();
   const helpHeader=document.getElementById('ft-help-header');
   if(helpHeader){
-   helpHeader.replaceChildren();
    const intro=el.querySelector(':scope > .ft-page-hint');
-   if(intro)helpHeader.appendChild(intro);
+   ftPageInfoRender_(helpHeader,intro,ST.tab);
   }
   requestAnimationFrame(()=>{if(el.isConnected)ftFitFormControls(el);});
  }
@@ -2932,6 +3005,17 @@ async function ftCommPhotoData_(input){
 }
 
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
+if(a==='pageInfo'){
+ const dialog=document.getElementById('ft-page-info-dialog');
+ if(dialog&&!dialog.open)dialog.showModal();
+ return;
+}
+if(a==='closePageInfo'){
+ const dialog=document.getElementById('ft-page-info-dialog');
+ if(dialog?.open)dialog.close();
+ return;
+}
+
 
 
 if(a==='pushRefresh'){
