@@ -180,9 +180,10 @@ async function pushInternal(request,env){
  // to known tabs; never use a client-provided URL or arbitrary external origin.
  const kind=String(data.notification.kind||'COMM').slice(0,50);
  const tab=/^PUSH_(AVAILABILITY)$/.test(kind)?'availability':
-   /^PUSH_(SHIFT|HANDOVER|PLAN|TIMER_RUNNING)/.test(kind)?'standby':
+   /^PUSH_(SHIFT|HANDOVER|PLAN)/.test(kind)?'standby':
    /^PUSH_TIMER_/.test(kind)?'time':
-   /^PUSH_(LEAVE|SICK)/.test(kind)?'leave':
+   /^PUSH_LEAVE/.test(kind)?'leave':
+   /^PUSH_SICK/.test(kind)?'sick':
    /^PUSH_MONTH_/.test(kind)?'reports':'messages';
  const notice={
   title:String(data.notification.title||'FireTime Pro').slice(0,90),
