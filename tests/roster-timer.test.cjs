@@ -169,3 +169,37 @@ test('19:00 sweep only emails a timer still open; manual stop removes it from ca
  result=fn();
  assert.equal(result.closed,1);assert.equal(closed,1);assert.equal(emailed,1);
 });
+
+test('manual End remains possible after six hours without inventing a pause or auto-close notification',()=>{
+ const src=fragment(code,'function ft_timerClose_','function ft_timerStop_');
+ const saved=[],audits=[],deleted=[];
+ class Clock extends Date{constructor(v){super(v===undefined?'2026-10-20T16:45:00Z':v)}}
+ const ctx={
+  Date:Clock,Boolean,Number,
+  ft_localDate_:()=> '2026-10-20',
+  ft_viennaWallDate_:()=>new Clock('2026-10-20T17:00:00Z'),
+  ft_timerPauseData_:()=>({paused:false,rows:[],completedMinutes:0}),
+  ft_activitySave_:(actor,p,allowPending)=>{
+   saved.push({p,allowPending});
+   return {id:'activity-manual',companyId:p.companyId,userId:p.userId,description:p.description,
+    end:'2026-10-20T16:45:00.000Z'};
+  },
+  ft_timerPauseClear_:()=>{},
+  ft_sheet_:()=>({deleteRow:row=>deleted.push(row)}),
+  ft_invalidate_:()=>{},
+  ft_audit_:(actor,action)=>audits.push(action),
+  Utilities:{formatDate:(d,z,fmt)=>fmt==="yyyy-MM-dd'T'HH:mm"?
+   (d.getTime()===new Clock('2026-10-20T16:45:00Z').getTime()?'2026-10-20T18:45':'2026-10-20T12:00'):'2026-10-20T18:45'},
+  FT_TZ:'Europe/Vienna'
+ };
+ const fn=vm.runInNewContext(src+';ft_timerClose_',ctx);
+ const out=fn({id:'timer',companyId:'a',userId:'u',start:'2026-10-20T10:00:00Z',
+  type:'OBJECT',description:'Objektkontrolle',__row:2},{id:'u'},false,0);
+ assert.equal(out.autoClosed,false);
+ assert.equal(saved.length,1);
+ assert.equal(saved[0].allowPending,true,'Save unfinished pause as explicit pending, not block Stop');
+ assert.equal(saved[0].p.breakMinutes,0,'Never invent a 30-minute pause');
+ assert.doesNotMatch(saved[0].p.description,/Automatisch um 19:00/);
+ assert.deepEqual(audits,['TIMER_STOP']);
+ assert.deepEqual(deleted,[2]);
+});
