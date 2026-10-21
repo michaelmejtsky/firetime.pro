@@ -2276,11 +2276,21 @@ function ft_pushEventSpecs_(actor,action,result,p,details){
     'Dein Bereitschaftsdienst wurde vom Administrator bestätigt.');
   }
  }else if(action==='planPublish'||action==='workPublish'){
-  const list=data.shifts||[];
-  for(const shift of list){
-   add(shift.companyId,shift.userId,'PUSH_DUTY_PUBLISHED',shift.id+'|'+shift.start,
-    'FireTime Pro · Neuer Dienst veröffentlicht',
-    'Du bist für den Dienst am '+String(shift.day||date(shift.start))+' eingeteilt.');
+  // Exactly one push per affected employee, not one per every day of the month.
+  const grouped=new Map();
+  for(const shift of data.shifts||[]){
+   if(!shift.userId)continue;
+   const key=String(shift.companyId)+'|'+String(shift.userId);
+   if(!grouped.has(key))grouped.set(key,[]);
+   grouped.get(key).push(shift);
+  }
+  for(const shifts of grouped.values()){
+   const shift=shifts[0],ids=shifts.map(x=>x.id+'|'+x.start).sort();
+   add(shift.companyId,shift.userId,'PUSH_DUTY_PUBLISHED',
+    String(p.month||'')+'|'+ft_sha_(ids.join('|')),
+    'FireTime Pro · Dienstplan veröffentlicht',
+    shifts.length===1?'Ein neuer Dienst am '+String(shift.day||date(shift.start))+' wurde veröffentlicht.':
+    'Für dich wurden '+shifts.length+' neue Dienste veröffentlicht. Bitte den Dienstplan prüfen.');
   }
  }
  return specs;
