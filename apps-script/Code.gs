@@ -1664,7 +1664,10 @@ function ft_timerClose_(timer,actor,auto,actualPauseMinutes){
   object:timer.object||'',description:(timer.description||'')+
    (auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':'')+
    (pauses.paused?' [Laufende Pause beim Abschluss ungeklärt – bitte korrigieren.]':''),
-  breakMinutes:minutes},Boolean(auto));
+  // A pressed Stop must really finish the timer. If the legally required pause
+  // is missing, save the real minutes and flag the row for correction instead
+  // of blocking manual Stop and accidentally forcing a 19:00 auto-close.
+  breakMinutes:minutes},true);
  ft_timerPauseClear_(pauses.rows);
  ft_sheet_('ActivityTimers').deleteRow(timer.__row);ft_invalidate_('ActivityTimers');
  ft_audit_(actor,auto?'TIMER_AUTO_CLOSE':'TIMER_STOP','ActivityTimers',timer.id,timer,{activityId:out.id,end:finish.toISOString()});
@@ -1683,9 +1686,13 @@ function ft_timerStop_(actor,p){
  * Eingetragene Pause bzw. Tätigkeitsart bleiben unverändert.
  */
 function ft_timerConfirmedAutoClose_(activity){
- return Boolean(activity&&
-  String(activity.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]')&&
-  /T19:00(?::00(?:\.000)?)?$/.test(String(activity.end||'')));
+ if(!activity||!String(activity.description||'').includes(
+  '[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'))return false;
+ // Activities are normalized to UTC when saved in Sheets, not wall-clock
+ // YYYY-MM-DDTHH:mm. Compare in Vienna local time, including winter/DST.
+ const end=new Date(activity.end);
+ return Number.isFinite(end.getTime())&&
+  Utilities.formatDate(end,FT_TZ,'HH:mm')==='19:00';
 }
 /** Automatische Schließung: genau eine Benachrichtigung pro Arbeitszeiteintrag.
  * Status ERROR wird beim nächsten 15-Minuten-Trigger erneut versucht.
