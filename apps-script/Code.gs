@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.8-background-webpush-20261021';
+const FT_VERSION='1.8.9-operational-webpush-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2072,12 +2072,12 @@ function ft_pushOperationalEvents_(now,source){
  const events=[];
  const add=(c,u,kind,ref,title,body)=>{if(c&&u)events.push({company:c,user:u,kind,reference:ref,title,body});};
  const hasModule=(c,m)=>Boolean(source.modules?.[c.id]?.includes(m));
- if(day===20&&clock>='09:00'){
+ if(clock>='09:00'){
   const submitted=new Set(source.submissions.filter(x=>String(x.month)===nextMonth)
    .map(x=>String(x.companyId)+'|'+String(x.userId)));
   for(const u of employees){
    const c=companyById.get(String(u.companyId));
-   if(!ft_bool_(c.remindAvailability)||!hasModule(c,'AVAILABILITY')||
+   if(day!==Number(c.availabilityDay||20)||!ft_bool_(c.remindAvailability)||!hasModule(c,'AVAILABILITY')||
       submitted.has(c.id+'|'+u.id))continue;
    add(c,u,'PUSH_AVAILABILITY',nextMonth,
     'FireTime Pro · Verfügbarkeit fehlt',
@@ -2269,10 +2269,18 @@ function ft_pushEventSpecs_(actor,action,result,p,details){
    'FireTime Pro · Monatsbericht '+(data.status==='APPROVED'?'freigegeben':'zurückgegeben'),
    'Dein Monatsbericht '+data.month+' wurde '+(data.status==='APPROVED'?'freigegeben.':'zur Korrektur zurückgegeben.'),true);
  }else if(action==='shiftConfirm'||action==='segmentConfirm'){
-  if(actor.role!=='STAFF'){
-   add(cId,data.userId,'PUSH_SHIFT_CONFIRMED',data.id,
+  if(actor.role!=='STAFF'&&!data.unchanged){
+   const shift=ft_one_(action==='shiftConfirm'?'Shifts':'ShiftSegments',p.id);
+   if(shift) add(shift.companyId,shift.userId,'PUSH_SHIFT_CONFIRMED',shift.id,
     'FireTime Pro · Bereitschaft bestätigt',
     'Dein Bereitschaftsdienst wurde vom Administrator bestätigt.');
+  }
+ }else if(action==='planPublish'||action==='workPublish'){
+  const list=data.shifts||[];
+  for(const shift of list){
+   add(shift.companyId,shift.userId,'PUSH_DUTY_PUBLISHED',shift.id+'|'+shift.start,
+    'FireTime Pro · Neuer Dienst veröffentlicht',
+    'Du bist für den Dienst am '+String(shift.day||date(shift.start))+' eingeteilt.');
   }
  }
  return specs;
@@ -2568,7 +2576,16 @@ function ft_api(token,action,p){
    ft_pushAfterActionSafe_(u,'planAssign',changed,p,{previous});
    return changed;
   }
-  case 'planPublish':return ft_lock_(()=>ft_planPublishOnly_(u,p));
+  case 'planPublish':{
+   const cid=String(p.companyId||u.companyId),month=String(p.month||'');
+   const before=new Set(ft_get_('Shifts').filter(x=>x.companyId===cid&&
+    x.status==='PUBLISHED'&&String(x.day).slice(0,7)===month).map(x=>x.id));
+   const result=ft_lock_(()=>ft_planPublishOnly_(u,p));
+   const published=ft_get_('Shifts').filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+    String(x.day).slice(0,7)===month&&!before.has(x.id));
+   ft_pushAfterActionSafe_(u,'planPublish',{companyId:cid,shifts:published},p);
+   return result;
+  }
   case 'shiftConfirm':{
    const result=ft_lock_(()=>ft_shiftConfirm_(u,p));
    ft_pushAfterActionSafe_(u,'shiftConfirm',result,p);
@@ -2576,7 +2593,16 @@ function ft_api(token,action,p){
   }
   case 'workSave':return ft_lock_(()=>ft_workSave_(u,p));
   case 'workDelete':return ft_lock_(()=>ft_workDelete_(u,p));
-  case 'workPublish':return ft_lock_(()=>ft_workPublish_(u,p));
+  case 'workPublish':{
+   const cid=String(p.companyId||u.companyId),m=String(p.month||'');
+   const before=new Set(ft_workRows_().filter(x=>x.companyId===cid&&
+    x.status==='PUBLISHED'&&String(x.start).slice(0,7)===m).map(x=>x.id));
+   const result=ft_lock_(()=>ft_workPublish_(u,p));
+   const published=ft_workRows_().filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+    String(x.start).slice(0,7)===m&&!before.has(x.id));
+   ft_pushAfterActionSafe_(u,'workPublish',{companyId:cid,shifts:published},p);
+   return result;
+  }
   case 'leaveRequest':{
    const result=ft_lock_(()=>ft_leaveRequest_(u,p));
    ft_pushAfterActionSafe_(u,'leaveRequest',result,p);
