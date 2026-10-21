@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261021-v189';
+const FT_SHELL_CACHE='firetime-shell-20261021-v1810';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
@@ -67,9 +67,19 @@ self.addEventListener('push',event=>{
    actions:[{action:'open',title:'In FireTime Pro öffnen'}]
   };
   await self.registration.showNotification(title,options);
-  // Der exakte Ungelesenzähler wird bei der nächsten App-Aktualisierung gesetzt.
-  if(typeof self.registration.setAppBadge==='function'){
-   try{await self.registration.setAppBadge();}catch{}
+  // Apple Home Screen web apps expose badges on WorkerNavigator, NOT on
+  // ServiceWorkerRegistration. The trusted unread total arrives with each push,
+  // so it can update even while all FireTime windows are closed.
+  const unread=info.unreadCount;
+  if(Number.isSafeInteger(unread)&&unread>=0&&unread<=999){
+   try{
+    if(unread>0&&typeof self.navigator?.setAppBadge==='function')
+     await self.navigator.setAppBadge(unread);
+    else if(unread===0&&typeof self.navigator?.clearAppBadge==='function')
+     await self.navigator.clearAppBadge();
+    else if(unread===0&&typeof self.navigator?.setAppBadge==='function')
+     await self.navigator.setAppBadge(0);
+   }catch(err){console.warn('Badge konnte nicht aktualisiert werden.');}
   }
  })());
 });
