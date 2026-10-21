@@ -203,3 +203,32 @@ test('manual End remains possible after six hours without inventing a pause or a
  assert.deepEqual(audits,['TIMER_STOP']);
  assert.deepEqual(deleted,[2]);
 });
+
+test('End during an active pause finishes both exactly, preserving actual pause minutes',()=>{
+ const src=fragment(code,'function ft_timerClose_','function ft_timerStop_');
+ let row=null,finished=0;
+ class Clock extends Date{constructor(v){super(v===undefined?'2026-10-20T16:45:00Z':v)}}
+ const ctx={
+  Date:Clock,Number,Boolean,FT_TZ:'Europe/Vienna',
+  ft_localDate_:()=> '2026-10-20',
+  ft_viennaWallDate_:()=>new Clock('2026-10-20T17:00:00Z'),
+  ft_timerPauseData_:()=>({paused:true,active:{start:'2026-10-20T16:35:00Z'},
+   rows:[{id:'old',start:'2026-10-20T15:00:00Z',end:'2026-10-20T15:12:00Z'},
+     {id:'current',start:'2026-10-20T16:35:00Z',end:''}],completedMinutes:12}),
+  ft_activitySave_:(actor,p,allowPending)=>{row={...p,allowPending};return {id:'activity',description:p.description};},
+  ft_timerPauseClear_:()=>{finished++;},
+  ft_sheet_:()=>({deleteRow:()=>{}}),
+  ft_invalidate_:()=>{},ft_audit_:()=>{},
+  Utilities:{formatDate:(d,z,fmt)=>fmt==="yyyy-MM-dd'T'HH:mm"?
+    (d.getTime()===new Clock('2026-10-20T16:45:00Z').getTime()?'2026-10-20T18:45':'2026-10-20T12:00'):'other'}
+ };
+ const fn=vm.runInNewContext(src+';ft_timerClose_',ctx);
+ const result=fn({id:'t',companyId:'c',userId:'u',start:'2026-10-20T10:00:00Z',type:'OBJECT',__row:2},
+  {id:'u'},false,0);
+ assert.equal(result.autoClosed,false);
+ assert.equal(row.breakMinutes,22);
+ assert.equal(row.allowPending,true);
+ assert.equal(finished,1);
+ assert.match(row.description,/Laufende Pause mit Arbeitsende abgeschlossen/);
+ assert.doesNotMatch(row.description,/Automatisch um 19:00 Uhr/);
+});
