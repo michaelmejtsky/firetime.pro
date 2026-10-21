@@ -22,7 +22,7 @@ function dateString(date,zone,format){
 }
 const mock={
  Date,Math,Number,String,Set,Map,Error,
- ft_timerConfirmedAutoClose_:a=>!!a&&String(a.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]')&&/T19:00(?::00(?:\\.000)?)?$/.test(String(a.end||'')),
+ ft_timerConfirmedAutoClose_:a=>!!a&&String(a.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]')&&Number.isFinite(new Date(a.end).getTime())&&dateString(new Date(a.end),'Europe/Vienna','HH:mm')==='19:00',
  FT_TZ:'Europe/Vienna',ft_bool_:Boolean,
  ft_sha_:str=>'hash:'+str,
  Utilities:{formatDate:dateString},
@@ -76,10 +76,10 @@ test('manual finish, including after 18:30, produces no early or auto-close push
 test('only verified auto-closed 19:00 activity generates the eventual push',()=>{
  const s=source();
  s.activities=[{id:'act1',companyId:'a',userId:'u1',createdAt:'2026-10-20T17:15:00Z',
-  end:'2026-10-20T19:00',
+  end:'2026-10-20T17:00:00.000Z',
   description:'Test [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'}];
  assert.ok(kinds(events(new Date('2026-10-20T17:20:00Z'),s)).includes('PUSH_TIMER_AUTO'));
- s.activities[0].end='2026-10-20T18:55';
+ s.activities[0].end='2026-10-20T16:55:00.000Z';
  assert.ok(!kinds(events(new Date('2026-10-20T17:20:00Z'),s)).includes('PUSH_TIMER_AUTO'));
 });
 test('first of next month sends reminder only if previous month is not submitted',()=>{
