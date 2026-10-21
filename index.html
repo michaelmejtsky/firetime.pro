@@ -785,7 +785,7 @@ const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigke
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const app=document.getElementById('app');
 const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
-const ftDashboardHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:2});
+
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
 const FT_VISIBLE_VERSION='1.8.8';
@@ -1464,8 +1464,8 @@ function dashboard(){
   [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF').length)],
    ['Bereitschaften im Monat',String(ftHomePublishedCount_(ST.h.shifts))],
    ['Arbeitsdienste im Monat',String(ftHomePublishedCount_(ST.h.workShifts))]]:
-  [['Monatssoll',ftDashboardHours_(r.target)+' h'],['Aktive Arbeitszeit',ftDashboardHours_(r.worked)+' h'],
-   ['Plus/Minus',ftDashboardHours_(r.saldo)+' h'],['Bereitschaft netto',ftDashboardHours_(r.standby)+' h']];
+  [['Monatssoll',N(Math.round(Number(r.target||0)*100)/100)+' h'],['Aktive Arbeitszeit',N(Math.round(Number(r.worked||0)*100)/100)+' h'],
+   ['Plus/Minus',N(Math.round(Number(r.saldo||0)*100)/100)+' h'],['Bereitschaft netto',N(Math.round(Number(r.standby||0)*100)/100)+' h']];
  const intro=adminAccount?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Nur Mitarbeiter haben ein persönliches Stundenkonto.':
   'Meine Übersicht für '+ftPdfMonthLabel(ST.month)+'. Geplante Dienste sind keine geleisteten Stunden.';
  let html='<div class="ft-home-intro">'+E(intro)+'</div>'+
