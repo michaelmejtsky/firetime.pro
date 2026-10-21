@@ -1834,7 +1834,7 @@ function ft_commPublic_(x){
  return {id:x.id,companyId:x.companyId,kind:x.kind,title:ft_commDecode_(x.titleEncoded),
  body:ft_commDecode_(x.bodyEncoded),createdBy:x.createdBy,recipientId:x.recipientId,
  dueDate:x.dueDate||'',status:x.status,createdAt:x.createdAt,updatedAt:x.updatedAt,
- hasPhoto:Boolean(x.attachmentId)};
+ hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''};
 }
 function ft_commRecipients_(actor,c){
  return ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE'&&x.id!==actor.id&&
@@ -1893,7 +1893,7 @@ function ft_commList_(actor,p){
  return {threads:threads.map(x=>({...ft_commPublic_(x),
   unread:!(read.some(z=>z.threadId===x.id&&z.userId===actor.id&&Date.parse(z.seenAt)>=Date.parse(x.updatedAt)))})),
   replies:replies.map(x=>({id:x.id,threadId:x.threadId,authorId:x.authorId,body:ft_commDecode_(x.bodyEncoded),
-  createdAt:x.createdAt,hasPhoto:Boolean(x.attachmentId)})),
+  createdAt:x.createdAt,hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''})),
   recipients:ft_commRecipients_(actor,c),users,unread:ft_commUnread_(actor,c)};
 }
 function ft_commMail_(c,recipient,sender,thread,eventId,activity){
