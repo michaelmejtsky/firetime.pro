@@ -139,3 +139,33 @@ test('email only follows a genuine 19:00 auto-close, never a manual finish',()=>
  assert.match(calls[0].text,/Bearbeiten/);
  assert.ok(calls[0].text.includes('\n\n'),'Mail uses real line breaks');
 });
+
+test('19:00 sweep only emails a timer still open; manual stop removes it from candidates',()=>{
+ const sweepSource=fragment(code,'function ft_timerSweep_','function ft_timerTick_');
+ let pending=[],closed=0,emailed=0;
+ const fn=vm.runInNewContext(sweepSource+';ft_timerSweep_;',{
+  ft_db_:()=>({getSheetByName:()=>({})}),
+  ft_get_:name=>name==='ActivityTimers'?pending:[],
+  ft_viennaWallDate_:()=>new Date('2026-10-20T17:00:00Z'),
+  ft_localDate_:()=> '2026-10-20',
+  ft_one_:(name)=>name==='Users'?{id:'u',companyId:'a'}:{id:'a',name:'Company'},
+  ft_timerClose_:(t,u,auto)=>{
+   assert.equal(auto,true);closed++;
+   return {autoClosed:true,activity:{id:'auto',companyId:'a',userId:'u',
+    end:'2026-10-20T19:00',
+    description:'[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'}};
+  },
+  ft_timerConfirmedAutoClose_:a=>String(a?.description||'').includes('[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'),
+  ft_timerAutoNotice_:()=>{emailed++;return true},
+  ft_timerRetryNotices_:()=>0,
+  Date:class extends Date{constructor(v){super(v===undefined?'2026-10-20T17:10:00Z':v)}}
+ });
+ // The user pressed End at 18:55, so no row remains at 19:00.
+ let result=fn();
+ assert.equal(result.closed,0);
+ assert.equal(emailed,0);
+ // If the timer really survives 19:00, the sweep closes and notifies exactly once.
+ pending=[{id:'open-1',companyId:'a',userId:'u',start:'2026-10-20T12:00:00Z',__row:2}];
+ result=fn();
+ assert.equal(result.closed,1);assert.equal(closed,1);assert.equal(emailed,1);
+});
