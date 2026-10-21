@@ -9,6 +9,7 @@ on:
       - 'tests/webpush.test.cjs'
       - 'tests/messages-pause.test.cjs'
       - 'tests/operational-push.test.cjs'
+      - 'tests/account-push.test.cjs'
       - '.github/workflows/webpush-regression.yml'
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'tests/webpush.test.cjs'
       - 'tests/messages-pause.test.cjs'
       - 'tests/operational-push.test.cjs'
+      - 'tests/account-push.test.cjs'
       - '.github/workflows/webpush-regression.yml'
   workflow_dispatch:
 permissions:
