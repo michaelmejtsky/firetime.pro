@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.4-roster-time-mail-20261020';
+const FT_VERSION='1.8.5-pause-messages-20261021';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1568,10 +1568,53 @@ function ft_activityTypesSave_(actor,p){
  ft_audit_(actor,'ACTIVITY_TYPE_SAVE','ActivityTypes',row.id,before,ft_publicRow_(row));
  return {id:row.id,type:row.type,label:row.label,active:ft_bool_(row.active)};
 }
+
+/** Separate Pausen-Ereignisse ohne Migration der bestehenden ActivityTimers-Tabelle. */
+const FT_TIMER_PAUSE_COLS_=['id','companyId','userId','timerId','start','end'];
+function ft_timerPauseRows_(){return ft_absenceRows_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,false);}
+function ft_timerPauseData_(timer){
+ const rows=ft_timerPauseRows_().filter(x=>x.companyId===timer.companyId&&x.userId===timer.userId&&x.timerId===timer.id);
+ const now=Date.now(),active=rows.find(x=>!x.end);
+ const completed=rows.filter(x=>x.end).reduce((sum,x)=>sum+Math.max(0,(Date.parse(x.end)-Date.parse(x.start))/60000),0);
+ return {rows,paused:Boolean(active),active,completedMinutes:Math.round(completed),
+  currentPauseStart:active?.start||'',pauseStartedAt:active?.start||''};
+}
+function ft_timerPauseAction_(actor,action){
+ const u=actor.role==='STAFF'?actor:ft_user_(actor,actor.id);
+ const timer=ft_get_('ActivityTimers').find(x=>x.companyId===u.companyId&&x.userId===u.id);
+ if(!timer)throw Error('Keine laufende Arbeitszeit. Bitte zuerst Arbeit beginnen.');
+ const company=ft_company_(actor,timer.companyId);ft_need_(actor,company,'TIME');
+ const info=ft_timerPauseData_(timer),now=new Date();
+ const deadline=ft_viennaWallDate_(ft_localDate_(new Date(timer.start))+'T19:00');
+ if(now>=deadline)throw Error('Die Arbeitszeit ist bereits bei 19:00 Uhr angekommen. Bitte den automatischen Abschluss abwarten und die tatsächliche Pause danach nachtragen.');
+ if(action==='start'){
+  if(info.paused)throw Error('Die Pause läuft bereits. Bitte erst Pause beenden.');
+  // Do not create any guessed pause. The recorded start is the actual server timestamp.
+  ft_absenceAdd_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,{id:ft_uuid_(),companyId:timer.companyId,
+   userId:timer.userId,timerId:timer.id,start:now.toISOString(),end:''});
+  ft_audit_(actor,'TIMER_PAUSE_START','ActivityTimers',timer.id,{}, {at:now.toISOString()});
+ }else if(action==='stop'){
+  if(!info.paused)throw Error('Es läuft derzeit keine Pause.');
+  const row=info.active;row.end=now.toISOString();
+  if(Date.parse(row.end)<=Date.parse(row.start))throw Error('Pause kann erst nach ihrem tatsächlichen Beginn beendet werden.');
+  ft_absenceSave_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,row);
+  ft_audit_(actor,'TIMER_PAUSE_STOP','ActivityTimers',timer.id,{}, {start:row.start,end:row.end});
+ }else throw Error('Unbekannte Pausenaktion.');
+ return ft_timerActive_(timer.companyId,timer.userId);
+}
+function ft_timerPauseClear_(rows){
+ const sh=ft_db_().getSheetByName('TimerPauseEvents');if(!sh)return;
+ rows.slice().sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
+}
+
 function ft_timerActive_(companyId,userId){
  const db=ft_db_();if(!db.getSheetByName('ActivityTimers'))return null;
  const r=ft_get_('ActivityTimers').find(x=>x.companyId===companyId&&x.userId===userId);
- return r?{id:r.id,start:r.start,type:r.type,activityOptionId:r.activityOptionId||'',object:r.object||'',description:r.description||''}:null;
+ if(!r)return null;
+ const state=ft_timerPauseData_(r);
+ return {id:r.id,start:r.start,type:r.type,activityOptionId:r.activityOptionId||'',
+  object:r.object||'',description:r.description||'',paused:state.paused,
+  pauseStartedAt:state.pauseStartedAt,completedPauseMinutes:state.completedMinutes};
 }
 function ft_timerStatus_(actor,p){
  const userId=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),u=ft_user_(actor,userId);
@@ -1610,13 +1653,19 @@ function ft_viennaWallDate_(value){
 }
 function ft_timerClose_(timer,actor,auto,actualPauseMinutes){
  const beginning=new Date(timer.start),day=ft_localDate_(beginning),endOfDay=ft_viennaWallDate_(day+'T19:00');
+ const pauses=ft_timerPauseData_(timer);
+ if(pauses.paused&&!auto)throw Error('Bitte zuerst die laufende Pause beenden und dann die Arbeitszeit stoppen.');
+ const minutes=pauses.rows.length?pauses.completedMinutes:Number(actualPauseMinutes)||0;
  let finish=new Date();if(finish>endOfDay)finish=endOfDay;
  if(finish<=beginning)throw Error('Endzeit muss nach dem Arbeitsbeginn liegen.');
  const out=ft_activitySave_(actor,{userId:timer.userId,companyId:timer.companyId,
   type:timer.type,activityOptionId:timer.activityOptionId||'',
   start:Utilities.formatDate(beginning,FT_TZ,"yyyy-MM-dd'T'HH:mm"),end:Utilities.formatDate(finish,FT_TZ,"yyyy-MM-dd'T'HH:mm"),
-  object:timer.object||'',description:(timer.description||'')+(auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':''),
-  breakMinutes:auto?0:actualPauseMinutes||0},Boolean(auto));
+  object:timer.object||'',description:(timer.description||'')+
+   (auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':'')+
+   (pauses.paused?' [Laufende Pause beim Abschluss ungeklärt – bitte korrigieren.]':''),
+  breakMinutes:minutes},Boolean(auto));
+ ft_timerPauseClear_(pauses.rows);
  ft_sheet_('ActivityTimers').deleteRow(timer.__row);ft_invalidate_('ActivityTimers');
  ft_audit_(actor,auto?'TIMER_AUTO_CLOSE':'TIMER_STOP','ActivityTimers',timer.id,timer,{activityId:out.id,end:finish.toISOString()});
  return {activity:out,autoClosed:auto||false,closedAt:finish.toISOString()};
@@ -1642,7 +1691,7 @@ function ft_timerAutoNotice_(company,user,activity){
   'Hallo '+user.name+'!\n\nDeine Arbeitszeit vom '+stamp+
   ' Uhr wurde automatisch mit 19:00 Uhr beendet, weil kein manuelles Arbeitsende erfasst wurde.'+
   '\n\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
-  '\nDie automatische Endzeit und eine Pause von 0 Minuten sind nur vorläufige Werte – es wurde keine Pause erfunden.'+
+  '\nDie automatische Endzeit ist vorläufig. Bitte auch protokollierte oder nicht abgeschlossene Pausen prüfen; es wird keine Pause erfunden.'+
   '\n\n'+url+'\n\n'+company.name);
 }
 function ft_timerRetryNotices_(){
@@ -1753,6 +1802,168 @@ function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Numbe
 
 function ft_remindOne_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=ft_user_(actor,p.userId),c=ft_company_(actor,u.companyId),m=ft_month_(p.month),kind=String(p.kind);if(u.status!=='ACTIVE')throw Error('Nur aktive Mitarbeiter können erinnert werden.');if(!['AVAILABILITY','HOURS'].includes(kind))throw Error('Ungültige Erinnerung');if(kind==='AVAILABILITY'&&ft_get_('AvailabilitySubmissions').some(s=>s.userId===u.id&&s.month===m))throw Error('Verfügbarkeit wurde bereits abgegeben.');if(kind==='HOURS'&&ft_get_('Months').some(s=>s.userId===u.id&&s.month===m&&['SUBMITTED','APPROVED','FINAL'].includes(s.status)))throw Error('Stunden sind bereits eingereicht.');const body='Hallo '+u.name+'!\n\nBitte vervollständige deine '+(kind==='HOURS'?'Stunden':'Verfügbarkeitsmeldung')+' für '+m+' in FireTime Pro.\n\n'+ft_publicGithubUrl_()+'\n\n'+c.name;return {sent:ft_notification_(c,u,kind+'-MANUAL',m+'-'+Utilities.formatDate(new Date(),FT_TZ,'yyyyMMddHHmm'), 'FireTime Pro – Erinnerung '+m,body)};}
 
+
+/** Nachrichten und Aufgaben: mandantengetrennt, privat; bei erster Verwendung
+ * drei zusätzliche Tabellen und bei Bedarf ein privater Drive-Ordner.
+ * Keine Veränderung an den vorhandenen Arbeits- oder Urlaubsdaten.
+ */
+const FT_COMM_THREAD_COLS_=['id','companyId','kind','titleEncoded','bodyEncoded','createdBy','recipientId','dueDate','status','createdAt','updatedAt','attachmentId'];
+const FT_COMM_REPLY_COLS_=['id','companyId','threadId','authorId','bodyEncoded','createdAt','attachmentId'];
+const FT_COMM_READ_COLS_=['id','companyId','threadId','userId','seenAt'];
+function ft_commThreads_(){return ft_absenceRows_('CommThreads',FT_COMM_THREAD_COLS_,false);}
+function ft_commReplies_(){return ft_absenceRows_('CommReplies',FT_COMM_REPLY_COLS_,false);}
+function ft_commReads_(){return ft_absenceRows_('CommReads',FT_COMM_READ_COLS_,false);}
+function ft_commEncode_(s){return Utilities.base64EncodeWebSafe(String(s||''),Utilities.Charset.UTF_8);}
+function ft_commDecode_(s){return Utilities.newBlob(Utilities.base64DecodeWebSafe(String(s||''))).getDataAsString('UTF-8');}
+function ft_commCompany_(actor,p){
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(actor.role==='STAFF'&&c.id!==actor.companyId)throw Error('Keine Berechtigung für diese Firma.');
+ return c;
+}
+function ft_commAccessible_(actor,thread){
+ if(!thread||thread.companyId!==(actor.companyId||thread.companyId))return false;
+ return actor.role!=='STAFF'||String(thread.createdBy)===String(actor.id)||String(thread.recipientId)===String(actor.id);
+}
+function ft_commThread_(actor,id){
+ const row=ft_commThreads_().find(x=>String(x.id)===String(id));
+ if(!row||!ft_commAccessible_(actor,row))throw Error('Nachricht nicht gefunden oder keine Berechtigung.');
+ ft_scope_(actor,row.companyId);
+ return row;
+}
+function ft_commPublic_(x){
+ return {id:x.id,companyId:x.companyId,kind:x.kind,title:ft_commDecode_(x.titleEncoded),
+ body:ft_commDecode_(x.bodyEncoded),createdBy:x.createdBy,recipientId:x.recipientId,
+ dueDate:x.dueDate||'',status:x.status,createdAt:x.createdAt,updatedAt:x.updatedAt,
+ hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''};
+}
+function ft_commRecipients_(actor,c){
+ return ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE'&&x.id!==actor.id&&
+ (actor.role==='STAFF'?x.role==='ADMIN':x.role==='STAFF')).map(x=>({id:x.id,name:x.name}));
+}
+function ft_commVisible_(actor,c){
+ return ft_commThreads_().filter(x=>x.companyId===c.id&&ft_commAccessible_(actor,x));
+}
+function ft_commUnread_(actor,c){
+ const reads=ft_commReads_(),rows=ft_commVisible_(actor,c);
+ return rows.filter(t=>{
+  const read=reads.find(r=>r.companyId===c.id&&r.threadId===t.id&&r.userId===actor.id);
+  return !read||Date.parse(read.seenAt)<Date.parse(t.updatedAt);
+ }).length;
+}
+function ft_commRead_(actor,t){
+ const rows=ft_commReads_(),existing=rows.find(x=>x.companyId===t.companyId&&x.threadId===t.id&&x.userId===actor.id);
+ const row=existing||{id:ft_uuid_(),companyId:t.companyId,threadId:t.id,userId:actor.id};
+ row.seenAt=ft_now_();
+ if(existing)ft_absenceSave_('CommReads',FT_COMM_READ_COLS_,row);
+ else ft_absenceAdd_('CommReads',FT_COMM_READ_COLS_,row);
+ return true;
+}
+function ft_commPhotoSave_(actor,c,picture){
+ if(!picture)return '';
+ const data=String(picture.data||'');
+ const mime=String(picture.mime||'');
+ if(!['image/jpeg','image/png'].includes(mime)||data.length>950000||data.length<20||
+   !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
+  throw Error('Bitte ein JPG- oder PNG-Foto bis ca. 650 KB auswählen.');
+ const bytes=Utilities.base64Decode(data);
+ if(bytes.length>700000)throw Error('Foto zu groß (maximal 650 KB).');
+ const signature=bytes.map(x=>x&255);
+ if((mime==='image/png'&&!(signature[0]===137&&signature[1]===80&&signature[2]===78&&signature[3]===71))||
+    (mime==='image/jpeg'&&!(signature[0]===255&&signature[1]===216&&signature[2]===255)))
+   throw Error('Das Fotoformat stimmt nicht mit der Datei überein.');
+ const root=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
+ const iter=root.getFoldersByName('FireTime Pro – Nachrichtenbilder (privat)');
+ const folder=iter.hasNext()?iter.next():root.createFolder('FireTime Pro – Nachrichtenbilder (privat)');
+ const blob=Utilities.newBlob(bytes,mime,ft_uuid_()+(mime==='image/png'?'.png':'.jpg'));
+ const file=folder.createFile(blob);return file.getId();
+}
+function ft_commPhoto_(actor,p){
+ const t=ft_commThread_(actor,p.threadId),attachmentId=String(p.attachmentId||'');
+ const allowed=[t.attachmentId,...ft_commReplies_().filter(r=>r.threadId===t.id&&r.companyId===t.companyId).map(r=>r.attachmentId)];
+ if(!attachmentId||!allowed.includes(attachmentId))throw Error('Foto gehört nicht zu dieser Nachricht.');
+ const file=DriveApp.getFileById(attachmentId),blob=file.getBlob(),type=blob.getContentType();
+ if(!['image/jpeg','image/png'].includes(type)||blob.getSize()>700000)throw Error('Dieses Fotoformat kann nicht geöffnet werden.');
+ return {mime:type,data:Utilities.base64Encode(blob.getBytes())};
+}
+function ft_commList_(actor,p){
+ const c=ft_commCompany_(actor,p);
+ const threads=ft_commVisible_(actor,c).slice().sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,100);
+ const ids=new Set(threads.map(x=>x.id)),read=ft_commReads_(),replies=ft_commReplies_().filter(x=>x.companyId===c.id&&ids.has(x.threadId));
+ const users=ft_get_('Users').filter(x=>x.companyId===c.id).map(x=>({id:x.id,name:x.name,role:x.role}));
+ return {threads:threads.map(x=>({...ft_commPublic_(x),
+  unread:!(read.some(z=>z.threadId===x.id&&z.userId===actor.id&&Date.parse(z.seenAt)>=Date.parse(x.updatedAt)))})),
+  replies:replies.map(x=>({id:x.id,threadId:x.threadId,authorId:x.authorId,body:ft_commDecode_(x.bodyEncoded),
+  createdAt:x.createdAt,hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''})),
+  recipients:ft_commRecipients_(actor,c),users,unread:ft_commUnread_(actor,c)};
+}
+function ft_commMail_(c,recipient,sender,thread,eventId,activity){
+ const url=ft_clientUrl_(c);
+ return ft_notification_(c,recipient,'COMM_'+activity,eventId,'FireTime Pro – '+(thread.kind==='TASK'?'Aufgabe: ':'Nachricht: ')+
+  ft_commDecode_(thread.titleEncoded),
+  'Hallo '+recipient.name+'!\n\n'+sender.name+' hat dir in FireTime Pro '+
+  (activity==='REPLY'?'geantwortet.':activity==='STATUS'?'den Aufgabenstatus geändert.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
+  '\n\n'+ft_commDecode_(thread.titleEncoded)+
+  (thread.dueDate?'\nFrist: '+thread.dueDate.slice(8,10)+'.'+thread.dueDate.slice(5,7)+'.'+thread.dueDate.slice(0,4):'')+
+  '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);
+}
+function ft_commCreate_(actor,p){
+ const c=ft_commCompany_(actor,p),kind=String(p.kind||'MESSAGE');
+ if(!['MESSAGE','TASK'].includes(kind))throw Error('Unbekannte Nachrichtenart.');
+ if(kind==='TASK'&&actor.role==='STAFF')throw Error('Aufgaben werden vom Firmenadministrator vergeben.');
+ const recipient=ft_user_(actor,String(p.recipientId||''));
+ if(recipient.companyId!==c.id||recipient.id===actor.id||recipient.status!=='ACTIVE'||
+   !(actor.role==='STAFF'?recipient.role==='ADMIN':recipient.role==='STAFF'))
+  throw Error('Der Empfänger ist für diese Firma nicht erlaubt.');
+ const title=ft_str_(p.title||'',120).trim(),body=ft_str_(p.body||'',3000).trim();
+ if(title.length<3||body.length<1)throw Error('Bitte Betreff und Nachrichtentext eingeben.');
+ const dueDate=kind==='TASK'?String(p.dueDate||''):'';
+ if(dueDate)ft_date_(dueDate);
+ // Fristen als reinen Text speichern, niemals von Google Sheets als Datum verschieben lassen.
+ ft_absenceSheet_('CommThreads',FT_COMM_THREAD_COLS_,true).getRange('H:H').setNumberFormat('@');
+ const now=ft_now_(),row={id:ft_uuid_(),companyId:c.id,kind,titleEncoded:ft_commEncode_(title),
+  bodyEncoded:ft_commEncode_(body),createdBy:actor.id,recipientId:recipient.id,dueDate,
+  status:kind==='TASK'?'OPEN':'MESSAGE',createdAt:now,updatedAt:now,
+  attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
+ ft_absenceAdd_('CommThreads',FT_COMM_THREAD_COLS_,row);
+ ft_commRead_(actor,row);
+ ft_audit_(actor,'COMM_CREATE','CommThreads',row.id,{}, {companyId:c.id,kind,recipientId:recipient.id,dueDate});
+ return {thread:ft_commPublic_(row),mailSent:ft_commMail_(c,recipient,actor,row,row.id,'NEW')};
+}
+function ft_commReply_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId),c=ft_commCompany_(actor,{companyId:thread.companyId});
+ const body=ft_str_(p.body||'',3000).trim();
+ if(!body)throw Error('Bitte eine Antwort eingeben.');
+ const reply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
+  bodyEncoded:ft_commEncode_(body),createdAt:ft_now_(),attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
+ ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,reply);
+ thread.updatedAt=reply.createdAt;ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);
+ ft_commRead_(actor,thread);
+ const recipientId=thread.createdBy===actor.id?thread.recipientId:thread.createdBy;
+ const recipient=ft_one_('Users',recipientId);
+ const sent=recipient&&recipient.status==='ACTIVE'?ft_commMail_(c,recipient,actor,thread,reply.id,'REPLY'):false;
+ ft_audit_(actor,'COMM_REPLY','CommReplies',reply.id,{}, {companyId:c.id,threadId:thread.id});
+ return {ok:true,mailSent:sent};
+}
+function ft_commMark_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId);
+ ft_commRead_(actor,thread);return {ok:true};
+}
+function ft_commTaskStatus_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId);
+ if(thread.kind!=='TASK')throw Error('Das ist keine Aufgabe.');
+ const next=String(p.status||'');
+ if(!['OPEN','DONE'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
+ if(actor.role==='STAFF'&&(next!=='DONE'||thread.recipientId!==actor.id))
+  throw Error('Du kannst nur deine eigenen Aufgaben als erledigt melden.');
+ if(thread.status===next)return {ok:true};
+ const before=thread.status;thread.status=next;thread.updatedAt=ft_now_();
+ ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);ft_commRead_(actor,thread);
+ const c=ft_company_(actor,thread.companyId),other=ft_one_('Users',thread.createdBy===actor.id?thread.recipientId:thread.createdBy);
+ if(other&&other.status==='ACTIVE')ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');
+ ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,{status:before},{status:next});
+ return {ok:true};
+}
+
 // -----------------------------------------------------------------
 // 10_API
 // -----------------------------------------------------------------
@@ -1792,6 +2003,14 @@ function ft_api(token,action,p){
   case 'timerStart':return ft_lock_(()=>ft_timerStart_(u,p));
   case 'timerStop':return ft_lock_(()=>ft_timerStop_(u,p));
   case 'timerStatus':return ft_timerStatus_(u,p);
+  case 'timerPauseStart':return ft_lock_(()=>ft_timerPauseAction_(u,'start'));
+  case 'timerPauseStop':return ft_lock_(()=>ft_timerPauseAction_(u,'stop'));
+  case 'commList':return ft_commList_(u,p);
+  case 'commCreate':return ft_lock_(()=>ft_commCreate_(u,p));
+  case 'commReply':return ft_lock_(()=>ft_commReply_(u,p));
+  case 'commRead':return ft_lock_(()=>ft_commMark_(u,p));
+  case 'commTaskStatus':return ft_lock_(()=>ft_commTaskStatus_(u,p));
+  case 'commPhoto':return ft_commPhoto_(u,p);
   case 'activitySave':return ft_lock_(()=>ft_activitySave_(u,p));
   case 'activityDelete':return ft_lock_(()=>ft_activityDelete_(u,p));
   case 'availabilitySave':return ft_lock_(()=>ft_availabilitySave_(u,p));
@@ -1903,6 +2122,9 @@ function ft_home_(u,p){
   workflowReady:Boolean(c&&ft_db_().getSheetByName('ActivityTimers')&&ft_db_().getSheetByName('ActivityTypes')&&ft_db_().getSheetByName('PlanMonths')),
   balanceCutoverSupported:true,
   activityDefaultsSupported:true,
+  commSupported:true,
+  pauseClockSupported:true,
+  commUnread:c?ft_commUnread_(u,c):0,
   activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
   runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
@@ -2002,7 +2224,7 @@ function ft_licApi_(actor,p){
 }
 function ft_requireAction_(actor,action,p){
  const dict={
-  activitySave:'TIME',activityDelete:'TIME',activityTypesGet:'TIME',activityTypesSave:'TIME',timerStart:'TIME',timerStop:'TIME',timerStatus:'TIME',
+  activitySave:'TIME',activityDelete:'TIME',activityTypesGet:'TIME',activityTypesSave:'TIME',timerStart:'TIME',timerStop:'TIME',timerStatus:'TIME',timerPauseStart:'TIME',timerPauseStop:'TIME',
   monthSubmit:'REPORTS',monthReview:'REPORTS',report:'REPORTS',pdf:'REPORTS',pdfPrepare:'REPORTS',pdfJobStatus:'REPORTS',pdfArchive:'REPORTS',pdfChunk:'REPORTS',pdfStore:'REPORTS',pdfBatchStore:'REPORTS',pdfBatchArchive:'REPORTS',pdfBatchChunk:'REPORTS',
   leaveRequest:'LEAVE',leaveUpdate:'LEAVE',leaveWithdraw:'LEAVE',leaveReview:'LEAVE',
   leaveAccount:'LEAVE',leavePolicyGet:'LEAVE',leavePolicySave:'LEAVE',
