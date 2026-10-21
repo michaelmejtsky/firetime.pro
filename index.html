@@ -1136,7 +1136,8 @@ function ftAutoCanRender_(){
  return true;
 }
 async function ftAutoCheck_(force=false){
- if(FT_AUTO_RUNNING||!ftAutoCanRender_()||ST.tab==='rules')return false;
+ // Inbox has its own lighter poll; account is mostly local settings.
+ if(FT_AUTO_RUNNING||!ftAutoCanRender_()||['rules','messages','profile'].includes(ST.tab))return false;
  const now=performance.now();
  if(now-FT_AUTO_LAST_TRY<12000)return false; // avoid focus/visibility event bursts
  const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
