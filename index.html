@@ -3056,8 +3056,8 @@ if(a==='toggleOpeningSign'){
 }
 if(a==='normalLogin'){ST.invite=false;auth();return;}
 if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
-if(a==='back'){ST.cid='';ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
-if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
+if(a==='back'){ST.cid='';ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
+if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='homeOpenStandby'||a==='homeOpenWork'){
  const next=a==='homeOpenStandby'?'standby':'work';
  FT_TAB_MONTHS[next]=ST.month;
@@ -3264,7 +3264,8 @@ if(form.getAttribute('id')==='loginForm'){
   const result=await rpc('ft_login',email,p.password);
   try{localStorage.setItem(FT_SAVED_EMAIL_KEY,email);}catch(e){}
   FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;
-  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.tab='dashboard';
+  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.pushSettings=null;
+  ST.tab=new URLSearchParams(location.search).get('tab')==='messages'?'messages':'dashboard';
   if(button)button.textContent='Konto bestätigt – Arbeitsbereich öffnet …';
   await ftOpenShell();
  }catch(err){
