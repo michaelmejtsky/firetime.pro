@@ -122,13 +122,13 @@ test('email only follows a genuine 19:00 auto-close, never a manual finish',()=>
   ft_notification_:(c,u,kind,id,subject,text)=>{
    if(sent.has(id))return false;sent.add(id);calls.push({kind,id,subject,text});return true;
   },
-  Utilities:{formatDate:()=> '20.10.2026 19:00'},FT_TZ:'Europe/Vienna',Date
+  Utilities:{formatDate:(date,zone,fmt)=>fmt==='HH:mm'?'19:00':'20.10.2026 19:00'},FT_TZ:'Europe/Vienna',Date
  });
  const company={id:'c',name:'BSB3100'},user={id:'u',email:'employee@example.test',name:'Mitarbeiter'};
- const manual={id:'manual-x',end:'2026-10-20T18:55',description:'Objektkontrolle'};
+ const manual={id:'manual-x',end:'2026-10-20T16:55:00.000Z',description:'Objektkontrolle'};
  assert.equal(api.ft_timerConfirmedAutoClose_(manual),false);
  assert.equal(api.ft_timerAutoNotice_(company,user,manual),false);
- const auto={id:'activity-x',end:'2026-10-20T19:00',
+ const auto={id:'activity-x',end:'2026-10-20T17:00:00.000Z',
   description:'Objektkontrolle [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'};
  assert.equal(api.ft_timerConfirmedAutoClose_(auto),true);
  assert.equal(api.ft_timerAutoNotice_(company,user,auto),true);
