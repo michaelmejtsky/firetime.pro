@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-private-colleague-messages-v1"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-21-photo-ui-cache-fix-v187"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -568,6 +568,20 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-notify-explainer{font-size:12px;color:#b6d1e3;line-height:1.6;margin:12px 0}
 .ft-notify-settings .btn{min-height:45px}
 @media(max-width:500px){.ft-notify-inner{padding:9px 11px 14px}.ft-notify-settings>summary{padding:12px 10px}}
+
+/* Mobile und Desktop: eigener Foto-Viewer, keine winzigen Bildbuttons. */
+.ft-msg-photo-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+ min-height:45px;padding:10px 14px;border-radius:10px;font-weight:700;border-color:#6393b0}
+.ft-photo-viewer{width:min(96vw,900px);max-width:96vw;max-height:94dvh;padding:12px;
+ background:#0d2032;border:1px solid #527893;border-radius:15px;color:#f5fbff;overscroll-behavior:contain}
+.ft-photo-viewer::backdrop{background:rgba(0,6,13,.88)}
+.ft-photo-header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+ margin-bottom:10px;padding:0 2px}
+.ft-photo-header strong{font-size:14px}
+.ft-photo-close{min-height:42px}
+.ft-photo-viewer img{max-width:100%;max-height:calc(94dvh - 90px);width:auto;height:auto;
+ display:block;object-fit:contain;margin:0 auto;border-radius:8px}
+@media(max-width:580px){.ft-photo-viewer{padding:9px}.ft-photo-header strong{font-size:12px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -805,7 +819,7 @@ async function rpc(name,...args){
 function api(action,p={}){
   const startedContext=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
   const result=rpc('ft_api',ST.token,action,p);
-  const readOnly=new Set(['home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','absenceHistory','leaveAccount','leavePolicyGet','absencePdfArchive','absencePdfChunk','planWorkflow']);
+  const readOnly=new Set(['commPhoto','commList','home','report','licenseGet','profileGet','rulesGet','audit','shiftPeriodSummary','calendarTest','userInvite','remindOne','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','absenceHistory','leaveAccount','leavePolicyGet','absencePdfArchive','absencePdfChunk','planWorkflow']);
   if(readOnly.has(action))return result;
   return result.then(value=>{
     if(['leaveRequest','leaveUpdate','leaveWithdraw','leaveReview','sickReport','sickReview','userUpdate','leavePolicySave'].includes(action))
@@ -1050,7 +1064,41 @@ function ftCommStartPoll_(){
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')ftCommPoll_();});
 function ftCommPhotoButton_(id,threadId){
  return id?'<button type="button" class="btn ft-msg-photo-btn" data-act="commPhoto" data-id="'+
-  E(id)+'" data-thread="'+E(threadId)+'">📷 Foto ansehen</button>':'';
+  E(id)+'" data-thread="'+E(threadId)+'"><span aria-hidden="true">📷</span> Bild öffnen</button>':'';
+}
+function ftCommPhotoPreview_(photo){
+ const data=String(photo?.data||''),type=String(photo?.mime||'');
+ if(!['image/jpeg','image/png','image/webp'].includes(type)||
+  !/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>1200000)throw Error('Ungültige Fotodaten.');
+ let bytes;
+ try{
+  const binary=atob(data);bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+ }catch(e){throw Error('Das Foto konnte nicht decodiert werden.');}
+ const blob=new Blob([bytes],{type});
+ const objectUrl=URL.createObjectURL(blob);
+ const dialog=document.createElement('dialog');
+ dialog.className='ft-msg-photo-dialog ft-photo-viewer';
+ dialog.setAttribute('aria-label','Foto zur Nachricht');
+ const header=document.createElement('div');header.className='ft-photo-header';
+ const title=document.createElement('strong');title.textContent='Foto zur Nachricht';
+ const close=document.createElement('button');close.className='btn ft-photo-close';
+ close.type='button';close.textContent='✕ Schließen';close.setAttribute('aria-label','Bild schließen');
+ header.append(title,close);
+ const img=document.createElement('img');
+ img.alt='Angehängtes Foto';img.src=objectUrl;img.decoding='async';
+ img.addEventListener('error',()=>{
+  const warning=document.createElement('p');warning.className='ft-plan-message ft-plan-warning';
+  warning.textContent='Die Bilddatei wurde empfangen, aber dieses Gerät kann sie nicht darstellen.';
+  dialog.append(warning);
+ },{once:true});
+ const cleanup=()=>{URL.revokeObjectURL(objectUrl);dialog.remove();};
+ dialog.addEventListener('close',cleanup,{once:true});
+ close.addEventListener('click',()=>dialog.close());
+ dialog.append(header,img);document.body.append(dialog);
+ try{dialog.showModal();}
+ catch(err){cleanup();throw Error('Die Bildvorschau kann auf diesem Gerät nicht geöffnet werden.');}
+ return dialog;
 }
 
 function ftCommNotificationState_(){
@@ -2817,21 +2865,16 @@ if(a==='commDone'||a==='commReopen'){
  return;
 }
 if(a==='commPhoto'){
- btn.disabled=true;
+ btn.disabled=true;const old=btn.innerHTML;btn.textContent='Bild wird geladen …';
  try{
   const photo=await api('commPhoto',{companyId:firm().id,threadId:btn.dataset.thread,attachmentId:id});
-  if(!['image/jpeg','image/png'].includes(photo?.mime)||!/^[A-Za-z0-9+/]+={0,2}$/.test(photo.data||''))
-   throw Error('Ungültige Bilddaten.');
-  const dialog=document.createElement('dialog');
-  dialog.className='ft-msg-photo-dialog';
-  const img=document.createElement('img');img.alt='Foto zur Nachricht';img.src='data:'+photo.mime+';base64,'+photo.data;
-  const close=document.createElement('button');close.className='btn primary';close.textContent='Schließen';close.type='button';
-  close.addEventListener('click',()=>dialog.close());
-  dialog.append(img,close);
-  document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});
-  dialog.showModal();
- }catch(e){say('Foto konnte nicht geladen werden: '+String(e.message||e),true);}
- finally{if(btn.isConnected)btn.disabled=false;}
+  ftCommPhotoPreview_(photo);
+ }catch(err){
+  const message=String(err.message||err);
+  say('Foto konnte nicht geöffnet werden: '+message,true);
+  // Eine deutliche Meldung statt eines stillen Fehlers, besonders am iPhone.
+  if(typeof alert==='function')alert('Foto konnte nicht geöffnet werden.\n\n'+message);
+ }finally{if(btn.isConnected){btn.disabled=false;btn.innerHTML=old;}}
  return;
 }
 
