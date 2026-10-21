@@ -93,7 +93,7 @@ test('client UI exposes real opt-in, device status and test; worker shows incomi
  assert.match(frontend,/pushUnregister/);
  assert.match(frontend,/pushTest/);
  assert.match(frontend,/Push aktiv/);
- assert.match(frontend,/FT_VISIBLE_VERSION='1\.8\.11'/);
+ assert.match(frontend,/FT_VISIBLE_VERSION='1\.8\.12'/);
  assert.match(sw,/addEventListener\('push'/);
  assert.match(sw,/registration\.showNotification/);
  assert.match(sw,/addEventListener\('notificationclick'/);
