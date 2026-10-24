@@ -5,7 +5,7 @@
  */
 const MAX_BYTES = 3_700_000;
 const MAX_RESPONSE_BYTES = 7_000_000;
-const REQUEST_TYPES = new Set(['login', 'activate', 'logout', 'password', 'brand', 'api']);
+const REQUEST_TYPES = new Set(['login', 'activate', 'resetRequest', 'resetConfirm', 'logout', 'password', 'brand', 'api']);
 
 function cors(origin) {
   return {
