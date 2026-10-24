@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-22-timer-end-consistent-v1813"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-24-password-recovery-v1814"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -689,7 +689,12 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
   </div>
 </div>
 <button type="button" class="ft-install-shortcut" id="ft-install-open" aria-label="FireTime Pro installieren">↧ App installieren</button><script>
-const INVITE=new URLSearchParams(location.search).get('invite') || ''; 
+const INVITE=new URLSearchParams(location.search).get('invite') || '';
+const FT_RESET_TOKEN=new URLSearchParams(location.search).get('reset') || '';
+// Hide the one-time recovery secret from browser history after reading it.
+if(FT_RESET_TOKEN&&window.history?.replaceState){
+ try{const u=new URL(location.href);u.searchParams.delete('reset');history.replaceState(history.state,'',u.pathname+u.search+u.hash);}catch(_){}
+}
 const SLUG=new URLSearchParams(location.search).get('firm') || localStorage.getItem('ft_last_firm_slug') || 'bsb3100'; // Standardkunde, bis eine andere Firma gewählt wurde
 // Public brand-only cache: never store accounts, tokens, permissions or private data.
 // Keyed by the exact company slug so a tenant can never show another tenant's logo.
@@ -781,7 +786,7 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:['messages','availability','standby','leave','time','reports','sick','work'].includes(new URLSearchParams(location.search).get('tab'))?new URLSearchParams(location.search).get('tab'):'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE)};
+const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:['messages','availability','standby','leave','time','reports','sick','work'].includes(new URLSearchParams(location.search).get('tab'))?new URLSearchParams(location.search).get('tab'):'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE),reset:/^[a-f0-9]{64}$/.test(FT_RESET_TOKEN),forgot:false};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -873,7 +878,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.13';
+const FT_VISIBLE_VERSION='1.8.14';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -949,6 +954,8 @@ async function rpc(name,...args){
   switch(name){
     case 'ft_login': request={type:'login',email:args[0],password:args[1]};break;
     case 'ft_activate': request={type:'activate',invite:args[0],password:args[1]};break;
+    case 'ft_resetRequest':request={type:'resetRequest',email:args[0]};break;
+    case 'ft_resetConfirm':request={type:'resetConfirm',resetToken:args[0],password:args[1]};break;
     case 'ft_logout': request={type:'logout',token:args[0]};break;
     case 'ft_changePassword': request={type:'password',token:args[0],current:args[1],next:args[2]};break;
     case 'ft_brandForLogin':request={type:'brand',slug:args[0]};break;
@@ -1017,7 +1024,19 @@ function hint(t,title='Mehr Informationen'){
 function monthPick(){return `<div class="actions"><label>Monat: <input type="month" id="monthPick" style="width:180px" value="${E(ST.month)}"></label></div>`;}
 function chk(name,label,checked,desc=''){return `<label class="cbox"><input type="checkbox" name="${E(name)}" ${checked?'checked':''}><span><b>${E(label)}</b>${desc?`<div class="muted small">${E(desc)}</div>`:''}</span></label>`;}
 function fields(form){const p=Object.fromEntries(new FormData(form).entries());form.querySelectorAll('input[type=checkbox]').forEach(x=>{if(!['module','nightTypes','sundayTypes','holidayTypes'].includes(x.name))p[x.name]=x.checked;});return p;}
-function auth(){const activate=ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div><div id="ft-login-brand" aria-live="polite">${ftLoginBrandHtml()}</div><p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${activate?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button class="btn" data-act="normalLogin">Zur Anmeldung</button>`:`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form>`}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</p></div></div>`;}
+function auth(){
+ const reset=ST.reset&&/^[a-f0-9]{64}$/.test(FT_RESET_TOKEN);
+ const activate=!reset&&ST.invite&&/^[a-f0-9]{64}$/.test(INVITE);
+ const forgot=!reset&&!activate&&ST.forgot;
+ const content=reset
+  ?`<h2>Passwort zurücksetzen</h2><p class="muted small">Vergib ein neues Passwort für deinen FireTime-Pro-Zugang. Der einmalige Link ist 30 Minuten gültig.</p><form id="resetPasswordForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12" maxlength="150" autocomplete="new-password"')}${input('Neues Passwort wiederholen','confirm','','password','required minlength="12" maxlength="150" autocomplete="new-password"')}<button class="btn primary" style="width:100%">Neues Passwort speichern</button></form><button type="button" class="btn" data-act="normalLogin">Zur Anmeldung</button>`
+  :activate
+  ?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button type="button" class="btn" data-act="normalLogin">Zur Anmeldung</button>`
+  :forgot
+  ?`<h2>Passwort vergessen?</h2><p class="muted small">Trage deine hinterlegte E-Mail-Adresse ein. Falls ein aktives Konto besteht, bekommst du einen einmaligen Link. Der Link ist 30 Minuten gültig.</p><form id="forgotPasswordForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}<button class="btn primary" style="width:100%">Zurücksetzen-Link anfordern</button></form><button type="button" class="btn" data-act="normalLogin">Zur Anmeldung</button>`
+  :`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form><button type="button" class="btn" data-act="forgotPassword">Passwort vergessen?</button>`;
+ app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div><div id="ft-login-brand" aria-live="polite">${ftLoginBrandHtml()}</div><p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${content}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</p></div></div>`;
+}
 // Schneller, authentifizierter App-Start ohne teure Monatsabrechnung.
 // Der echte Monatsbericht wird danach aus dem Backend nachgeladen.
 async function ftOpenShell(){
@@ -1842,7 +1861,11 @@ function ftStaffVacationSync_(){
   'Bitte zuerst die regelmäßigen Arbeitstage korrekt eingeben (z. B. 1,2,3,4,5).';
 }
 
-function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${ftStaffDecimalField_('Monatssoll / Anstellungsstunden je Monat', 'monthlyHours',ftStaffFormatDecimal_(u?.monthlyHours??25),'0 bis 300 Stunden · Komma und Punkt möglich, z. B. 25,10')}${ftStaffDecimalField_('Stundensatz (€)', 'hourlyRate',ftStaffFormatDecimal_(u?.hourlyRate??0),'Auch Centbeträge mit Komma möglich, z. B. 14,75')}${ftStaffDecimalField_('Bisheriger Resturlaub / Startsaldo (Tage)', 'leaveBalance',ftStaffFormatDecimal_(u?.leaveBalance??0),'Bereits bestehender Urlaubsstand; kein automatisch berechneter Jahresanspruch')}${ftStaffDecimalField_('Stunden-Startsaldo (+ / −)', 'openingHours',ftStaffFormatDecimal_(u?.openingHours??0),'Auch negative und beliebige Dezimalwerte, z. B. −7,35')}${ST.h?.balanceCutoverSupported?input('Abrechnungsbeginn (ab diesem Monat Monatssoll zählen)','hoursStartMonth',u?.hoursStartMonth||ST.month,'month','required'):''}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div>${ftStaffVacationFields_(u)}${ST.h?.balanceCutoverSupported?'<p class="ft-balance-start-help"><strong>Übernommener Stundensaldo:</strong> Der Stunden-Startsaldo gilt vor dem hier gewählten Abrechnungsbeginn. Beispiel: Bei −54,75 Stunden zum Ende Oktober beginnt die neue Monatsverrechnung ab November. Frühere Monate werden nicht nochmals belastet. Der Beschäftigungsbeginn darf davor liegen.</p>':'<p class="ft-balance-warning">Bitte zuerst die vollständige Code.gs V1.8.3 veröffentlichen, damit der neue Abrechnungsbeginn gespeichert werden kann. Vorher keine Saldenkorrektur über dieses Feld durchführen.</p>'}<p class="ft-staff-leave-opening-note">Wichtig: Dieser Resturlaub ist der <strong>bisherige belegte Startsaldo</strong>, nicht automatisch der volle Jahresanspruch. Bei Neuanlage ist 0 nur ein Platzhalter, <strong>nicht der gesetzliche Urlaubsanspruch</strong>. Den tatsächlich bereits entstandenen (gegebenenfalls aliquoten) Urlaubsanspruch bitte vor der ersten Verwendung mit den Beschäftigungsunterlagen oder der Lohnverrechnung feststellen und hier eintragen. Bestehende Mitarbeiterstände bleiben unverändert.</p><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button></td></tr>`).join('')}</table></div></div>`;}
+function ftCanResetUser_(u){
+ return Boolean(u&&u.status==='ACTIVE'&&isAdmin()&&
+  (me().role==='SYSADMIN'?u.role!=='SYSADMIN':u.role==='STAFF'&&u.companyId===firm()?.id));
+}
+function staff(){if(!isAdmin())return '';const u=myUsers().find(x=>x.id===ST.edit);return hint('Firmenadministratoren legen ihre Mitarbeiter selbst an. Jeder neue Mitarbeiter bekommt einen persönlichen Aktivierungslink per E-Mail.')+`<div class="card"><h2>${u?'Mitarbeiter bearbeiten':'Neuen Mitarbeiter anlegen'}</h2><form id="staffForm"><input type="hidden" name="id" value="${E(u?.id||'')}"><div class="cols">${input('Vor- und Nachname','name',u?.name||'','text','required')}${u?`<div>E-Mail: ${E(u.email)}</div>`:input('E-Mail','email','','email','required')}${select('role','Rolle',[['STAFF','Mitarbeiter'],['ADMIN','Firmenadministrator']],u?.role||'STAFF')}${ftStaffDecimalField_('Monatssoll / Anstellungsstunden je Monat', 'monthlyHours',ftStaffFormatDecimal_(u?.monthlyHours??25),'0 bis 300 Stunden · Komma und Punkt möglich, z. B. 25,10')}${ftStaffDecimalField_('Stundensatz (€)', 'hourlyRate',ftStaffFormatDecimal_(u?.hourlyRate??0),'Auch Centbeträge mit Komma möglich, z. B. 14,75')}${ftStaffDecimalField_('Bisheriger Resturlaub / Startsaldo (Tage)', 'leaveBalance',ftStaffFormatDecimal_(u?.leaveBalance??0),'Bereits bestehender Urlaubsstand; kein automatisch berechneter Jahresanspruch')}${ftStaffDecimalField_('Stunden-Startsaldo (+ / −)', 'openingHours',ftStaffFormatDecimal_(u?.openingHours??0),'Auch negative und beliebige Dezimalwerte, z. B. −7,35')}${ST.h?.balanceCutoverSupported?input('Abrechnungsbeginn (ab diesem Monat Monatssoll zählen)','hoursStartMonth',u?.hoursStartMonth||ST.month,'month','required'):''}${input('Beschäftigungsbeginn','startDate',u?.startDate||ST.month+'-01','date')}${input('Arbeitstage (Mo=1)','workdays',u?.workdays||'1,2,3,4,5')}${u?select('status','Status',[['ACTIVE','Aktiv'],['DISABLED','Gesperrt'],['INVITED','Einladung offen']],u.status):''}</div>${ftStaffVacationFields_(u)}${ST.h?.balanceCutoverSupported?'<p class="ft-balance-start-help"><strong>Übernommener Stundensaldo:</strong> Der Stunden-Startsaldo gilt vor dem hier gewählten Abrechnungsbeginn. Beispiel: Bei −54,75 Stunden zum Ende Oktober beginnt die neue Monatsverrechnung ab November. Frühere Monate werden nicht nochmals belastet. Der Beschäftigungsbeginn darf davor liegen.</p>':'<p class="ft-balance-warning">Bitte zuerst die vollständige Code.gs V1.8.3 veröffentlichen, damit der neue Abrechnungsbeginn gespeichert werden kann. Vorher keine Saldenkorrektur über dieses Feld durchführen.</p>'}<p class="ft-staff-leave-opening-note">Wichtig: Dieser Resturlaub ist der <strong>bisherige belegte Startsaldo</strong>, nicht automatisch der volle Jahresanspruch. Bei Neuanlage ist 0 nur ein Platzhalter, <strong>nicht der gesetzliche Urlaubsanspruch</strong>. Den tatsächlich bereits entstandenen (gegebenenfalls aliquoten) Urlaubsanspruch bitte vor der ersten Verwendung mit den Beschäftigungsunterlagen oder der Lohnverrechnung feststellen und hier eintragen. Bestehende Mitarbeiterstände bleiben unverändert.</p><button type="button" class="btn primary" data-ft-staff-save="1">Speichern</button>${u?'<button type="button" class="btn" data-act="cancelEdit">Abbrechen</button>':''}</form></div><div class="card"><h2>Mitarbeiter</h2><div class="table"><table><tr><th>Name</th><th>Rolle</th><th>Soll</th><th>Status</th><th>Aktion</th></tr>${myUsers().map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.role)}</td><td>${N(x.monthlyHours)} h</td><td>${E(x.status)}</td><td><button class="btn" data-act="editStaff" data-id="${x.id}">Bearbeiten</button><button class="btn" data-act="invite" data-id="${x.id}">Einladung senden</button>${ftCanResetUser_(x)?`<button type="button" class="btn" data-act="staffPasswordReset" data-id="${E(x.id)}">Passwort zurücksetzen</button>`:''}</td></tr>`).join('')}</table></div></div>`;}
 
 
 function ftTimePauseMinutes_(start,end){
@@ -3325,7 +3348,8 @@ if(a==='toggleOpeningSign'){
  if(input){const current=input.value.trim();input.value=current.startsWith('-')||current.startsWith('−')?current.slice(1):'-'+(current||'0');input.focus();}
  return;
 }
-if(a==='normalLogin'){ST.invite=false;auth();return;}
+if(a==='forgotPassword'){ST.forgot=true;ST.invite=false;ST.reset=false;auth();return;}
+if(a==='normalLogin'){ST.invite=false;ST.forgot=false;ST.reset=false;auth();return;}
 if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
 if(a==='back'){ST.cid='';ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
@@ -3341,6 +3365,16 @@ if(a==='homeOpenStandby'||a==='homeOpenWork'){
 if(a==='cancelEdit'){ST.edit='';page();return;}
 if(a==='editStaff'||a==='editTime'){ST.edit=id;page();window.scrollTo(0,0);return;}
 if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>api('userInvite',{id}),'Einladung verschickt.');return;}
+if(a==='staffPasswordReset'){
+ const u=(ST.h?.users||[]).find(x=>String(x.id)===String(id));
+ if(!u||!ftCanResetUser_(u))return;
+ if(!confirm('Passwort-Zurücksetzen-Link an '+u.name+' ('+u.email+') versenden? Das bestehende Passwort bleibt bis zur Verwendung gültig.'))return;
+ btn.disabled=true;
+ try{const message=await api('userPasswordReset',{id:u.id});say(message);}
+ catch(err){say('Passwort-Zurücksetzung fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}
+ return;
+}
 if(a==='deleteTime'){if(confirm('Eintrag löschen?'))await run(async()=>{await api('activityDelete',{id});await load();},'Gelöscht.');return;}
 if(a==='workDelete'){if(confirm('Unveröffentlichten Dienst löschen?'))await run(async()=>{await api('workDelete',{id,companyId:firm().id});await load();},'Dienst gelöscht.');return;}
 if(a==='workPublish'){if(confirm('Entwürfe des Monats veröffentlichen und E-Mails/Kalendereinladungen verschicken?'))await run(async()=>{const r=await api('workPublish',{companyId:firm().id,month:ST.month});await load();say(r.published+' Schichten veröffentlicht. '+r.warnings.join('; '),r.warnings.length>0);});return;}
@@ -3545,6 +3579,29 @@ if(form.getAttribute('id')==='loginForm'){
   FT_LOGIN_BUSY=false;
   if(button){button.disabled=false;button.textContent='Anmelden';}
  }
+ return;
+}
+if(form.id==='forgotPasswordForm'){
+ const button=form.querySelector('button');if(button)button.disabled=true;
+ try{
+  const message=await rpc('ft_resetRequest',String(p.email||'').trim().toLowerCase());
+  // Deliberately generic; account existence is never revealed.
+  say(String(message));
+  ST.forgot=false;auth();
+ }catch(err){say('Zurücksetzen konnte nicht angefordert werden: '+String(err.message||err),true);}
+ finally{if(button?.isConnected)button.disabled=false;}
+ return;
+}
+if(form.id==='resetPasswordForm'){
+ if(p.password!==p.confirm){say('Die beiden neuen Passwörter stimmen nicht überein.',true);return;}
+ const button=form.querySelector('button');if(button)button.disabled=true;
+ try{
+  const message=await rpc('ft_resetConfirm',FT_RESET_TOKEN,p.password);
+  ST.reset=false;ST.forgot=false;ST.invite=false;
+  ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');
+  auth();say(String(message));
+ }catch(err){say('Passwort-Zurücksetzung: '+String(err.message||err),true);}
+ finally{if(button?.isConnected)button.disabled=false;}
  return;
 }
 if(form.getAttribute('id')==='activateForm')return run(async()=>{await rpc('ft_activate',INVITE,p.password);ST.invite=false;auth();},'Zugang aktiviert.');
