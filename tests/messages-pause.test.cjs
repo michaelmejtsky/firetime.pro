@@ -240,5 +240,5 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.doesNotThrow(()=>new vm.Script(sw));
  assert.match(sw,/self\.registration\.scope/);
  assert.match(sw,/cache:'no-store'/);
- assert.match(sw,/firetime-shell-20261021-v1811/);
+ assert.match(sw,/firetime-shell-20261024-v1814/);
 });
