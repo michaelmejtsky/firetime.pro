@@ -100,6 +100,8 @@ test('login recovery, worker routing and employee buttons are wired',()=>{
  assert.match(backend,/case 'resetRequest':/);
  assert.match(backend,/case 'resetConfirm':/);
  assert.match(backend,/case 'userPasswordReset':return ft_passwordResetForUser_/);
+ assert.match(backend,/case 'myPasswordReset':/);
+ assert.match(ui,/data-act="myPasswordReset"/);
  assert.match(ui,/data-act="forgotPassword"/);
  assert.match(ui,/id="resetPasswordForm"/);
  assert.match(ui,/id="forgotPasswordForm"/);
