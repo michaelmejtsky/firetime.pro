@@ -1040,6 +1040,9 @@ function auth(){
 // Schneller, authentifizierter App-Start ohne teure Monatsabrechnung.
 // Der echte Monatsbericht wird danach aus dem Backend nachgeladen.
 async function ftOpenShell(){
+ // A one-time recovery/activation URL always takes precedence over a
+ // previously cached session, even when opened in an installed iPhone PWA.
+ if(ST.reset||ST.invite){FT_DASHBOARD_LOADING=false;auth();return;}
  if(!ST.token){FT_DASHBOARD_LOADING=false;auth();return;}
  const seq=++FT_LOAD_SEQ,start=performance.now(),month=ST.month,companyId=ST.cid;
  try{
