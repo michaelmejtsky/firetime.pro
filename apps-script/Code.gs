@@ -2666,6 +2666,11 @@ function ft_api(token,action,p){
    ft_allowed_(u,['SYSADMIN','ADMIN']);
    return ft_lock_(()=>ft_invite_(u,ft_user_(u,p.id)));
   case 'userPasswordReset':return ft_passwordResetForUser_(u,p);
+  case 'myPasswordReset':{
+   const sent=ft_passwordResetLink_(u,u);
+   return sent?'Ein Passwort-Zurücksetzen-Link wurde an deine hinterlegte E-Mail-Adresse gesendet.':
+    'Du hast kürzlich bereits einen Passwort-Link angefordert. Bitte E-Mail prüfen.';
+  }
   case 'activityTypesGet':return ft_activityTypesGet_(u,p);
   case 'activityTypesSave':return ft_lock_(()=>ft_activityTypesSave_(u,p));
   case 'timerStart':return ft_lock_(()=>ft_timerStart_(u,p));
