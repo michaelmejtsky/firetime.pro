@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.13-timer-auto-notifications-only-20261022';
+const FT_VERSION='1.8.14-password-recovery-20261024';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -238,6 +238,91 @@ function ft_activate(invite,password){
 }
 
 function ft_changePassword(token,current,next){const u=ft_auth_(token);if(String(next||'').length<12)throw Error('Neues Passwort mindestens 12 Zeichen');if(ft_password_(String(current||''),u.salt)!==u.passwordHash)throw Error('Bisheriges Passwort falsch');return ft_lock_(()=>{u.salt=ft_rand_();u.passwordHash=ft_password_(next,u.salt);u.mustChange=false;ft_save_('Users',u);ft_get_('Sessions').filter(s=>s.userId===u.id).sort((a,b)=>b.__row-a.__row).forEach(s=>ft_sheet_('Sessions').deleteRow(s.__row));return 'Passwort geändert. Bitte neu anmelden.';});}
+
+/**
+ * Password recovery reuses the pre-existing Invites table without migration:
+ * reset keys have the "reset:" prefix and cannot activate a new account.
+ * No password or raw reset token is stored in Sheets or returned to callers.
+ */
+function ft_passwordResetLink_(user,actor){
+ if(!user||user.status!=='ACTIVE'||!user.email)throw Error('Für dieses Konto ist keine Passwort-Wiederherstellung verfügbar.');
+ const cache=CacheService.getScriptCache(),rateKey='ftreset:'+ft_sha_(String(user.email).toLowerCase());
+ if(cache.get(rateKey))return false; // suppress repeated emails, incl. manager retries
+ const token=ft_rand_(),hash='reset:'+ft_sha_(token);
+ const company=user.companyId?ft_one_('Companies',user.companyId):null;
+ const base=company?ft_clientUrl_(company):ft_publicGithubUrl_();
+ if(!/^https:\/\//.test(String(base||'')))throw Error('Die öffentliche FireTime-Adresse ist nicht konfiguriert.');
+ const link=base+(base.includes('?')?'&':'?')+'reset='+encodeURIComponent(token);
+ const sentTo=ft_email_(user.email);
+ // Mail first: a mail delivery error must not revoke a working password or create a dead token.
+ ft_sendMail_({to:sentTo,subject:'FireTime Pro – Passwort zurücksetzen',
+  body:'Hallo '+user.name+'!\n\nFür deinen FireTime-Pro-Zugang wurde eine Passwort-Zurücksetzung angefordert.'+
+   '\nÖffne innerhalb von 30 Minuten diesen einmaligen Link und vergib ein neues Passwort (mindestens 12 Zeichen):\n'+link+
+   '\n\nWenn du keine Zurücksetzung angefordert hast, ignoriere die E-Mail. Dein bisheriges Passwort bleibt unverändert.'+
+   '\n\nFireTime Pro – Developed by Michael Mejtsky',name:'FireTime Pro'});
+ // No new schema: mark earlier reset links for this user consumed.
+ ft_lock_(()=>{
+  for(const old of ft_get_('Invites').filter(x=>x.userId===user.id&&
+      String(x.id).startsWith('reset:')&&!x.usedAt)){
+   old.usedAt=ft_now_();ft_save_('Invites',old);
+  }
+  ft_add_('Invites',{id:hash,userId:user.id,
+   expiresAt:new Date(Date.now()+30*60000).toISOString(),usedAt:''});
+  ft_audit_(actor||null,'PASSWORD_RESET_REQUEST','Users',user.id,
+   {companyId:user.companyId},{companyId:user.companyId,email:user.email});
+ });
+ cache.put(rateKey,'1',600);
+ return true;
+}
+function ft_passwordResetRequest_(email){
+ // Same response whether the address exists, is inactive or just rate-limited.
+ const generic='Falls ein aktives FireTime-Pro-Konto für diese E-Mail-Adresse besteht, wurde ein Zurücksetzen-Link versendet. Bitte auch den Spam-Ordner prüfen.';
+ const em=String(email||'').trim().toLowerCase();
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)||em.length>200)return generic;
+ const user=ft_get_('Users').find(x=>String(x.email).toLowerCase()===em&&x.status==='ACTIVE');
+ if(user){
+  try{ft_passwordResetLink_(user,null);}
+  catch(err){console.warn('Passwort-Wiederherstellung konnte nicht versendet werden.');}
+ }
+ return generic;
+}
+function ft_passwordResetForUser_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const user=ft_user_(actor,String(p.id||''));
+ if(user.status!=='ACTIVE')throw Error('Passwort-Zurücksetzung nur für aktive Konten möglich.');
+ if(actor.role==='ADMIN'&&user.role!=='STAFF')
+  throw Error('Nur der Systemadministrator darf Administrator-Passwörter zurücksetzen.');
+ if(user.role==='SYSADMIN'&&user.id!==actor.id)
+  throw Error('Systemadministrator-Zugang kann nur selbst wiederhergestellt werden.');
+ const sent=ft_passwordResetLink_(user,actor);
+ return sent?'Passwort-Link an '+user.email+' versendet. 30 Minuten gültig.':
+  'Für diesen Zugang wurde kürzlich bereits ein Passwort-Link verschickt. Bitte E-Mail prüfen.';
+}
+function ft_passwordResetConfirm_(token,password){
+ if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Zurücksetzen-Link ungültig oder abgelaufen.');
+ if(String(password||'').length<12||String(password||'').length>150)
+  throw Error('Das neue Passwort muss 12 bis 150 Zeichen lang sein.');
+ return ft_lock_(()=>{
+  const key='reset:'+ft_sha_(token),row=ft_one_('Invites',key);
+  if(!row||row.usedAt||!Number.isFinite(Date.parse(row.expiresAt))||
+    Date.parse(row.expiresAt)<Date.now())
+   throw Error('Zurücksetzen-Link ungültig, abgelaufen oder bereits verwendet.');
+  const user=ft_one_('Users',row.userId);
+  if(!user||user.status!=='ACTIVE')throw Error('Konto ist nicht aktiv.');
+  const before=ft_safe_(user);
+  user.salt=ft_rand_();user.passwordHash=ft_password_(String(password),user.salt);
+  user.mustChange=false;ft_save_('Users',user);
+  // Invalidate all sessions and all unused reset links for that user.
+  ft_get_('Sessions').filter(x=>x.userId===user.id)
+   .sort((a,b)=>b.__row-a.__row).forEach(x=>ft_sheet_('Sessions').deleteRow(x.__row));
+  for(const invite of ft_get_('Invites').filter(x=>x.userId===user.id&&
+      String(x.id).startsWith('reset:')&&!x.usedAt)){
+   invite.usedAt=ft_now_();ft_save_('Invites',invite);
+  }
+  ft_audit_(user,'PASSWORD_RESET_COMPLETED','Users',user.id,before,ft_safe_(user));
+  return 'Passwort erfolgreich geändert. Bitte mit dem neuen Passwort anmelden.';
+ });
+}
 
 function ft_logout(token){const h=ft_sha_(String(token||'')),s=ft_one_('Sessions',h);if(s)ft_lock_(()=>ft_sheet_('Sessions').deleteRow(s.__row));return true;}
 
@@ -2580,6 +2665,7 @@ function ft_api(token,action,p){
   case 'userInvite':
    ft_allowed_(u,['SYSADMIN','ADMIN']);
    return ft_lock_(()=>ft_invite_(u,ft_user_(u,p.id)));
+  case 'userPasswordReset':return ft_passwordResetForUser_(u,p);
   case 'activityTypesGet':return ft_activityTypesGet_(u,p);
   case 'activityTypesSave':return ft_lock_(()=>ft_activityTypesSave_(u,p));
   case 'timerStart':return ft_lock_(()=>ft_timerStart_(u,p));
@@ -3605,6 +3691,12 @@ function doPost(e) {
         break;
       case 'activate':
         result=ft_activate(req.invite,req.password);
+        break;
+      case 'resetRequest':
+        result=ft_passwordResetRequest_(req.email);
+        break;
+      case 'resetConfirm':
+        result=ft_passwordResetConfirm_(req.resetToken,req.password);
         break;
       case 'logout':
         result=ft_logout(req.token);
