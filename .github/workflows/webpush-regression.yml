@@ -12,6 +12,7 @@ on:
       - 'tests/account-push.test.cjs'
       - 'tests/background-badge.test.cjs'
       - 'tests/fast-refresh.test.cjs'
+      - 'tests/password-reset.test.cjs'
       - '.github/workflows/webpush-regression.yml'
   push:
     branches: [main]
@@ -26,6 +27,7 @@ on:
       - 'tests/account-push.test.cjs'
       - 'tests/background-badge.test.cjs'
       - 'tests/fast-refresh.test.cjs'
+      - 'tests/password-reset.test.cjs'
       - '.github/workflows/webpush-regression.yml'
   workflow_dispatch:
 permissions:
