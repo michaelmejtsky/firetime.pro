@@ -3194,7 +3194,7 @@ function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return
 function profile(){
  return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p></div>`+
   (ST.h?.backgroundPushSupported?`<section class="card ft-account-push"><h2>🔔 Benachrichtigungen</h2><p class="muted small">Push-Mitteilungen und registrierte Geräte für dein persönliches Konto verwalten.</p>${ftCommNotificationUI_()}</section>`:'')+
-  `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form></div>`;
+  `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form><p class="muted small">Altes Passwort nicht mehr bekannt? Du kannst dir auch einen sicheren Einmal-Link senden lassen.</p><button type="button" class="btn" data-act="myPasswordReset">Passwort zurücksetzen (E-Mail)</button></div>`;
 }
 
 async function ftCommPhotoData_(input){
@@ -3368,6 +3368,15 @@ if(a==='homeOpenStandby'||a==='homeOpenWork'){
 if(a==='cancelEdit'){ST.edit='';page();return;}
 if(a==='editStaff'||a==='editTime'){ST.edit=id;page();window.scrollTo(0,0);return;}
 if(a==='invite'){if(confirm('Einladungslink erneut versenden?'))await run(()=>api('userInvite',{id}),'Einladung verschickt.');return;}
+if(a==='myPasswordReset'){
+ if(!me()?.email)return;
+ if(!confirm('Passwort-Zurücksetzen-Link an '+me().email+' schicken? Dein aktuelles Passwort bleibt bis zur Rücksetzung gültig.'))return;
+ btn.disabled=true;
+ try{const result=await api('myPasswordReset',{});say(String(result));}
+ catch(err){say('Passwort-Zurücksetzung fehlgeschlagen: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}
+ return;
+}
 if(a==='staffPasswordReset'){
  const u=(ST.h?.users||[]).find(x=>String(x.id)===String(id));
  if(!u||!ftCanResetUser_(u))return;
