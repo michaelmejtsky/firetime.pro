@@ -886,6 +886,24 @@ const FT_VIEW_FETCHED_AT=new Map();
 let FT_META_LAST_FETCH=0;
 let FT_SHELL_SIGNATURE='';
 let FT_LOAD_SEQ=0;
+// Navigation requests take priority over polling and expensive admin overviews.
+let FT_NAV_LAST_AT=performance.now(),FT_MAIN_FETCHES=0;
+let FT_ADMIN_OVERVIEW_DEBOUNCE=null;
+function ftScheduleAdminOverview_(){
+ if(FT_ADMIN_OVERVIEW_DEBOUNCE)clearTimeout(FT_ADMIN_OVERVIEW_DEBOUNCE);
+ if(ST.tab!=='dashboard'||FT_DASHBOARD_LOADING||!isAdmin()||!firm())return;
+ const expectedId=firm().id,expectedMonth=ST.month;
+ FT_ADMIN_OVERVIEW_DEBOUNCE=setTimeout(()=>{
+  FT_ADMIN_OVERVIEW_DEBOUNCE=null;
+  if(ST.tab!=='dashboard'||firm()?.id!==expectedId||ST.month!==expectedMonth)return;
+  if(FT_MAIN_FETCHES||performance.now()-FT_NAV_LAST_AT<1500){
+   // A late response or a user tap gets priority.
+   ftScheduleAdminOverview_();
+   return;
+  }
+  ftAdminOverviewFetch_();
+ },2000);
+}
 // Only mark screens as ready when all information needed to display them
 // has already been delivered by the authenticated session bootstrap.
 function ftMarkLocalViews_(){
@@ -1162,6 +1180,7 @@ async function load(options={}){
   const background=Boolean(options.background);
   const loadSeq=++FT_LOAD_SEQ, loadStart=performance.now();
   const requestedTab=ST.tab, requestedMonth=ST.month, requestedCid=ST.cid;
+  FT_MAIN_FETCHES++;
   // Ein einziges signiertes home-Paket fuer die eigene Mitarbeiteroberflaeche.
   // Daten bleiben nur im RAM, firmenspezifisch und maximal 30 s frisch.
   // Administratoransichten ausserhalb des ersten Firmenaufrufs bleiben gezielt.
@@ -1264,6 +1283,8 @@ async function load(options={}){
       }else console.warn('FireTime Hintergrund-Aktualisierung:',message);
     }else auth();
     if(!background)say(message,true);
+  }finally{
+    FT_MAIN_FETCHES=Math.max(0,FT_MAIN_FETCHES-1);
   }
 }
 function nav(){if(me().role==='SYSADMIN'&&!firm())return ['dashboard','customers','profile'];const tabs=['dashboard','messages'];if(me().role==='SYSADMIN')tabs.push('customers','license');if(isAdmin())tabs.push('staff');if(has('TIME'))tabs.push('time');if(has('REPORTS'))tabs.push('reports');if(has('LEAVE'))tabs.push('leave');if(has('SICK'))tabs.push('sick');if(has('WORKPLAN'))tabs.push('work');if(has('STANDBY'))tabs.push('standby');if(has('AVAILABILITY'))tabs.push('availability');if(isAdmin()&&has('REPORTS'))tabs.push('rules');if(isAdmin())tabs.push('settings');tabs.push('profile');return tabs;}
@@ -1315,19 +1336,21 @@ function ftAutoCanRender_(){
 }
 async function ftAutoCheck_(force=false){
  // Inbox has its own lighter poll; account is mostly local settings.
- if(FT_AUTO_RUNNING||!ftAutoCanRender_()||['rules','messages','profile'].includes(ST.tab))return false;
+ if(FT_AUTO_RUNNING||FT_MAIN_FETCHES||!ftAutoCanRender_()||['rules','messages','profile'].includes(ST.tab))return false;
  const now=performance.now();
- if(now-FT_AUTO_LAST_TRY<12000)return false; // avoid focus/visibility event bursts
+ // Do not compete with active navigation and recently edited forms.
+ if(now-FT_NAV_LAST_AT<15000||now-FT_AUTO_LAST_TRY<12000)return false;
  const key=(firm()?.id||'SYS')+'|'+ST.month+'|'+ST.tab;
+ if(!FT_VIEWS_LOADED.has(key))return false;
  const age=now-(FT_VIEW_FETCHED_AT.get(key)||0);
- if(!force&&age<60000)return false;
+ if(!force&&age<180000)return false;
  FT_AUTO_RUNNING=true;FT_AUTO_LAST_TRY=now;
  try{await load({background:true});return true;}
  finally{FT_AUTO_RUNNING=false;}
 }
 function ftAutoStart_(){
  if(FT_AUTO_TIMER)return;
- FT_AUTO_TIMER=setInterval(()=>{ftAutoCheck_().catch(err=>console.warn('Auto-Refresh:',err));},12000);
+ FT_AUTO_TIMER=setInterval(()=>{ftAutoCheck_().catch(err=>console.warn('Auto-Refresh:',err));},30000);
 }
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='visible')ftAutoCheck_().catch(()=>{});
@@ -1407,6 +1430,8 @@ let FT_COMM_POLL_BUSY=false,FT_COMM_LAST_POLL=0;
 async function ftCommPoll_(force=false){
  if(!ST.token||!firm()?.id||!ST.h?.commSupported||document.visibilityState==='hidden'||ST.commLoading||FT_COMM_POLL_BUSY)return;
  if(ST.tab==='messages'&&(ST.commCompose||document.activeElement?.closest('form')))return;
+ // Timer polls yield to user taps; forced push / visibility checks stay immediate.
+ if(!force&&(FT_MAIN_FETCHES||performance.now()-FT_NAV_LAST_AT<15000))return;
  const now=Date.now();
  if(!force&&now-FT_COMM_LAST_POLL<60000)return;
  FT_COMM_POLL_BUSY=true;FT_COMM_LAST_POLL=now;
@@ -1745,7 +1770,7 @@ function page(){
  if(ST.tab==='reports')ftResumePdfJob();
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
- if(ST.tab==='dashboard'&&isAdmin()&&firm())Promise.resolve().then(()=>ftAdminOverviewFetch_());
+ if(ST.tab==='dashboard'&&isAdmin()&&firm()&&!FT_DASHBOARD_LOADING)ftScheduleAdminOverview_();
  if(ST.tab==='messages'&&ST.h?.commSupported&&!ST.comm&&!ST.commLoading)ftCommFetch_();
  if(ST.tab==='profile'&&ST.h?.backgroundPushSupported&&!ST.pushSettings)ftPushRefresh_();
 }
@@ -4022,7 +4047,7 @@ if(form.getAttribute('id')==='passwordForm')return run(async()=>{await rpc('ft_c
 }
 async function fileAsData(file){if(!file)return null;if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){say('Logo: PNG/JPG/WEBP maximal 2 MB.',true);return null;}return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error('Datei nicht lesbar.'));reader.readAsDataURL(file);});}
 async function uploadFile(input){const str=await fileAsData(input.files[0]);if(!str)return;if(input.id==='newLogo'){ST.logoNew=str;const el=document.getElementById('newLogoLabel');if(el)el.textContent='Ausgewählt: '+input.files[0].name;}else if(input.id==='existingLogo')await run(async()=>{await api('logoUpload',{companyId:firm().id,data:str});await load();},'Firmenlogo gespeichert.');}
-document.addEventListener('click',e=>{const more=e.target.closest?.('[data-mobile-more]');if(more){const sheet=document.getElementById('ft-mobile-sheet');const expanded=!sheet?.classList.contains('is-open');sheet?.classList.toggle('is-open',expanded);document.querySelectorAll('[data-mobile-more]').forEach(x=>x.setAttribute('aria-expanded',String(expanded)));return;}const b=e.target.closest('button[data-tab],button[data-act]');if(b){if(b.dataset.tab){
+document.addEventListener('click',e=>{const more=e.target.closest?.('[data-mobile-more]');if(more){const sheet=document.getElementById('ft-mobile-sheet');const expanded=!sheet?.classList.contains('is-open');sheet?.classList.toggle('is-open',expanded);document.querySelectorAll('[data-mobile-more]').forEach(x=>x.setAttribute('aria-expanded',String(expanded)));return;}const b=e.target.closest('button[data-tab],button[data-act]');if(b){FT_NAV_LAST_AT=performance.now();if(b.dataset.tab){
   // Close the mobile drawer immediately, before any view fetch starts.
   const drawer=document.getElementById('ft-mobile-sheet');
   if(drawer?.classList.contains('is-open')){
