@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-attachments-10mb-tempo-v1819"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-attachments-10mb-tempo-v1820"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -975,7 +975,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.19';
+const FT_VISIBLE_VERSION='1.8.20';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1070,7 +1070,12 @@ async function rpc(name,...args){
     default:throw Error('Nicht freigegebener API-Aufruf: '+name);
   }
   const pdfAction=request.type==='api'&&['pdfPrepare','pdfArchive','pdfJobStatus','pdfChunk','pdfStore','pdfBatchArchive','pdfBatchChunk','pdfBatchStore','absencePdfCreate','absencePdfArchive','absencePdfChunk'].includes(request.action);
-  const deadline=pdfAction?(['pdfStore','pdfBatchStore'].includes(request.action)?55000:request.action==='absencePdfCreate'?105000:request.action==='pdfPrepare'?25000:20000):65000;
+  const conversationPdf=request.type==='api'&&
+   ['commCreate','commReply','commTaskStatus'].includes(request.action)&&
+   request.data?.photo?.mime==='application/pdf';
+  const conversationDownload=request.type==='api'&&request.action==='commPhoto';
+  const deadline=conversationPdf?100000:conversationDownload?95000:
+   pdfAction?(['pdfStore','pdfBatchStore'].includes(request.action)?55000:request.action==='absencePdfCreate'?105000:request.action==='pdfPrepare'?25000:20000):65000;
   const abort=new AbortController();
   const timeout=setTimeout(()=>abort.abort(),deadline);
   let response;
@@ -1080,7 +1085,9 @@ async function rpc(name,...args){
       body:JSON.stringify(request),cache:'no-store',credentials:'omit',signal:abort.signal
     });
   }catch(err){
-    if(err?.name==='AbortError')throw Error(pdfAction?'PDF-Server antwortet nicht innerhalb von '+Math.round(deadline/1000)+' Sekunden. Der Auftrag kann trotzdem bei Google laufen. Bitte nicht mehrfach starten.':'Verbindung zum Server hat zu lange gedauert.');
+    if(err?.name==='AbortError')throw Error(conversationPdf?
+  'PDF-Übertragung hat zu lange gedauert. Bitte vor erneutem Senden prüfen, ob die Nachricht schon angekommen ist.':
+  pdfAction?'PDF-Server antwortet nicht innerhalb von '+Math.round(deadline/1000)+' Sekunden. Der Auftrag kann trotzdem bei Google laufen. Bitte nicht mehrfach starten.':'Verbindung zum Server hat zu lange gedauert.');
     throw Error('Server nicht erreichbar: '+String(err.message||err));
   }finally{clearTimeout(timeout);}
   let data;try{data=await response.json();}catch(e){throw Error('Die API liefert keine gültige Antwort (HTTP '+response.status+').');}
@@ -1173,8 +1180,13 @@ async function ftOpenShell(){
   render();
   console.info('[FireTime Tempo] Login-Oberfläche bereit nach '+Math.round(performance.now()-start)+' ms (Startdaten)');
   if(initial.company){
-   // Absichtlich parallel zum bereits sichtbaren, bedienbaren Grundgeruest.
-   load();
+   // A very fast menu tap cancels the unnecessary initial dashboard read.
+   // Let the shell paint first and never make the new tab compete with a stale dashboard request.
+   const shellSeq=FT_LOAD_SEQ,initialCid=ST.cid;
+   setTimeout(()=>{
+    if(ST.token&&FT_LOAD_SEQ===shellSeq&&ST.tab==='dashboard'&&ST.cid===initialCid)
+      load();
+   },250);
   }else{
    const key=FT_LAST_CONTEXT+'|dashboard';
    FT_VIEWS_LOADED.add(key);FT_VIEW_FETCHED_AT.set(key,performance.now());
