@@ -2918,8 +2918,12 @@ function ft_adminOverview_(actor,p){
   Leaves:allowed('REPORTS')?ft_get_('Leaves'):[],
   Months:allowed('REPORTS')?ft_get_('Months'):[]
  };
+ const publishedShiftIds=new Set(source.Shifts.filter(x=>x.companyId===cid&&
+  x.status==='PUBLISHED').map(x=>String(x.id)));
  const candidate=(allowed('STANDBY')?ft_accountableShifts_(source):[])
-  .filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&Number.isFinite(Date.parse(x.start))&&Number.isFinite(Date.parse(x.end)));
+  .filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+   (!x.shiftId||publishedShiftIds.has(String(x.shiftId)))&&
+   Number.isFinite(Date.parse(x.start))&&Number.isFinite(Date.parse(x.end)));
  const work=allowed('WORKPLAN')?ft_workRows_().filter(x=>x.companyId===cid&&x.status==='PUBLISHED'):[];
  const rowFor=x=>({
   id:x.id||x.shiftId||'',userId:x.userId,kind:x.kind||'STANDBY',
