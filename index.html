@@ -3419,6 +3419,21 @@ async async function ftCommPhotoData_(input){
  }finally{URL.revokeObjectURL(obj);}
 }
 
+function ftCommUpdateLocalTask_(threadId,status,result={}){
+ if(!ST.comm)return;
+ const thread=ST.comm.threads?.find(t=>String(t.id)===String(threadId));
+ if(thread){thread.status=status;thread.updatedAt=result.updatedAt||new Date().toISOString();thread.unread=false;}
+ const summary=ST.comm.taskOverview?.find(t=>String(t.id)===String(threadId));
+ if(summary){summary.status=status;summary.updatedAt=thread?.updatedAt||summary.updatedAt;
+  if(status==='DONE')summary.evidence=true;}
+ if(result.evidenceReply){
+  ST.comm.replies=ST.comm.replies||[];
+  if(!ST.comm.replies.some(r=>r.id===result.evidenceReply.id))
+   ST.comm.replies.push(result.evidenceReply);
+ }
+ page();
+}
+
 async function action(btn){const a=btn.dataset.act,id=btn.dataset.id;
 
 
@@ -3445,20 +3460,6 @@ if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
 }
 if(a==='adminOverviewRefresh'){
  ST.adminOverview=null;await ftAdminOverviewFetch_(true);return;
-}
-function ftCommUpdateLocalTask_(threadId,status,result={}){
- if(!ST.comm)return;
- const thread=ST.comm.threads?.find(t=>String(t.id)===String(threadId));
- if(thread){thread.status=status;thread.updatedAt=result.updatedAt||new Date().toISOString();thread.unread=false;}
- const summary=ST.comm.taskOverview?.find(t=>String(t.id)===String(threadId));
- if(summary){summary.status=status;summary.updatedAt=thread?.updatedAt||summary.updatedAt;
-  if(status==='DONE')summary.evidence=true;}
- if(result.evidenceReply){
-  ST.comm.replies=ST.comm.replies||[];
-  if(!ST.comm.replies.some(r=>r.id===result.evidenceReply.id))
-   ST.comm.replies.push(result.evidenceReply);
- }
- page();
 }
 if(a==='taskFilter'){ST.taskFilter=id;page();return;}
 if(a==='commAccept'||a==='commReopen'){
