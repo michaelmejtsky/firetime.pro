@@ -1350,25 +1350,36 @@ async function ftCommPoll_(force=false){
  if(!ST.token||!firm()?.id||!ST.h?.commSupported||document.visibilityState==='hidden'||ST.commLoading||FT_COMM_POLL_BUSY)return;
  if(ST.tab==='messages'&&(ST.commCompose||document.activeElement?.closest('form')))return;
  const now=Date.now();
- if(!force&&now-FT_COMM_LAST_POLL<30000)return;
+ if(!force&&now-FT_COMM_LAST_POLL<60000)return;
  FT_COMM_POLL_BUSY=true;FT_COMM_LAST_POLL=now;
  const cid=firm().id,uid=me()?.id;
  try{
-  const result=await api('commList',{companyId:cid});
+  // A cheap count/revision first instead of loading every reply and every user.
+  const pulse=await api('commPulse',{companyId:cid});
   if(firm()?.id!==cid||me()?.id!==uid)return;
-  const old=ST.comm;
-  const changed=!old||JSON.stringify(old.threads)!==JSON.stringify(result.threads)||
-    JSON.stringify(old.replies)!==JSON.stringify(result.replies);
-  ST.comm=result;ftCommSetBadge_(result.unread);
-  // Only redraw an idle inbox when the actual contents changed.
-  if(ST.tab==='messages'&&changed&&ftAutoCanRender_())page();
+  ftCommSetBadge_(pulse.unread);
+  if(ST.tab==='messages'){
+   const current=ST.comm;
+   const previousMax=Math.max(0,...(current?.threads||[]).map(t=>Date.parse(t.updatedAt)||0));
+   const contentChanged=!current||previousMax!==pulse.modified||
+     current.threads.length!==pulse.total||Number(current.unread)!==Number(pulse.unread);
+   if(force||contentChanged){
+    const result=await api('commList',{companyId:cid});
+    if(firm()?.id!==cid||me()?.id!==uid)return;
+    const old=ST.comm;
+    const changed=!old||JSON.stringify(old.threads)!==JSON.stringify(result.threads)||
+      JSON.stringify(old.replies)!==JSON.stringify(result.replies);
+    ST.comm=result;ftCommSetBadge_(result.unread);
+    if(changed&&ftAutoCanRender_())page();
+   }
+  }
  }catch(err){console.warn('Nachrichten-Aktualisierung:',String(err.message||err));}
  finally{FT_COMM_POLL_BUSY=false;}
 }
 function ftCommStartPoll_(){
  if(FT_COMM_POLL_TIMER)return;
- // Push events update immediately; light foreground fallback checks every 30s.
- FT_COMM_POLL_TIMER=setInterval(()=>ftCommPoll_(),30000);
+ // The service worker sends updates immediately; 60s fallback saves GAS quota.
+ FT_COMM_POLL_TIMER=setInterval(()=>ftCommPoll_(),60000);
 }
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='visible')ftCommPoll_(true);
