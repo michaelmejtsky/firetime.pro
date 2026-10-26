@@ -3,8 +3,10 @@
  * Static UI: GitHub Pages. Data/authorization: Google Apps Script + Sheets.
  * No credential, password or service secret is stored in GitHub Pages.
  */
-const MAX_BYTES = 3_700_000;
-const MAX_RESPONSE_BYTES = 7_000_000;
+const MAX_BYTES = 16_000_000;
+const STANDARD_MAX_BYTES = 3_700_000;
+const MAX_RESPONSE_BYTES = 16_000_000;
+const LARGE_ATTACHMENT_ACTIONS = new Set(['commCreate','commReply','commTaskStatus']);
 const REQUEST_TYPES = new Set(['login', 'activate', 'resetRequest', 'resetConfirm', 'logout', 'password', 'brand', 'api']);
 
 function cors(origin) {
@@ -257,6 +259,12 @@ export default {
       if (!input || typeof input !== 'object' || Array.isArray(input) ||
           !REQUEST_TYPES.has(input.type)) {
         return output({ok:false,error:'Ungültige Anfrage.'},400,allowed);
+      }
+      // Keep the original request cap for every operation except attachment uploads.
+      if(new TextEncoder().encode(raw).length > STANDARD_MAX_BYTES &&
+         !(input.type==='api' && LARGE_ATTACHMENT_ACTIONS.has(input.action) &&
+           input.data?.photo?.mime==='application/pdf')){
+        return output({ok:false,error:'Anfrage für diesen Vorgang zu groß.'},413,allowed);
       }
       const payload = JSON.stringify(input);
       const ts = Math.floor(Date.now()/1000);
