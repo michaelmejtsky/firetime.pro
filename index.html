@@ -3347,7 +3347,7 @@ function profile(){
   `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form><p class="muted small">Altes Passwort nicht mehr bekannt? Du kannst dir auch einen sicheren Einmal-Link senden lassen.</p><button type="button" class="btn" data-act="myPasswordReset">Passwort zurücksetzen (E-Mail)</button></div>`;
 }
 
-async async function ftCommPhotoData_(input){
+async function ftCommPhotoData_(input){
  const file=input?.files?.[0];if(!file)return null;
  const pdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
  if(pdf){
