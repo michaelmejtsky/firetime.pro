@@ -67,6 +67,10 @@ function communications(){
   ft_str_:(v,max)=>String(v||'').slice(0,max),
   ft_date_:s=>{if(!/^\d{4}-\d\d-\d\d$/.test(s))throw Error('Datum');return s;},
   ft_clientUrl_:()=> 'https://firetime.example.test/',
+  ft_prop_:()=> 'root-folder',
+  DriveApp:{getFolderById:()=>({getFoldersByName:()=>({
+   hasNext:()=>true,next:()=>({createFile:()=>({getId:()=> 'photo-evidence'})})
+  })})},
   ft_notification_:(company,recipient,kind,reference)=>{
    mailEvents.push({companyId:company.id,recipientId:recipient.id,kind,reference});return true;
   },
@@ -74,6 +78,7 @@ function communications(){
    Charset:{UTF_8:'UTF-8'},
    base64EncodeWebSafe:t=>Buffer.from(String(t),'utf8').toString('base64url'),
    base64DecodeWebSafe:t=>Buffer.from(String(t),'base64url'),
+   base64Decode:t=>Array.from(Buffer.from(t,'base64')),
    newBlob:bytes=>({getDataAsString:()=>Buffer.from(bytes).toString('utf8')})
   }
  };
@@ -95,8 +100,16 @@ test('private tasks and messages are isolated per company and sender/recipient',
   title:'Test',body:'Nicht erlaubt'}),/Aufgaben/);
  api.ft_commReply_(staff,{threadId:created.thread.id,body:'Erledige ich.'});
  assert.equal(rows.CommReplies.length,1);
- api.ft_commTaskStatus_(staff,{threadId:created.thread.id,status:'DONE'});
+ assert.throws(()=>api.ft_commTaskStatus_(staff,{threadId:created.thread.id,status:'DONE'}),/zuerst annehmen/);
+ api.ft_commTaskStatus_(staff,{threadId:created.thread.id,status:'ACCEPTED'});
+ assert.equal(rows.CommThreads[0].status,'ACCEPTED');
+ assert.throws(()=>api.ft_commTaskStatus_(staff,{threadId:created.thread.id,status:'DONE'}),/Foto/);
+ const photo={mime:'image/jpeg',data:Buffer.from([255,216,255,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]).toString('base64')};
+ api.ft_commTaskStatus_(staff,{threadId:created.thread.id,status:'DONE',photo,note:'Fertig geprüft'});
  assert.equal(rows.CommThreads[0].status,'DONE');
+ assert.equal(rows.CommReplies.length,2);
+ assert.equal(rows.CommReplies[1].attachmentId,'photo-evidence');
+ assert.equal(api.ft_commList_(a,{companyId:'a'}).taskOverview[0].status,'DONE');
  assert.equal(api.ft_commList_(staff,{companyId:'a'}).threads[0].status,'DONE');
  assert.throws(()=>api.ft_commTaskStatus_(other,{threadId:created.thread.id,status:'DONE'}),/keine Berechtigung/);
 });
@@ -233,12 +246,12 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.match(frontend,/URL\.createObjectURL/);
  assert.match(frontend,/ft-photo-viewer/);
  assert.match(frontend,/Foto konnte nicht geöffnet werden/);
- assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.14'/);
+ assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.15'/);
  assert.match(frontend,/ft-help-header/);
  assert.match(frontend,/Stand der geladenen App-Oberfläche/);
  const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
  assert.doesNotThrow(()=>new vm.Script(sw));
  assert.match(sw,/self\.registration\.scope/);
  assert.match(sw,/cache:'no-store'/);
- assert.match(sw,/firetime-shell-20261024-v1814/);
+ assert.match(sw,/firetime-shell-20261026-v1815/);
 });
