@@ -68,7 +68,7 @@ test('message checks are foreground-only, skip concurrent calls, and run every 6
  assert.match(html,/document\.visibilityState==='hidden'\|\|ST\.commLoading\|\|FT_COMM_POLL_BUSY/);
  assert.match(html,/const pulse=await api\('commPulse'/);
  assert.match(html,/const changed=!old\|\|JSON\.stringify\(old\.threads\)/);
- assert.match(html,/ST\.tab==='messages'&&changed&&ftAutoCanRender_\(\)/);
+ assert.match(html,/if\(changed&&ftAutoCanRender_\(\)\)page\(\)/);
 });
 test('push instantly sends a non-sensitive event to an already-open FireTime tab',async()=>{
  const calls=[],listeners={},badges=[];
