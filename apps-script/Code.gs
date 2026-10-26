@@ -2556,6 +2556,19 @@ function ft_commList_(actor,p){
      evidence:replies.some(r=>r.threadId===x.id&&r.authorId===x.recipientId&&Boolean(r.attachmentId))})),
   recipients:ft_commRecipients_(actor,c),users,unread:ft_commUnread_(actor,c)};
 }
+// Lightweight inbox heartbeat: no photos, reply bodies or staff directory.
+// Detects status changes while the inbox is open; otherwise just update badge.
+function ft_commPulse_(actor,p){
+ const c=ft_commCompany_(actor,p);
+ const threads=ft_commVisible_(actor,c),reads=ft_commReads_();
+ let unread=0,modified=0;
+ for(const t of threads){
+  modified=Math.max(modified,Date.parse(t.updatedAt)||0);
+  const seen=reads.find(r=>r.companyId===c.id&&r.threadId===t.id&&r.userId===actor.id);
+  if(!seen||Date.parse(seen.seenAt)<Date.parse(t.updatedAt))unread++;
+ }
+ return {unread,modified,total:threads.length};
+}
 function ft_commMail_(c,recipient,sender,thread,eventId,activity){
  const url=ft_clientUrl_(c);
  // Mail und Web-Push sind unabhängig. Ein Fehler blockiert keine Nachrichten.
@@ -2716,6 +2729,7 @@ function ft_api(token,action,p){
   case 'timerPauseStart':return ft_lock_(()=>ft_timerPauseAction_(u,'start'));
   case 'timerPauseStop':return ft_lock_(()=>ft_timerPauseAction_(u,'stop'));
   case 'commList':return ft_commList_(u,p);
+  case 'commPulse':return ft_commPulse_(u,p);
   case 'commCreate':return ft_lock_(()=>ft_commCreate_(u,p));
   case 'commReply':return ft_lock_(()=>ft_commReply_(u,p));
   case 'commRead':return ft_lock_(()=>ft_commMark_(u,p));
