@@ -6,7 +6,7 @@ const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 const worker=fs.readFileSync(path.join(root,'sw.js'),'utf8');
 const source=html.slice(html.indexOf('let FT_AUTO_TIMER=null'),html.indexOf('function mobileNav(){'));
 assert.ok(source.includes('function ftAutoCheck_'), 'auto refresh source found');
-function create(now=100000){
+function create(now=250000){
  const clock={now},refreshes=[],map=new Map([['c|2026-10|dashboard',1000]]);
  const content={contains:node=>!!node?.inForm,querySelector:()=>null};
  const document={
@@ -18,6 +18,8 @@ function create(now=100000){
   document,window:{addEventListener:()=>{}},
   ST,performance:{now:()=>clock.now},Map,
   FT_VIEW_FETCHED_AT:map,
+  FT_VIEWS_LOADED:new Set(['c|2026-10|dashboard']),
+  FT_MAIN_FETCHES:0,FT_NAV_LAST_AT:0,
   firm:()=>({id:'c'}),
   load:async args=>{refreshes.push(args);map.set('c|2026-10|dashboard',clock.now)},
   setInterval:()=>1,console
@@ -30,14 +32,14 @@ test('all inline app JavaScript remains syntactically valid',()=>{
   if(match[1].trim())assert.doesNotThrow(()=>new vm.Script(match[1]));
  assert.doesNotThrow(()=>new vm.Script(worker));
 });
-test('auto-refresh fetches after 60s, not continuously',async()=>{
+test('auto-refresh fetches when data is older than 180s, never continuously',async()=>{
  const c=create();
  assert.equal(await c.ftAutoCheck_(),true);
  assert.equal(c.refreshes.length,1);
  assert.equal(c.refreshes[0].background,true);
  c.clock.now+=25000;
  assert.equal(await c.ftAutoCheck_(),false);
- c.clock.now+=40000;
+ c.clock.now+=160000;
  assert.equal(await c.ftAutoCheck_(),true);
  assert.equal(c.refreshes.length,2);
 });

@@ -19,7 +19,8 @@ test('push settings are exclusively inside My Account, not inbox',()=>{
  assert.match(account,/backgroundPushSupported/);
  const ctx={
   ST:{h:{backgroundPushSupported:true}},E:v=>String(v),me:()=>({name:'Test',email:'test@example.at'}),
-  input:()=>'<input>',ftCommNotificationUI_:()=>'<div id="notification-settings">Push aktivieren</div>'
+  input:()=>'<input>',FT_TEMPO_SAMPLES:[],
+  ftCommNotificationUI_:()=>'<div id="notification-settings">Push aktivieren</div>'
  };
  const rendered=vm.runInNewContext(account+';profile()',ctx);
  assert.match(rendered,/id="notification-settings"/);

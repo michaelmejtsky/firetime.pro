@@ -10,13 +10,14 @@ function sourcePart(input,start,end){
  assert.ok(i>=0&&j>i,'Missing '+start);
  return input.slice(i,j);
 }
-test('remember login creates a revocable 14-day session and defaults to short login',()=>{
+test('remember login creates a revocable 30-day session and defaults to short login',()=>{
  const code=sourcePart(backend,'function ft_login(','function ft_activate(');
  const created=[];
  const ctx={
   Date,Number,String,Error,
   CacheService:{getScriptCache:()=>({get:()=>null,remove:()=>{},put:()=>{}})},
   ft_email_:x=>x,ft_sha_:x=>'sha:'+x,
+  ft_sessionCacheKey_:hash=>'ftsess:'+hash,
   ft_get_:name=>name==='Users'?[{id:'u',email:'employee@example.test',status:'ACTIVE',salt:'salt',
    passwordHash:'hashed'}]:[],
   ft_password_:()=> 'hashed',ft_rand_:()=> 'c'.repeat(64),
@@ -27,7 +28,7 @@ test('remember login creates a revocable 14-day session and defaults to short lo
  const now=Date.now();
  const long=fn('employee@example.test','secret',true);
  assert.equal(long.token,'c'.repeat(64));assert.ok(long.expiresAt);
- assert.ok((Date.parse(long.expiresAt)-now)/(86400000)>13.99);
+ assert.ok((Date.parse(long.expiresAt)-now)/(86400000)>29.99);
  const short=fn('employee@example.test','secret',false);
  assert.ok((Date.parse(short.expiresAt)-Date.now())/3600000<12.01);
  assert.equal(created[0].id,'sha:'+'c'.repeat(64));
@@ -62,7 +63,11 @@ test('admin task summary lists only own authored company tasks, never DMs',()=>{
  assert.match(frontend,/data-act="taskFilter"/);
 });
 test('cached shell starts fast, API and configuration remain network-only',()=>{
- assert.match(sw,/const FT_SHELL_CACHE='firetime-shell-20261026-v1816'/);
+ const version=frontend.match(/const FT_VISIBLE_VERSION='(\d+\.\d+\.\d+)'/);
+ assert.ok(version,'the UI publishes a semantic version');
+ const cache=sw.match(/const FT_SHELL_CACHE='firetime-shell-\d+-v(\d+)'/);
+ assert.ok(cache,'the PWA publishes a versioned shell cache');
+ assert.equal(cache[1],version[1].replace(/\./g,''),'cache must match the UI release');
  assert.match(sw,/if\(req\.method!=='GET'\)return/);
  assert.match(sw,/if\(url\.origin!==self\.location\.origin\)return/);
  assert.match(sw,/if\(\/\\\/config\\\.js\$\/.test\(url\.pathname\)\)return/);
