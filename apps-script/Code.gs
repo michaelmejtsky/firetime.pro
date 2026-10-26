@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.19-attachments-10mb-tempo-20261026';
+const FT_VERSION='1.8.20-attachments-10mb-tempo-20261026';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2974,6 +2974,17 @@ function ft_adminOverview_(actor,p){
  * Uses the same month accounting as the authoritative monthly report; standby
  * totals are confirmed (not merely scheduled) shifts.
  */
+function ft_workflowReady_(){
+ // Read-only schema flag, identical for every tenant. Cache only a true result;
+ // missing tables are checked again next time after an upgrade.
+ const cache=CacheService.getScriptCache(),key='ft_workflow_schema_v1';
+ if(cache.get(key)==='1')return true;
+ const db=ft_db_();
+ const ready=Boolean(db.getSheetByName('ActivityTimers')&&
+  db.getSheetByName('ActivityTypes')&&db.getSheetByName('PlanMonths'));
+ if(ready)cache.put(key,'1',300);
+ return ready;
+}
 function ft_home_(u,p){
  const cid=u.role==='SYSADMIN'?String(p.companyId||''):u.companyId;
  const month=ft_month_(p.month||ft_localMonth_(new Date()));
@@ -3025,7 +3036,7 @@ function ft_home_(u,p){
   loginUrl:c?ft_clientUrl_(c):'',directory,users,activities,availability,
   availSubmissions,shifts,workShifts,leaves,months,reports,...extra,
   standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
-  workflowReady:Boolean(c&&ft_db_().getSheetByName('ActivityTimers')&&ft_db_().getSheetByName('ActivityTypes')&&ft_db_().getSheetByName('PlanMonths')),
+  workflowReady:Boolean(c&&ft_workflowReady_()),
   balanceCutoverSupported:true,
   activityDefaultsSupported:true,
   commSupported:true,
