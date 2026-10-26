@@ -915,6 +915,18 @@ function ftWarmSchedule_(){
  // gateway and competed with real taps. Views fetch only when requested.
  // Session-scoped RAM views are still reused when revisited.
 }
+const LABELS={messages:'Nachrichten & Aufgaben',sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
+const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter'],['PAY_PREVIEW','Vergütungsvorschau (Zusatzmodul)','Unverbindliche Bruttovorschau, Bereitschaftsvergütung und Zuschläge'],['SICK','Krankenstandsverwaltung (Zusatzmodul)','Krankenstandsmeldungen, Prüfungen und Zeitgutschriften']];
+const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
+const app=document.getElementById('app');
+const N=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:8});
+// Display-only formatting in monthly reports; calculations and PDFs stay unchanged.
+const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigits:2});
+
+const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
+const FT_DISPLAY_TZ='Europe/Vienna';
+const FT_VISIBLE_VERSION='1.8.16';
+const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
  // ISO without timezone is a local wall clock, not a UTC instant.
