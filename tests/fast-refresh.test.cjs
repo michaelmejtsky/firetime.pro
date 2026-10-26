@@ -62,10 +62,11 @@ test('fast navigation uses memory for message inbox and personal account',()=>{
  assert.match(html,/const before=background&&same\?JSON\.stringify\(ST\.h\):null/);
  assert.match(html,/if\(before!==JSON\.stringify\(ST\.h\)&&ftAutoCanRender_\(\)\)page\(\)/);
 });
-test('message checks are foreground-only, skip concurrent calls, and run every 30 seconds',()=>{
+test('message checks are foreground-only, skip concurrent calls, and run every 60 seconds',()=>{
  assert.match(html,/FT_COMM_POLL_BUSY=true/);
- assert.match(html,/FT_COMM_POLL_TIMER=setInterval\(\(\)=>ftCommPoll_\(\),30000\)/);
+ assert.match(html,/FT_COMM_POLL_TIMER=setInterval\(\(\)=>ftCommPoll_\(\),60000\)/);
  assert.match(html,/document\.visibilityState==='hidden'\|\|ST\.commLoading\|\|FT_COMM_POLL_BUSY/);
+ assert.match(html,/const pulse=await api\('commPulse'/);
  assert.match(html,/const changed=!old\|\|JSON\.stringify\(old\.threads\)/);
  assert.match(html,/ST\.tab==='messages'&&changed&&ftAutoCanRender_\(\)/);
 });
