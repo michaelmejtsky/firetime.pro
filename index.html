@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-attachments-10mb-tempo-v1820"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-cross-month-fast-nav-v1821"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -885,6 +885,43 @@ let FT_RULES_KEY='';
 const FT_VIEW_FETCHED_AT=new Map();
 let FT_META_LAST_FETCH=0;
 let FT_SHELL_SIGNATURE='';
+// Unlike a single current-month snapshot, this preserves recent authenticated
+// views when switching between current-month duties and next-month availability.
+// Never stored on disk. Writes, logout and new sessions erase every snapshot.
+const FT_MONTH_SNAPSHOTS=new Map();
+function ftSnapshotKey_(context){
+ return [ST.token,ST.h?.me?.id||'',context].join('|');
+}
+function ftSnapshotSave_(){
+ if(!ST.token||!ST.h?.me||!FT_LAST_CONTEXT||!ST.h.month)return;
+ const ctx=(ST.h.company?.id||'SYS')+'|'+ST.h.month;
+ if(ctx!==FT_LAST_CONTEXT)return;
+ const views=[];
+ for(const v of FT_VIEWS_LOADED)if(v.startsWith(ctx+'|'))views.push(v);
+ const times=views.map(v=>[v,FT_VIEW_FETCHED_AT.get(v)||0]);
+ const key=ftSnapshotKey_(ctx);
+ FT_MONTH_SNAPSHOTS.delete(key);
+ FT_MONTH_SNAPSHOTS.set(key,{home:ST.h,views,times,at:Date.now()});
+ while(FT_MONTH_SNAPSHOTS.size>4)
+  FT_MONTH_SNAPSHOTS.delete(FT_MONTH_SNAPSHOTS.keys().next().value);
+}
+function ftSnapshotRestore_(tab){
+ if(!ST.token||!ST.h?.me)return false;
+ const tenant=ST.cid||(ST.h.me.role==='SYSADMIN'?'SYS':ST.h.company?.id||'SYS');
+ const ctx=tenant+'|'+ST.month,key=ftSnapshotKey_(ctx);
+ const cached=FT_MONTH_SNAPSHOTS.get(key);
+ // Cache can make an already visited screen instant, never invent a new one.
+ if(!cached||Date.now()-cached.at>180000||!cached.views.includes(ctx+'|'+tab))return false;
+ if(cached.home?.me?.id!==ST.h.me.id||String(cached.home?.company?.id||'SYS')!==String(tenant))return false;
+ ST.h=cached.home;FT_LAST_CONTEXT=ctx;
+ FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
+ for(const v of cached.views)FT_VIEWS_LOADED.add(v);
+ for(const [v,at] of cached.times)FT_VIEW_FETCHED_AT.set(v,at);
+ FT_META_LAST_FETCH=Math.min(FT_META_LAST_FETCH,Date.now()-60000);
+ FT_DASHBOARD_LOADING=false;
+ FT_MONTH_SNAPSHOTS.delete(key);FT_MONTH_SNAPSHOTS.set(key,cached);
+ return true;
+}
 let FT_LOAD_SEQ=0;
 // Navigation requests take priority over polling and expensive admin overviews.
 let FT_NAV_LAST_AT=performance.now(),FT_MAIN_FETCHES=0;
@@ -975,7 +1012,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.20';
+const FT_VISIBLE_VERSION='1.8.21';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1108,6 +1145,7 @@ function api(action,p={}){
     const context=(firm()?.id||'SYS')+'|'+ST.month;
     const current=context+'|'+ST.tab;
     FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
+    FT_MONTH_SNAPSHOTS.clear();
     FT_META_LAST_FETCH=0;
     FT_WARM_CACHE.clear();FT_WARM_GENERATION++;
     if(action==='logoUpload'&&ST.h)ST.h.logo='';
@@ -1173,6 +1211,7 @@ async function ftOpenShell(){
   ST.h.segments=ST.h.segments||[];ST.h.changes=ST.h.changes||[];ST.h.sick=ST.h.sick||[];
   FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
   FT_LAST_CONTEXT=(initial.company?.id||'SYS')+'|'+initial.month;
+  FT_MONTH_SNAPSHOTS.clear();
   FT_META_LAST_FETCH=Date.now();
   ftMarkLocalViews_();
   FT_DASHBOARD_LOADING=Boolean(initial.company);
@@ -1254,6 +1293,7 @@ async function load(options={}){
     FT_VIEWS_LOADED.add(context+'|'+view);
     FT_VIEW_FETCHED_AT.set(context+'|'+view,performance.now());
     ftMarkLocalViews_();
+    ftSnapshotSave_();
     if(bulkRead){
       const bundled=['dashboard','staff','time','leave','sick','work','standby',
         'availability','profile','settings','customers','license'];
@@ -3657,7 +3697,7 @@ if(a==='toggleOpeningSign'){
 }
 if(a==='forgotPassword'){ST.forgot=true;ST.invite=false;ST.reset=false;auth();return;}
 if(a==='normalLogin'){ST.invite=false;ST.forgot=false;ST.reset=false;auth();return;}
-if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;ftForgetSession_();auth();await run(()=>rpc('ft_logout',old));return;}
+if(a==='logout'){++FT_LOAD_SEQ;FT_MONTH_SNAPSHOTS.clear();FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;ftForgetSession_();auth();await run(()=>rpc('ft_logout',old));return;}
 if(a==='back'){ST.cid='';ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='homeOpenStandby'||a==='homeOpenWork'){
@@ -3666,7 +3706,11 @@ if(a==='homeOpenStandby'||a==='homeOpenWork'){
  ++FT_LOAD_SEQ;
  ftChooseTabMonth(next);
  ST.edit='';
- await load();
+ if(ftSnapshotRestore_(ST.tab)){
+  page();
+  const key=FT_LAST_CONTEXT+'|'+ST.tab;
+  if(performance.now()-(FT_VIEW_FETCHED_AT.get(key)||0)>45000)load({background:true});
+ }else await load();
  return;
 }
 if(a==='cancelEdit'){ST.edit='';page();return;}
@@ -4083,6 +4127,7 @@ document.addEventListener('click',e=>{const more=e.target.closest?.('[data-mobil
   }
   ++FT_LOAD_SEQ; // Ein älterer Serveraufruf darf den neu gewählten Tab nicht überschreiben.
   ftChooseTabMonth(b.dataset.tab);ST.edit='';
+  ftSnapshotRestore_(ST.tab);
   if(ST.tab==='rules'&&firm()){
     const companyId=firm().id, month=ST.month, key=companyId+'|'+month;
     if(ST.rules&&FT_RULES_KEY===key){page();return;}
@@ -4103,7 +4148,7 @@ document.addEventListener('click',e=>{const more=e.target.closest?.('[data-mobil
   const cached=FT_VIEWS_LOADED.has(key);
   if(cached&&ST.h?.me){
     page();
-    if(performance.now()-(FT_VIEW_FETCHED_AT.get(key)||0)>120000)load({background:true});
+    if(performance.now()-(FT_VIEW_FETCHED_AT.get(key)||0)>45000)load({background:true});
     return;
   }
   const pane=document.getElementById('content');
