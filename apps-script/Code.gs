@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.20-attachments-10mb-tempo-20261026';
+const FT_VERSION='1.8.21-session-fast-nav-20261026';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -221,18 +221,52 @@ function ft_publicRow_(r){const o=Object.assign({},r);delete o.__row;return o;}
 // 02_Anmeldung
 // -----------------------------------------------------------------
 /** FireTime Pro 1.1 | Developed by Michael Mejtsky | 02_Anmeldung.gs */
-function ft_auth_(token){if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Bitte anmelden.');const h=ft_sha_(token),s=ft_get_('Sessions').find(x=>x.id===h);if(!s||new Date(s.expiresAt).getTime()<Date.now())throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');const u=ft_one_('Users',s.userId);if(!u||u.status!=='ACTIVE')throw Error('Zugang nicht aktiv.');return u;}
+/**
+ * The session sheet is append-only for logins and can become the slowest part
+ * of EVERY page click. Keep a very short, token-scoped read-through entry.
+ * Actual expiry is still taken from the Sessions row. User status, password
+ * fingerprint and company privileges are revalidated with the live Users row
+ * on every call; nothing tenant-wide is cached.
+ */
+function ft_sessionCacheKey_(hash){return 'ftsess:'+hash;}
+function ft_auth_(token){
+ if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Bitte anmelden.');
+ const h=ft_sha_(token),cache=CacheService.getScriptCache(),key=ft_sessionCacheKey_(h);
+ let cached=null;
+ try{const raw=cache.get(key);if(raw)cached=JSON.parse(raw);}catch(_){}
+ let s=cached&&cached.userId&&cached.expiresAt?cached:null;
+ if(!s||Date.parse(s.expiresAt)<=Date.now()){
+  s=ft_get_('Sessions').find(x=>x.id===h);
+  if(!s||Date.parse(s.expiresAt)<=Date.now()){
+   cache.remove(key);throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');
+  }
+  cached=null;
+ }
+ const u=ft_one_('Users',s.userId);
+ if(!u||u.status!=='ACTIVE')throw Error('Zugang nicht aktiv.');
+ const proof=String(u.passwordHash||'').slice(0,24);
+ if(cached&&cached.proof!==proof){
+  cache.remove(key);throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');
+ }
+ if(!cached){
+  const remaining=Math.floor((Date.parse(s.expiresAt)-Date.now())/1000);
+  if(remaining>0)cache.put(key,JSON.stringify({userId:u.id,expiresAt:s.expiresAt,proof}),Math.min(120,remaining));
+ }
+ return u;
+}
 
 function ft_login(email,password,remember){
  const em=ft_email_(email),cache=CacheService.getScriptCache(),key='login:'+ft_sha_(em),tries=Number(cache.get(key)||0);
  if(tries>=7)throw Error('Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.');
  const u=ft_get_('Users').find(x=>x.email===em&&x.status==='ACTIVE');
  if(!u||!u.salt||ft_password_(String(password||''),u.salt)!==u.passwordHash){cache.put(key,String(tries+1),900);throw Error('E-Mail-Adresse oder Passwort ungültig.');}
- // Installed personal devices may opt in to a 14-day authenticated session.
+ // Installed personal devices may opt in to a 30-day authenticated session.
  // No password is stored on the phone. Logout and password resets revoke it.
  cache.remove(key);
  const token=ft_rand_(),expiresAt=new Date(Date.now()+(remember===true?30*86400000:12*3600000)).toISOString();
  ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt}));
+ CacheService.getScriptCache().put(ft_sessionCacheKey_(ft_sha_(token)),
+  JSON.stringify({userId:u.id,expiresAt,proof:String(u.passwordHash||'').slice(0,24)}),120);
  return {token,expiresAt,user:ft_safe_(u)};
 }
 
@@ -241,7 +275,10 @@ function ft_activate(invite,password){
  return ft_lock_(()=>{const key=ft_sha_(invite),i=ft_one_('Invites',key);if(!i||i.usedAt||new Date(i.expiresAt)<new Date())throw Error('Einladung ungültig oder abgelaufen.');const u=ft_one_('Users',i.userId);if(!u)throw Error('Benutzer nicht gefunden.');const before=ft_safe_(u);u.salt=ft_rand_();u.passwordHash=ft_password_(password,u.salt);u.status='ACTIVE';u.mustChange=false;ft_save_('Users',u);i.usedAt=ft_now_();ft_save_('Invites',i);ft_audit_(u,'ACTIVATE','Users',u.id,before,ft_safe_(u));return 'Konto aktiviert. Du kannst dich jetzt anmelden.';});
 }
 
-function ft_changePassword(token,current,next){const u=ft_auth_(token);if(String(next||'').length<12)throw Error('Neues Passwort mindestens 12 Zeichen');if(ft_password_(String(current||''),u.salt)!==u.passwordHash)throw Error('Bisheriges Passwort falsch');return ft_lock_(()=>{u.salt=ft_rand_();u.passwordHash=ft_password_(next,u.salt);u.mustChange=false;ft_save_('Users',u);ft_get_('Sessions').filter(s=>s.userId===u.id).sort((a,b)=>b.__row-a.__row).forEach(s=>ft_sheet_('Sessions').deleteRow(s.__row));return 'Passwort geändert. Bitte neu anmelden.';});}
+function ft_changePassword(token,current,next){const u=ft_auth_(token);if(String(next||'').length<12)throw Error('Neues Passwort mindestens 12 Zeichen');if(ft_password_(String(current||''),u.salt)!==u.passwordHash)throw Error('Bisheriges Passwort falsch');return ft_lock_(()=>{u.salt=ft_rand_();u.passwordHash=ft_password_(next,u.salt);u.mustChange=false;ft_save_('Users',u);ft_get_('Sessions').filter(s=>s.userId===u.id).sort((a,b)=>b.__row-a.__row).forEach(s=>{
+  CacheService.getScriptCache().remove(ft_sessionCacheKey_(s.id));
+  ft_sheet_('Sessions').deleteRow(s.__row);
+ });return 'Passwort geändert. Bitte neu anmelden.';});}
 
 /**
  * Password recovery reuses the pre-existing Invites table without migration:
@@ -318,7 +355,10 @@ function ft_passwordResetConfirm_(token,password){
   user.mustChange=false;ft_save_('Users',user);
   // Invalidate all sessions and all unused reset links for that user.
   ft_get_('Sessions').filter(x=>x.userId===user.id)
-   .sort((a,b)=>b.__row-a.__row).forEach(x=>ft_sheet_('Sessions').deleteRow(x.__row));
+   .sort((a,b)=>b.__row-a.__row).forEach(x=>{
+    CacheService.getScriptCache().remove(ft_sessionCacheKey_(x.id));
+    ft_sheet_('Sessions').deleteRow(x.__row);
+   });
   for(const invite of ft_get_('Invites').filter(x=>x.userId===user.id&&
       String(x.id).startsWith('reset:')&&!x.usedAt)){
    invite.usedAt=ft_now_();ft_save_('Invites',invite);
@@ -328,7 +368,14 @@ function ft_passwordResetConfirm_(token,password){
  });
 }
 
-function ft_logout(token){const h=ft_sha_(String(token||'')),s=ft_one_('Sessions',h);if(s)ft_lock_(()=>ft_sheet_('Sessions').deleteRow(s.__row));return true;}
+function ft_logout(token){
+ const h=ft_sha_(String(token||''));
+ // Revoke the cache even if the backing session was already removed.
+ CacheService.getScriptCache().remove(ft_sessionCacheKey_(h));
+ const s=ft_one_('Sessions',h);
+ if(s)ft_lock_(()=>ft_sheet_('Sessions').deleteRow(s.__row));
+ return true;
+}
 
 function ft_invite_(actor,user){
  if(!user.email)throw Error('E-Mail fehlt.');
