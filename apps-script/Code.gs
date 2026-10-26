@@ -2906,9 +2906,9 @@ function ft_adminOverview_(actor,p){
  const company=ft_company_(actor,cid),month=ft_month_(p.month||ft_localMonth_(new Date()));
  const modules=ft_license_(company);
  const allowed=m=>modules.includes(m),now=new Date(),nowMs=now.getTime();
- const tomorrow=new Date(nowMs+24*3600000),
-  todayKey=Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd'),
-  tomorrowKey=Utilities.formatDate(tomorrow,FT_TZ,'yyyy-MM-dd');
+ const todayKey=Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd');
+ const [yy,mm,dd]=todayKey.split('-').map(Number);
+ const tomorrowKey=Utilities.formatDate(new Date(Date.UTC(yy,mm-1,dd+1,12)),'UTC','yyyy-MM-dd');
  const users=ft_get_('Users').filter(x=>x.companyId===cid&&x.role==='STAFF'&&x.status==='ACTIVE');
  const source={
   Activities:allowed('REPORTS')?ft_get_('Activities'):[],
@@ -2941,7 +2941,7 @@ function ft_adminOverview_(actor,p){
  const monthStart=month+'-';
  const staff=users.map(user=>{
   let rep=null;
-  if(allowed('REPORTS'))rep=ft_report_(company,user,month,false,source);
+  if(allowed('REPORTS'))rep=ft_report_(company,user,month,true,source);
   const countShifts=candidate.filter(x=>x.userId===user.id&&
    Utilities.formatDate(new Date(x.start),FT_TZ,'yyyy-MM').startsWith(month)).length;
   const countWork=work.filter(x=>x.userId===user.id&&String(x.start).slice(0,7)===month).length;
@@ -2950,7 +2950,7 @@ function ft_adminOverview_(actor,p){
    worked:rep?Number(rep.worked)||0:null,
    target:rep?Number(rep.target)||0:null,
    saldo:rep?Number(rep.saldo)||0:null,
-   runningBalance:rep?Number(rep.runningBalance)||0:null,
+   runningBalance:null, // expensive historical cumulative is shown only in detailed monthly report
    standby:rep?Number(rep.standby)||0:null,
    leaveBalance:allowed('LEAVE')?Number(user.leaveBalance)||0:null,
    standbyDuties:countShifts,workDuties:countWork
@@ -2968,55 +2968,6 @@ function ft_adminOverview_(actor,p){
  * Uses the same month accounting as the authoritative monthly report; standby
  * totals are confirmed (not merely scheduled) shifts.
  */
-function ft_adminOverview_(actor,p){
- ft_allowed_(actor,['ADMIN','SYSADMIN']);
- const cid=actor.role==='SYSADMIN'?String(p.companyId||''):String(actor.companyId||'');
- if(!cid)throw Error('Bitte eine Firma auswählen.');
- const c=ft_company_(actor,cid),month=ft_month_(p.month||ft_localMonth_(new Date()));
- const active=ft_get_('Users').filter(u=>u.companyId===c.id&&u.status==='ACTIVE'&&u.role==='STAFF');
- const mods=ft_license_(c),canReport=mods.includes('REPORTS');
- const source=canReport?{
-  Activities:ft_get_('Activities'),Shifts:ft_get_('Shifts'),
-  ShiftSegments:ft_get_('ShiftSegments'),SickLeaves:ft_get_('SickLeaves'),
-  Leaves:ft_get_('Leaves'),Months:ft_get_('Months')
- }:null;
- const people=active.map(u=>{
-  let report=null;
-  if(canReport){
-   try{report=ft_report_(c,u,month,true,source);}
-   catch(err){console.warn('Teamübersicht Stunden für Mitarbeiter:',String(err.message||err).slice(0,100));}
-  }
-  const safe=ft_safe_(u);
-  return {id:u.id,name:u.name,target:Number(report?.target??safe.monthlyHours??0),
-   worked:report?Number(report.worked||0):null,
-   saldo:report?Number(report.saldo||0):null,
-   standby:report?Number(report.standby||0):null,
-   leaveBalance:mods.includes('LEAVE')?Number(safe.leaveBalance||0):null};
- });
- const now=new Date(),today=Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd');
- const [yy,mm,dd]=today.split('-').map(Number);
- const tomorrow=Utilities.formatDate(new Date(Date.UTC(yy,mm-1,dd+1,12)),'UTC','yyyy-MM-dd');
- // Source times can be ISO/UTC or Vienna wall clock. Only PUBLISHED real
- // roster entries are shown; nobody can see another company's assignments.
- const entries=[
-  ...(mods.includes('STANDBY')?(source?.Shifts||ft_get_('Shifts'))
-   .filter(x=>x.companyId===c.id&&x.status==='PUBLISHED')
-   .map(x=>({...x,kind:'Bereitschaft'})):[]),
-  ...(mods.includes('WORKPLAN')?ft_workRows_()
-   .filter(x=>x.companyId===c.id&&x.status==='PUBLISHED')
-   .map(x=>({...x,kind:'Arbeitsdienst'})):[])
- ];
- const upcoming=entries.filter(x=>{
-  const st=Date.parse(x.start),en=Date.parse(x.end);
-  if(!Number.isFinite(st)||!Number.isFinite(en)||en<=st)return false;
-  const startDay=Utilities.formatDate(new Date(st),FT_TZ,'yyyy-MM-dd');
-  return (st<=now.getTime()&&now.getTime()<en)||startDay===tomorrow;
- }).sort((a,b)=>Date.parse(a.start)-Date.parse(b.start)).slice(0,30)
- .map(x=>({id:x.id,userId:x.userId,kind:x.kind,
-   start:x.start,end:x.end,ongoing:Date.parse(x.start)<=now.getTime()&&now.getTime()<Date.parse(x.end)}));
- return {month,companyId:c.id,people,upcoming,generatedAt:ft_now_()};
-}
-
 function ft_home_(u,p){
  const cid=u.role==='SYSADMIN'?String(p.companyId||''):u.companyId;
  const month=ft_month_(p.month||ft_localMonth_(new Date()));
