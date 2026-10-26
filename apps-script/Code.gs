@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.18-interactive-performance-20261026';
+const FT_VERSION='1.8.19-attachments-10mb-tempo-20261026';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2504,12 +2504,13 @@ function ft_commPhotoSave_(actor,c,picture){
  const data=String(picture.data||''),mime=String(picture.mime||'');
  const isPdf=mime==='application/pdf',isImage=['image/jpeg','image/png'].includes(mime);
  if(!isPdf&&!isImage)throw Error('Nur JPG, PNG oder PDF als Anhang erlaubt.');
- // The signed gateway accepts at most 3.7 MB per request. Base64 and JSON
- // overhead fit for PDFs up to 2 MB; the photo limit stays unchanged.
- const maxBytes=isPdf?2000000:700000;
+ // PDFs in private messages are allowed up to 10 MiB. The signed Worker/GAS
+ // envelope is enlarged only for conversation attachment actions; photos remain
+ // compressed to the original limit.
+ const maxBytes=isPdf?10*1024*1024:700000;
  if(data.length>Math.ceil(maxBytes*4/3)+8||data.length<20||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
-  throw Error(isPdf?'PDF zu groß (maximal 2 MB).':'Foto zu groß (maximal etwa 650 KB).');
+  throw Error(isPdf?'PDF zu groß (maximal 10 MB).':'Foto zu groß (maximal etwa 650 KB).');
  const bytes=Utilities.base64Decode(data);
  if(bytes.length>maxBytes||bytes.length<8)throw Error('Datei ist zu groß oder leer.');
  const sig=bytes.slice(0,12).map(x=>x&255);
@@ -2539,7 +2540,7 @@ function ft_commPhoto_(actor,p){
  try{file=DriveApp.getFileById(attachmentId);blob=file.getBlob();}
  catch(err){throw Error('Der Anhang konnte in Google Drive nicht gelesen werden. Bitte Drive-Zugriff der Web-App kontrollieren.');}
  const bytes=blob.getBytes(),size=bytes.length;
- if(size<8||size>2000000)throw Error('Gespeicherter Anhang ist leer oder zu groß (maximal 2 MB).');
+ if(size<8||size>10*1024*1024)throw Error('Gespeicherter Anhang ist leer oder zu groß (maximal 10 MB).');
  const u8=bytes.slice(0,12).map(x=>x&255);
  const jpeg=u8[0]===255&&u8[1]===216&&u8[2]===255;
  const png=u8[0]===137&&u8[1]===80&&u8[2]===78&&u8[3]===71&&u8[4]===13&&u8[5]===10;
@@ -2548,6 +2549,7 @@ function ft_commPhoto_(actor,p){
  const pdf=u8[0]===37&&u8[1]===80&&u8[2]===68&&u8[3]===70&&u8[4]===45;
  const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':pdf?'application/pdf':'';
  if(!mime)throw Error('Der Anhang hat kein unterstütztes Bild- oder PDF-Format.');
+ if(!pdf&&size>2000000)throw Error('Bildanhang ist zu groß.');
  return {mime,data:Utilities.base64Encode(bytes),size,
   name:String((typeof file.getName==='function'?file.getName():'Anhang')||'Anhang').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90)};
 }
@@ -3812,7 +3814,7 @@ function doPost(e) {
       throw new Error('Leere Anfrage.');
     }
     const body = e.postData.contents;
-    if (body.length > 3900000) throw new Error('Anfrage zu groß.');
+    if (body.length > 16000000) throw new Error('Anfrage zu groß.');
     const envelope = JSON.parse(body);
     if (!envelope || typeof envelope !== 'object') {
       throw new Error('Anfrage ungültig.');
@@ -3824,7 +3826,7 @@ function doPost(e) {
     if (!Number.isSafeInteger(ts) || Math.abs(Math.floor(Date.now()/1000)-ts)>300 ||
         !/^[a-f0-9]{32}$/.test(nonce) ||
         !/^[a-f0-9]{64}$/.test(signature) ||
-        payload.length > 3650000) {
+        payload.length > 15300000) {
       throw new Error('Signatur oder Zeitstempel ungültig.');
     }
     const secret = PropertiesService.getScriptProperties().getProperty('FT_GATEWAY_KEY') || '';
@@ -3848,6 +3850,10 @@ function doPost(e) {
     if (!req || typeof req !== 'object' || Array.isArray(req)) {
       throw new Error('Anfrage ungültig.');
     }
+    // Only private communication attachments may use the larger request size.
+    if(body.length>3900000 && !(req.type==='api' &&
+       ['commCreate','commReply','commTaskStatus'].includes(String(req.action||''))))
+      throw new Error('Anfrage für diesen Vorgang zu groß.');
     let result;
     const perfName=String(req.type==='api'?req.action:req.type||'request');
     if(/^[A-Za-z][A-Za-z0-9]{0,34}$/.test(perfName))ftPerfAction=perfName;
