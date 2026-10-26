@@ -1259,6 +1259,15 @@ async function load(options={}){
     // Preserve sections already fetched in the same company/month, do not mix customer data.
     const context=(home.company?.id||'SYS')+'|'+home.month;
     const same=FT_LAST_CONTEXT===context&&ST.h?.me?.id===home.me.id;
+    const sameIdentity=ST.h?.me?.id===home.me.id&&
+      ST.h?.me?.role===home.me.role&&
+      String(ST.h?.company?.id||'SYS')===String(home.company?.id||'SYS');
+    // Metadata stays valid across adjacent months for the SAME authenticated
+    // account and tenant. Never let a compact response erase staff lists.
+    if(home.compact===true&&sameIdentity){
+      for(const k of ['companies','directory','users','profile'])
+        home[k]=ST.h[k];
+    }
     const view=ST.tab;
     const fresh={
       dashboard:['shifts','workShifts','reports'],staff:[],time:['activities'],
@@ -1268,17 +1277,12 @@ async function load(options={}){
       license:[],customers:[],profile:[]
     }[view]||[];
     if(same&&!bulkRead){
-      // Empty metadata fields in a compact response are intentional; reuse
-      // only data authenticated earlier for exactly the same user and company.
-      if(home.compact===true){
-        for(const k of ['companies','directory','users','profile'])
-          home[k]=ST.h[k];
-      }
       if(!home.logo&&ST.h.logo)home.logo=ST.h.logo;
       for(const k of ['activities','availability','availSubmissions','shifts','segments','changes','sick','workShifts','leaves','months','reports']){
         if(!fresh.includes(k))home[k]=ST.h[k];
       }
     } else if(!same){
+      if(sameIdentity&&home.compact===true&&ST.h?.logo&&!home.logo)home.logo=ST.h.logo;
       FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
       FT_WARM_CACHE.clear();FT_WARM_GENERATION++;
     }
