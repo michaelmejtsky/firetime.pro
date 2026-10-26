@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-interactive-performance-v1818"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-attachments-10mb-tempo-v1819"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -896,13 +896,13 @@ function ftScheduleAdminOverview_(){
  FT_ADMIN_OVERVIEW_DEBOUNCE=setTimeout(()=>{
   FT_ADMIN_OVERVIEW_DEBOUNCE=null;
   if(ST.tab!=='dashboard'||firm()?.id!==expectedId||ST.month!==expectedMonth)return;
-  if(FT_MAIN_FETCHES||performance.now()-FT_NAV_LAST_AT<1500){
+  if(FT_MAIN_FETCHES||performance.now()-FT_NAV_LAST_AT<8000){
    // A late response or a user tap gets priority.
    ftScheduleAdminOverview_();
    return;
   }
   ftAdminOverviewFetch_();
- },2000);
+ },4000);
 }
 // Only mark screens as ready when all information needed to display them
 // has already been delivered by the authenticated session bootstrap.
@@ -975,7 +975,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.18';
+const FT_VISIBLE_VERSION='1.8.19';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1042,7 +1042,16 @@ function stampInput(s){
  return p?p.year+'-'+p.month+'-'+p.day+'T'+p.hour+':'+p.minute:'';
 }
 function say(s,bad=false){const el=document.getElementById('toast');el.textContent=s;el.className='toast'+(bad?' bad':'');clearTimeout(window.ftHide);window.ftHide=setTimeout(()=>el.className='toast hide',6500);}
+const FT_TEMPO_SAMPLES=[];
+function ftRecordResponseTime_(request,ms){
+ const label=request.type==='api'?
+  (request.action==='home'?'Ansicht '+String(request.data?.view||'Start'):String(request.action||'API'))
+  :String(request.type||'API');
+ FT_TEMPO_SAMPLES.unshift({label,seconds:(ms/1000).toFixed(1)});
+ if(FT_TEMPO_SAMPLES.length>12)FT_TEMPO_SAMPLES.length=12;
+}
 async function rpc(name,...args){
+  const startedAt=performance.now();
   const endpoint=String(window.FT_API_URL||'');
   if(!/^https:\/\/[^/]+\/api$/.test(endpoint)||endpoint.includes('DEIN-WORKER')){
     throw Error('Cloudflare-Adresse fehlt in config.js.');
@@ -1075,6 +1084,7 @@ async function rpc(name,...args){
     throw Error('Server nicht erreichbar: '+String(err.message||err));
   }finally{clearTimeout(timeout);}
   let data;try{data=await response.json();}catch(e){throw Error('Die API liefert keine gültige Antwort (HTTP '+response.status+').');}
+  ftRecordResponseTime_(request,Math.round(performance.now()-startedAt));
   if(!response.ok||!data.ok)throw Error(data.error||'Fehler beim Serveraufruf.');
   return data.data;
 }
@@ -1483,7 +1493,7 @@ function ftCommPhotoPreview_(file){
  const data=String(file?.data||''),type=String(file?.mime||'');
  const isPdf=type==='application/pdf';
  if(!['image/jpeg','image/png','image/webp','application/pdf'].includes(type)||
-  !/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>(isPdf?2800000:1200000))
+  !/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>(isPdf?14_100_000:1200000))
   throw Error('Ungültiger Bild- oder PDF-Anhang.');
  let bytes;
  try{
@@ -1670,7 +1680,7 @@ function ftMessages_(){
   input('Betreff','title','','text','required maxlength="120"')+
   '<label class="field"><span>Nachricht / Aufgabenbeschreibung</span><textarea name="body" maxlength="3000" rows="4" required></textarea></label>'+
   (isManager?input('Frist (nur für Aufgaben)','dueDate','','date'):'')+
-  '<label class="field"><span>Anhang (optional: Foto oder mehrseitiges PDF, bis 2 MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,application/pdf,.pdf"></label>'+
+  '<label class="field"><span>Anhang (optional: Foto oder mehrseitiges PDF, bis 10 MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,application/pdf,.pdf"></label>'+
   '<div class="actions"><button type="submit" class="btn primary">Senden</button>'+
   '<button type="button" class="btn" data-act="commCloseCompose">Abbrechen</button></div></form></section>':'';
  const threads=(data.threads||[]).map(x=>{
@@ -1709,7 +1719,7 @@ function ftMessages_(){
   ):'')+
   '<form id="ftCommReplyForm" data-thread="'+E(chosen.id)+'">'+
   '<label class="field"><span>Antwort</span><textarea name="body" required maxlength="3000" rows="3"></textarea></label>'+
-  '<label class="field"><span>Anhang zur Antwort (Foto oder PDF)</span><input type="file" accept="image/jpeg,image/png,application/pdf,.pdf" name="photo"></label>'+
+  '<label class="field"><span>Anhang zur Antwort (Foto oder PDF bis 10 MB)</span><input type="file" accept="image/jpeg,image/png,application/pdf,.pdf" name="photo"></label>'+
   '<button class="btn primary" type="submit">Antwort senden</button></form></section>':'';
  return '<div class="ft-msg-heading"><div><h2>Nachrichten & Aufgaben</h2>'+
   '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
@@ -3426,7 +3436,12 @@ function ftActivityTypesAdminPanel_(){
 
 function settings(){if(!isAdmin())return '';const c=firm(),p=ST.h.profile;return hint('Der Firmenadministrator kann Name, Logo, Farben, Arbeitszeitmodell und Kalender pflegen. Gekaufte Module kann nur der FireTime-Pro-Systemadministrator freischalten. Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.')+`<div class="cols"><div class="card"><h2>Firmendesign</h2>${ST.h.logo?`<img class="logo" src="${ST.h.logo}">`:''}<div class="drop" data-pick="existingLogo">Firmenlogo hochladen oder ersetzen<input type="file" id="existingLogo" accept="image/png,image/jpeg,image/webp"></div><div class="muted small" id="existingLogoLabel"></div><form id="settingsForm">${input('Firmenname','name',c.name,'text','required')}${input('Primärfarbe','color',c.color,'color')}${input('Google-Kalender-ID','calendarId',c.calendarId||'')}${chk('calendarOn','Google-Kalender aktivieren',c.calendarOn===true||c.calendarOn==='TRUE','Nur verfügbar, wenn du das Kalendermodul gekauft/freigeschaltet hast.')}${chk('remindHours','Monatsabschluss erinnern',c.remindHours===true||c.remindHours==='TRUE')}${chk('remindAvailability','Verfügbarkeit erinnern',c.remindAvailability===true||c.remindAvailability==='TRUE')}${chk('remindShift','Bereitschaft erinnern',c.remindShift===true||c.remindShift==='TRUE')}${input('Stichtag der Verfügbarkeit (Tag im Monat)','availabilityDay',c.availabilityDay||20,'number','min="1" max="28"')}${input('Nachtbeginn (0–23 Uhr)','nightStart',c.nightStart??22,'number','min="0" max="23"')}${input('Nachtende (0–23 Uhr)','nightEnd',c.nightEnd??6,'number','min="0" max="23"')}<button class="btn primary">Firmenangaben speichern</button>${has('CALENDAR')?'<button class="btn" type="button" data-act="calendarTest">Kalender testen</button>':''}</form></div><div class="card"><h2>Arbeitszeitmodell</h2><form id="profileForm">${profileFields(p)}<button class="btn primary">Arbeitszeitmodell speichern</button></form>${ftActivityTypesAdminPanel_()}<hr><h3>Kundenlink</h3><p class="small muted" style="word-break:break-word">${E(ST.h.loginUrl)}</p><button class="btn" data-act="copyUrl">Link kopieren</button></div></div>`;}
 function profile(){
+ const tempo=FT_TEMPO_SAMPLES.length?
+  FT_TEMPO_SAMPLES.slice(0,10).map(x=>'<div class="row between"><span>'+E(x.label)+'</span><strong>'+E(x.seconds)+' s</strong></div>').join(''):
+  '<p class="muted small">Noch keine Aufrufe gemessen. Öffne mehrere Menüs und komm danach hierher zurück.</p>';
  return `<div class="card"><h2>Mein Konto</h2><p>${E(me().name)} · ${E(me().email)}</p></div>`+
+  '<details class="card"><summary>Ladezeiten-Diagnose (letzte 10 Serveraufrufe)</summary>'+
+  '<p class="muted small">Misst die Zeit vom Klick bis zur Serverantwort. Keine Namen, Passwörter oder Zugangsdaten werden gespeichert.</p>'+tempo+'</details>'+
   (ST.h?.backgroundPushSupported?`<section class="card ft-account-push"><h2>🔔 Benachrichtigungen</h2><p class="muted small">Push-Mitteilungen und registrierte Geräte für dein persönliches Konto verwalten.</p>${ftCommNotificationUI_()}</section>`:'')+
   `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form><p class="muted small">Altes Passwort nicht mehr bekannt? Du kannst dir auch einen sicheren Einmal-Link senden lassen.</p><button type="button" class="btn" data-act="myPasswordReset">Passwort zurücksetzen (E-Mail)</button></div>`;
 }
@@ -3435,8 +3450,8 @@ async function ftCommPhotoData_(input){
  const file=input?.files?.[0];if(!file)return null;
  const pdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
  if(pdf){
-  if(file.size<8||file.size>2*1000*1000)
-   throw Error('PDF-Anhang: maximal 2 MB. Größere mehrseitige PDFs bitte vorher verkleinern.');
+  if(file.size<8||file.size>10*1024*1024)
+   throw Error('PDF-Anhang: maximal 10 MB. Bitte eine kleinere Datei wählen.');
   const bytes=new Uint8Array(await file.arrayBuffer());
   if(String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')
    throw Error('Die Datei ist kein gültiges PDF.');
@@ -3445,7 +3460,7 @@ async function ftCommPhotoData_(input){
   return {mime:'application/pdf',data:btoa(raw),name:file.name.slice(0,90)};
  }
  if(!['image/jpeg','image/png'].includes(file.type)||file.size>8*1024*1024)
-  throw Error('Bitte ein JPG-/PNG-Foto bis 8 MB oder PDF bis 2 MB auswählen.');
+  throw Error('Bitte ein JPG-/PNG-Foto bis 8 MB oder PDF bis 10 MB auswählen.');
  const obj=URL.createObjectURL(file);
  try{
   const img=new Image();
