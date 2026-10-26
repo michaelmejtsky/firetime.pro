@@ -47,7 +47,7 @@ async function run(){
    const response=await fetch('./config.js?probe='+stamp,{cache:'no-store'});
    if(!response.ok)throw Error('HTTP '+response.status);
    const text=await response.text();
-   const match=text.match(/FT_API_URL\\s*=\\s*['"]([^'"]+)['"]/);
+   const match=text.match(/FT_API_URL\s*=\s*['"]([^'"]+)['"]/);
    if(!match)throw Error('FT_API_URL fehlt');
    if(match[1]!==API)throw Error('Andere API-Adresse konfiguriert: '+match[1]);
    status('config','ok','OK – GitHub Pages und config.js erreichbar');
@@ -79,7 +79,7 @@ async function run(){
   }
  }finally{
   out.textContent=['FireTime Pro Verbindungstest',new Date().toLocaleString('de-AT'),
-   'Origin: '+location.origin,'API: '+API,...results].join('\\n');
+   'Origin: '+location.origin,'API: '+API,...results].join('\n');
   btn.disabled=false;byId('copy').disabled=false;
  }
 }
