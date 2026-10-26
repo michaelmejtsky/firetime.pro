@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-cross-month-fast-nav-v1821"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-pwa-network-first-v1822"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -1012,7 +1012,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.21';
+const FT_VISIBLE_VERSION='1.8.22';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -4359,7 +4359,31 @@ ftOpenShell();
   }
   if('serviceWorker' in navigator){
     window.addEventListener('load',()=>{
-      navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(err=>{
+      const started=Date.now();
+      let once=false;
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        if(once)return;
+        once=true;
+        // Only reload immediately after launch and when no form is being edited.
+        // Never interrupt an ongoing staff edit or open admin form.
+        if(Date.now()-started<12000&&!ST.edit&&!ST.commCompose&&
+           !document.querySelector('input:focus,textarea:focus,select:focus')){
+          window.location.reload();
+          return;
+        }
+        const notice=document.createElement('div');
+        notice.setAttribute('role','status');
+        notice.style.cssText='position:fixed;bottom:12px;left:12px;right:12px;z-index:99999;padding:14px;background:#173251;color:white;border:1px solid #7392b3;border-radius:12px;box-shadow:0 5px 22px #0009;text-align:center';
+        notice.textContent='Eine neue FireTime-Pro-Version ist verfügbar. ';
+        const btn=document.createElement('button');
+        btn.type='button';btn.textContent='Jetzt aktualisieren';
+        btn.className='btn primary';
+        btn.addEventListener('click',()=>window.location.reload());
+        notice.appendChild(btn);document.body.appendChild(notice);
+      });
+      navigator.serviceWorker.register('./sw.js',{
+        scope:'./',updateViaCache:'none'
+      }).then(reg=>reg.update()).catch(err=>{
         console.warn('FireTime Pro: PWA-Service-Worker konnte nicht aktiviert werden:',err.message);
       });
     });
