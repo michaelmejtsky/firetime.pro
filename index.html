@@ -532,6 +532,24 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-msg-heading .actions .btn{flex:1;min-height:46px}
 }
 
+/* Nachrichten/Angebote: echte vertikale Leserichtung auf Telefon und Desktop. */
+.ft-msg-layout{display:flex;flex-direction:column;gap:14px;align-items:stretch}
+.ft-msg-layout>.card{width:100%;max-width:none;min-width:0}
+.ft-msg-list{max-height:420px;overflow-y:auto}
+.ft-msg-thread{display:flex;width:100%;min-height:62px}
+.ft-msg-detail{scroll-margin-top:72px}
+.ft-msg-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ft-msg-heading .actions{display:flex;flex-wrap:wrap;gap:8px}
+.ft-attachment-viewer{width:min(96vw,940px);max-width:min(96vw,940px)}
+.ft-attachment-viewer .ft-photo-header{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ft-attachment-viewer .ft-pdf-frame{width:100%;height:min(73vh,780px);border:0;background:#fff;border-radius:8px}
+@media(max-width:780px){
+ .ft-msg-layout{display:flex;flex-direction:column;gap:12px}
+ .ft-msg-list{max-height:none;overflow:visible}
+ .ft-msg-heading .actions{width:100%}
+ .ft-msg-heading .btn{flex:1}
+ .ft-attachment-viewer .ft-pdf-frame{height:70vh}
+}
 /* Reduzierte Seitenhilfen: Erklärungen bleiben zugänglich, Aktionen sichtbar. */
 .ft-page-hint{margin:0 0 13px;border:1px solid #3e5870;border-radius:10px;background:#172c3d;min-width:0}
 .ft-page-hint>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:10px 12px;
@@ -914,7 +932,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.15';
+const FT_VISIBLE_VERSION='1.8.16';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1394,43 +1412,56 @@ if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('messag
 });
 function ftCommPhotoButton_(id,threadId){
  return id?'<button type="button" class="btn ft-msg-photo-btn" data-act="commPhoto" data-id="'+
-  E(id)+'" data-thread="'+E(threadId)+'"><span aria-hidden="true">📷</span> Bild öffnen</button>':'';
+  E(id)+'" data-thread="'+E(threadId)+'"><span aria-hidden="true">📎</span> Anhang öffnen</button>':'';
 }
-function ftCommPhotoPreview_(photo){
- const data=String(photo?.data||''),type=String(photo?.mime||'');
- if(!['image/jpeg','image/png','image/webp'].includes(type)||
-  !/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>1200000)throw Error('Ungültige Fotodaten.');
+function ftCommPhotoPreview_(file){
+ const data=String(file?.data||''),type=String(file?.mime||'');
+ const isPdf=type==='application/pdf';
+ if(!['image/jpeg','image/png','image/webp','application/pdf'].includes(type)||
+  !/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>(isPdf?2800000:1200000))
+  throw Error('Ungültiger Bild- oder PDF-Anhang.');
  let bytes;
  try{
   const binary=atob(data);bytes=new Uint8Array(binary.length);
   for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
- }catch(e){throw Error('Das Foto konnte nicht decodiert werden.');}
- const blob=new Blob([bytes],{type});
- const objectUrl=URL.createObjectURL(blob);
+ }catch(err){throw Error('Anhang konnte nicht decodiert werden.');}
+ const blob=new Blob([bytes],{type}),objectUrl=URL.createObjectURL(blob);
  const dialog=document.createElement('dialog');
- dialog.className='ft-msg-photo-dialog ft-photo-viewer';
- dialog.setAttribute('aria-label','Foto zur Nachricht');
+ dialog.className='ft-msg-photo-dialog ft-photo-viewer ft-attachment-viewer';
+ dialog.setAttribute('aria-label',isPdf?'PDF zur Nachricht':'Foto zur Nachricht');
  const header=document.createElement('div');header.className='ft-photo-header';
- const title=document.createElement('strong');title.textContent='Foto zur Nachricht';
+ const title=document.createElement('strong');title.textContent=isPdf?'📄 PDF-Dokument':'📷 Foto';
  const close=document.createElement('button');close.className='btn ft-photo-close';
- close.type='button';close.textContent='✕ Schließen';close.setAttribute('aria-label','Bild schließen');
- header.append(title,close);
- const img=document.createElement('img');
- img.alt='Angehängtes Foto';img.src=objectUrl;img.decoding='async';
- img.addEventListener('error',()=>{
-  const warning=document.createElement('p');warning.className='ft-plan-message ft-plan-warning';
-  warning.textContent='Die Bilddatei wurde empfangen, aber dieses Gerät kann sie nicht darstellen.';
-  dialog.append(warning);
- },{once:true});
+ close.type='button';close.textContent='✕ Schließen';
+ header.append(title);
+ const download=document.createElement('a');download.className='btn';
+ download.href=objectUrl;download.download=String(file.name|| (isPdf?'FireTime-Anhang.pdf':'FireTime-Foto.jpg'));
+ download.textContent=isPdf?'PDF speichern / öffnen':'Bild speichern';
+ header.append(download,close);
+ if(isPdf){
+  const frame=document.createElement('iframe');frame.src=objectUrl;
+  frame.title='Mehrseitiges PDF-Dokument';frame.className='ft-pdf-frame';
+  dialog.append(header,frame);
+  const note=document.createElement('p');note.className='muted small';
+  note.textContent='Falls die PDF-Vorschau auf deinem iPhone nicht angezeigt wird, verwende „PDF speichern / öffnen“. Alle Seiten bleiben erhalten.';
+  dialog.append(note);
+ }else{
+  const img=document.createElement('img');img.alt='Angehängtes Foto';img.src=objectUrl;img.decoding='async';
+  img.addEventListener('error',()=>{
+   const warning=document.createElement('p');warning.className='muted small';
+   warning.textContent='Das Bild kann auf diesem Gerät nicht angezeigt werden.';
+   dialog.append(warning);
+  },{once:true});
+  dialog.append(header,img);
+ }
  const cleanup=()=>{URL.revokeObjectURL(objectUrl);dialog.remove();};
  dialog.addEventListener('close',cleanup,{once:true});
  close.addEventListener('click',()=>dialog.close());
- dialog.append(header,img);document.body.append(dialog);
+ document.body.append(dialog);
  try{dialog.showModal();}
- catch(err){cleanup();throw Error('Die Bildvorschau kann auf diesem Gerät nicht geöffnet werden.');}
+ catch(err){cleanup();throw Error('Anhangsvorschau kann auf diesem Gerät nicht geöffnet werden.');}
  return dialog;
 }
-
 
 function ftCommNotificationState_(){
  const canAsk=typeof window.Notification!=='undefined'&&window.isSecureContext===true;
@@ -1553,7 +1584,7 @@ function ftMessages_(){
  const selectedTaskFilter=ST.taskFilter||'ALL';
  const filteredTasks=selectedTaskFilter==='ALL'?myTasks:myTasks.filter(t=>t.status===selectedTaskFilter);
  const taskBoard=isManager?'<section class="card ft-task-overview"><h3>📋 Vergebene Aufgaben</h3>'+
-  '<p class="muted small">Alle von dir vergebenen Aufgaben – nach Mitarbeiter und Bearbeitungsstand. Bei „Durchgeführt“ ist ein Abschlussfoto hinterlegt.</p>'+
+  '<p class="muted small">Alle von dir vergebenen Aufgaben – nach Mitarbeiter und Bearbeitungsstand. Bei „Durchgeführt“ ist die Fotodokumentation hinterlegt.</p>'+
   '<div class="ft-task-summary">'+
    [['ALL','Gesamt',myTasks.length],['OPEN','Offen',taskCounts.OPEN],['ACCEPTED','Angenommen',taskCounts.ACCEPTED],['DONE','Durchgeführt',taskCounts.DONE]]
     .map(([status,title,count])=>'<button type="button" class="ft-task-count'+(selectedTaskFilter===status?' on':'')+
@@ -1563,7 +1594,7 @@ function ftMessages_(){
     (t.dueDate?' · Frist '+E(t.dueDate.split('-').reverse().join('.')):'')+'</p></div>'+
     '<span class="ft-task-state">'+(t.status==='DONE'?'✓ Durchgeführt':t.status==='ACCEPTED'?'◉ Angenommen':'○ Offen')+'</span>'+
     '<button type="button" class="btn" data-act="commOpen" data-id="'+E(t.id)+'">'+
-       (t.status==='DONE'?'Foto ansehen':'Öffnen')+'</button></div>').join('')||
+       (t.status==='DONE'?'Dokumentation öffnen':'Öffnen')+'</button></div>').join('')||
    '<p class="muted">Für diesen Filter sind keine Aufgaben vorhanden.</p>')+
   '</div></section>':'';
  const composer=ST.commCompose?'<section class="card ft-msg-composer"><h3>Neue '+(isManager?'Nachricht oder Aufgabe':'Nachricht')+'</h3>'+
@@ -1574,7 +1605,7 @@ function ftMessages_(){
   input('Betreff','title','','text','required maxlength="120"')+
   '<label class="field"><span>Nachricht / Aufgabenbeschreibung</span><textarea name="body" maxlength="3000" rows="4" required></textarea></label>'+
   (isManager?input('Frist (nur für Aufgaben)','dueDate','','date'):'')+
-  '<label class="field"><span>Foto anhängen (optional, JPG/PNG)</span><input type="file" name="photo" accept="image/jpeg,image/png"></label>'+
+  '<label class="field"><span>Anhang (optional: Foto oder mehrseitiges PDF, bis 2 MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,application/pdf,.pdf"></label>'+
   '<div class="actions"><button type="submit" class="btn primary">Senden</button>'+
   '<button type="button" class="btn" data-act="commCloseCompose">Abbrechen</button></div></form></section>':'';
  const threads=(data.threads||[]).map(x=>{
@@ -1613,13 +1644,13 @@ function ftMessages_(){
   ):'')+
   '<form id="ftCommReplyForm" data-thread="'+E(chosen.id)+'">'+
   '<label class="field"><span>Antwort</span><textarea name="body" required maxlength="3000" rows="3"></textarea></label>'+
-  '<label class="field"><span>Foto zur Antwort (optional)</span><input type="file" accept="image/jpeg,image/png" name="photo"></label>'+
+  '<label class="field"><span>Anhang zur Antwort (Foto oder PDF)</span><input type="file" accept="image/jpeg,image/png,application/pdf,.pdf" name="photo"></label>'+
   '<button class="btn primary" type="submit">Antwort senden</button></form></section>':'';
  return '<div class="ft-msg-heading"><div><h2>Nachrichten & Aufgaben</h2>'+
   '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
   '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
   '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
-  composer+taskBoard+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang & Aufgaben</h3>'+
+  composer+taskBoard+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Posteingang</h3>'+
   (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
   '</section>'+detail+'</div>';
 }
@@ -3271,11 +3302,21 @@ function profile(){
   `<div class="card"><h2>Passwort ändern</h2><form id="passwordForm">${input('Altes Passwort','current','','password','required')}${input('Neues Passwort (mindestens 12 Zeichen)','next','','password','required minlength="12"')}<button class="btn primary">Passwort ändern</button></form><p class="muted small">Altes Passwort nicht mehr bekannt? Du kannst dir auch einen sicheren Einmal-Link senden lassen.</p><button type="button" class="btn" data-act="myPasswordReset">Passwort zurücksetzen (E-Mail)</button></div>`;
 }
 
-async function ftCommPhotoData_(input){
- const file=input?.files?.[0];
- if(!file)return null;
+async async function ftCommPhotoData_(input){
+ const file=input?.files?.[0];if(!file)return null;
+ const pdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name||'');
+ if(pdf){
+  if(file.size<8||file.size>2*1000*1000)
+   throw Error('PDF-Anhang: maximal 2 MB. Größere mehrseitige PDFs bitte vorher verkleinern.');
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  if(String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')
+   throw Error('Die Datei ist kein gültiges PDF.');
+  let raw='';for(let i=0;i<bytes.length;i+=16384)
+   raw+=String.fromCharCode(...bytes.subarray(i,i+16384));
+  return {mime:'application/pdf',data:btoa(raw),name:file.name.slice(0,90)};
+ }
  if(!['image/jpeg','image/png'].includes(file.type)||file.size>8*1024*1024)
-  throw Error('Bitte ein JPG- oder PNG-Foto bis 8 MB auswählen.');
+  throw Error('Bitte ein JPG-/PNG-Foto bis 8 MB oder PDF bis 2 MB auswählen.');
  const obj=URL.createObjectURL(file);
  try{
   const img=new Image();
@@ -3286,10 +3327,9 @@ async function ftCommPhotoData_(input){
    canvas.width=Math.max(1,Math.round(img.naturalWidth*factor));
    canvas.height=Math.max(1,Math.round(img.naturalHeight*factor));
    const ctx=canvas.getContext('2d');if(!ctx)throw Error('Foto konnte nicht bearbeitet werden.');
-   ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
-   ctx.drawImage(img,0,0,canvas.width,canvas.height);
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0);
    const encoded=canvas.toDataURL('image/jpeg',Math.max(.45,.8-n*.065)).split(',')[1]||'';
-   if(encoded.length<870000)return {mime:'image/jpeg',data:encoded};
+   if(encoded.length<870000)return {mime:'image/jpeg',data:encoded,name:file.name};
    factor*=.78;
   }
   throw Error('Das Foto ist zu groß. Bitte ein kleineres Foto auswählen.');
@@ -3343,15 +3383,15 @@ if(a==='commOpen'){
  return;
 }
 if(a==='commPhoto'){
- btn.disabled=true;const old=btn.innerHTML;btn.textContent='Bild wird geladen …';
+ btn.disabled=true;const old=btn.innerHTML;btn.textContent='Anhang wird geladen …';
  try{
   const photo=await api('commPhoto',{companyId:firm().id,threadId:btn.dataset.thread,attachmentId:id});
   ftCommPhotoPreview_(photo);
  }catch(err){
   const message=String(err.message||err);
-  say('Foto konnte nicht geöffnet werden: '+message,true);
+  say('Anhang konnte nicht geöffnet werden: '+message,true);
   // Eine deutliche Meldung statt eines stillen Fehlers, besonders am iPhone.
-  if(typeof alert==='function')alert('Foto konnte nicht geöffnet werden.\n\n'+message);
+  if(typeof alert==='function')alert('Anhang konnte nicht geöffnet werden.\n\n'+message);
  }finally{if(btn.isConnected){btn.disabled=false;btn.innerHTML=old;}}
  return;
 }
