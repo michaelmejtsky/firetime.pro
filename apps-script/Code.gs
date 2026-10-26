@@ -2645,7 +2645,10 @@ function ft_commReply_(actor,p){
  const recipient=ft_one_('Users',recipientId);
  const sent=recipient&&recipient.status==='ACTIVE'?ft_commMail_(c,recipient,actor,thread,reply.id,'REPLY'):false;
  ft_audit_(actor,'COMM_REPLY','CommReplies',reply.id,{}, {companyId:c.id,threadId:thread.id});
- return {ok:true,mailSent:sent};
+ return {ok:true,mailSent:sent,reply:{
+  id:reply.id,threadId:reply.threadId,authorId:reply.authorId,body,
+  createdAt:reply.createdAt,hasPhoto:Boolean(reply.attachmentId),attachmentId:reply.attachmentId||''
+ }};
 }
 function ft_commMark_(actor,p){
  const thread=ft_commThread_(actor,p.threadId);
@@ -2691,7 +2694,12 @@ function ft_commTaskStatus_(actor,p){
  }
  ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,
   {status:before},{status:next,attachment:Boolean(evidenceId)});
- return {ok:true,status:next,mailSent,hasEvidence:Boolean(evidenceId)};
+ return {ok:true,status:next,mailSent,hasEvidence:Boolean(evidenceId),
+  updatedAt:thread.updatedAt,
+  evidenceReply:evidenceReply?{
+   id:evidenceReply.id,threadId:evidenceReply.threadId,authorId:evidenceReply.authorId,
+   body:ft_commDecode_(evidenceReply.bodyEncoded),createdAt:evidenceReply.createdAt,
+   hasPhoto:true,attachmentId:evidenceReply.attachmentId}:null};
 }
 
 // -----------------------------------------------------------------
