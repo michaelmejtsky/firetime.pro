@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.15-tasks-login-speed-20261026';
+const FT_VERSION='1.8.16-attachments-task-layout-20261026';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2501,44 +2501,57 @@ function ft_commRead_(actor,t){
 }
 function ft_commPhotoSave_(actor,c,picture){
  if(!picture)return '';
- const data=String(picture.data||'');
- const mime=String(picture.mime||'');
- if(!['image/jpeg','image/png'].includes(mime)||data.length>950000||data.length<20||
-   !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
-  throw Error('Bitte ein JPG- oder PNG-Foto bis ca. 650 KB auswählen.');
+ const data=String(picture.data||''),mime=String(picture.mime||'');
+ const isPdf=mime==='application/pdf',isImage=['image/jpeg','image/png'].includes(mime);
+ if(!isPdf&&!isImage)throw Error('Nur JPG, PNG oder PDF als Anhang erlaubt.');
+ // The signed gateway accepts at most 3.7 MB per request. Base64 and JSON
+ // overhead fit for PDFs up to 2 MB; the photo limit stays unchanged.
+ const maxBytes=isPdf?2000000:700000;
+ if(data.length>Math.ceil(maxBytes*4/3)+8||data.length<20||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
+  throw Error(isPdf?'PDF zu groß (maximal 2 MB).':'Foto zu groß (maximal etwa 650 KB).');
  const bytes=Utilities.base64Decode(data);
- if(bytes.length>700000)throw Error('Foto zu groß (maximal 650 KB).');
- const signature=bytes.map(x=>x&255);
- if((mime==='image/png'&&!(signature[0]===137&&signature[1]===80&&signature[2]===78&&signature[3]===71))||
-    (mime==='image/jpeg'&&!(signature[0]===255&&signature[1]===216&&signature[2]===255)))
-   throw Error('Das Fotoformat stimmt nicht mit der Datei überein.');
+ if(bytes.length>maxBytes||bytes.length<8)throw Error('Datei ist zu groß oder leer.');
+ const sig=bytes.slice(0,12).map(x=>x&255);
+ const png=sig[0]===137&&sig[1]===80&&sig[2]===78&&sig[3]===71;
+ const jpeg=sig[0]===255&&sig[1]===216&&sig[2]===255;
+ const pdf=sig[0]===37&&sig[1]===80&&sig[2]===68&&sig[3]===70&&sig[4]===45; // %PDF-
+ if((mime==='image/png'&&!png)||(mime==='image/jpeg'&&!jpeg)||(isPdf&&!pdf))
+  throw Error('Der tatsächliche Dateityp stimmt nicht mit dem angegebenen Format überein.');
  const root=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
  const iter=root.getFoldersByName('FireTime Pro – Nachrichtenbilder (privat)');
  const folder=iter.hasNext()?iter.next():root.createFolder('FireTime Pro – Nachrichtenbilder (privat)');
- const blob=Utilities.newBlob(bytes,mime,ft_uuid_()+(mime==='image/png'?'.png':'.jpg'));
- const file=folder.createFile(blob);return file.getId();
+ const original=String(picture.name||'').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90);
+ const name=original&&original.toLowerCase().endsWith(isPdf?'.pdf':mime==='image/png'?'.png':'.jpg')
+  ?original:ft_uuid_()+(isPdf?'.pdf':mime==='image/png'?'.png':'.jpg');
+ const blob=Utilities.newBlob(bytes,mime,name);
+ // Google Drive stays private; the stored ID can only be fetched by
+ // authenticated conversation participants through commPhoto.
+ return folder.createFile(blob).getId();
 }
+
 function ft_commPhoto_(actor,p){
  const t=ft_commThread_(actor,p.threadId),attachmentId=String(p.attachmentId||'').trim();
  const allowed=[t.attachmentId,...ft_commReplies_().filter(r=>
   r.threadId===t.id&&r.companyId===t.companyId).map(r=>r.attachmentId)];
- if(!attachmentId||!allowed.includes(attachmentId))throw Error('Foto gehört nicht zu dieser Nachricht.');
- let blob;
- try{blob=DriveApp.getFileById(attachmentId).getBlob();}
- catch(err){throw Error('Das gespeicherte Foto konnte in Google Drive nicht gelesen werden. Bitte Drive-Zugriff der Web-App kontrollieren.');}
+ if(!attachmentId||!allowed.includes(attachmentId))throw Error('Anhang gehört nicht zu dieser Nachricht.');
+ let file,blob;
+ try{file=DriveApp.getFileById(attachmentId);blob=file.getBlob();}
+ catch(err){throw Error('Der Anhang konnte in Google Drive nicht gelesen werden. Bitte Drive-Zugriff der Web-App kontrollieren.');}
  const bytes=blob.getBytes(),size=bytes.length;
- if(size<4||size>800000)throw Error('Das gespeicherte Foto ist leer oder zu groß für die Vorschau.');
+ if(size<8||size>2000000)throw Error('Gespeicherter Anhang ist leer oder zu groß (maximal 2 MB).');
  const u8=bytes.slice(0,12).map(x=>x&255);
- // Ältere Drive-Fotos können einen ungenauen Content-Type besitzen.
- // Format anhand der tatsächlichen Datei prüfen, nicht nur Metadaten vertrauen.
  const jpeg=u8[0]===255&&u8[1]===216&&u8[2]===255;
  const png=u8[0]===137&&u8[1]===80&&u8[2]===78&&u8[3]===71&&u8[4]===13&&u8[5]===10;
  const webp=u8[0]===82&&u8[1]===73&&u8[2]===70&&u8[3]===70&&
   u8[8]===87&&u8[9]===69&&u8[10]===66&&u8[11]===80;
- const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':'';
- if(!mime)throw Error('Die Bilddatei wurde gefunden, hat aber kein unterstütztes Bildformat.');
- return {mime,data:Utilities.base64Encode(bytes),size};
+ const pdf=u8[0]===37&&u8[1]===80&&u8[2]===68&&u8[3]===70&&u8[4]===45;
+ const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':pdf?'application/pdf':'';
+ if(!mime)throw Error('Der Anhang hat kein unterstütztes Bild- oder PDF-Format.');
+ return {mime,data:Utilities.base64Encode(bytes),size,
+  name:String(file.getName()||'Anhang').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90)};
 }
+
 function ft_commList_(actor,p){
  const c=ft_commCompany_(actor,p);
  const threads=ft_commVisible_(actor,c).slice().sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,100);
