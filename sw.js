@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261024-v1814';
+const FT_SHELL_CACHE='firetime-shell-20261026-v1815';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
@@ -19,6 +19,9 @@ self.addEventListener('activate',event=>{
   )).then(()=>self.clients.claim())
  );
 });
+// Fast app shell: stored code/graphics render instantly on subsequent launches.
+// Do NOT cache API, config.js, secrets, staff records or employee data.
+// A validated background network response refreshes the shell for next launch.
 self.addEventListener('fetch',event=>{
  const req=event.request;
  if(req.method!=='GET')return;
@@ -28,15 +31,28 @@ self.addEventListener('fetch',event=>{
  const isPage=req.mode==='navigate';
  const shell=FT_SHELL_URLS.includes(url.href.split('?')[0]);
  if(!isPage&&!shell)return;
- event.respondWith(
-  fetch(req,{cache:'no-store'}).catch(async()=>{
-   if(isPage)return (await caches.match(new URL('index.html',FT_BASE).href))||
-    Response.error();
-   return (await caches.match(req,{ignoreSearch:true}))||Response.error();
-  })
- );
+ const cacheKey=isPage?new URL('index.html',FT_BASE).href:req;
+ event.respondWith((async()=>{
+  const saved=await caches.match(cacheKey,{ignoreSearch:true});
+  if(saved){
+   event.waitUntil(fetch(req,{cache:'no-store'}).then(async response=>{
+    if(response.ok&&response.type==='basic'){
+     const cache=await caches.open(FT_SHELL_CACHE);
+     await cache.put(cacheKey,response.clone());
+    }
+   }).catch(()=>{}));
+   return saved;
+  }
+  try{
+   const response=await fetch(req,{cache:'no-store'});
+   if(response.ok&&response.type==='basic'){
+    const cache=await caches.open(FT_SHELL_CACHE);
+    event.waitUntil(cache.put(cacheKey,response.clone()));
+   }
+   return response;
+  }catch{return (await caches.match(new URL('index.html',FT_BASE).href))||Response.error();}
+ })());
 });
-
 
 // Echte Hintergrund-Push-Mitteilungen, auch wenn die Web-App geschlossen ist.
 // Keine Zugangstoken oder vertraulichen Nachrichtentexte im Payload.
