@@ -110,7 +110,7 @@ test('staff gets personal monthly hours, not admin statistics', () => {
   const output = api.dashboard();
   assert.match(output, /Monatssoll/);
   assert.match(output, /Bereitschaft netto/);
-  assert.doesNotMatch(output, /Bereitschaften im Monat \\(geplant\\)/);
+  assert.doesNotMatch(output, /Bereitschaften im Monat \(geplant\)/);
 });
 
 test('empty state stays concise with full-plan navigation', () => {
