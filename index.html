@@ -1821,8 +1821,8 @@ function dashboard(){
  const adminAccount=me().role!=='STAFF',r=ST.h?.reports?.[me().id]||{};
  const metrics=adminAccount?
   [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF'&&u.status==='ACTIVE').length)],
-   ['Bereitschaften geplant',String(ftHomePublishedCount_(ST.h.shifts))],
-   ['Arbeitsdienste geplant',String(ftHomePublishedCount_(ST.h.workShifts))]]:
+   ['Bereitschaften im Monat (geplant)',String(ftHomePublishedCount_(ST.h.shifts))],
+   ['Arbeitsdienste im Monat (geplant)',String(ftHomePublishedCount_(ST.h.workShifts))]]:
   [['Monatssoll',N(Math.round(Number(r.target||0)*100)/100)+' h'],['Aktive Arbeitszeit',N(Math.round(Number(r.worked||0)*100)/100)+' h'],
    ['Plus/Minus',N(Math.round(Number(r.saldo||0)*100)/100)+' h'],['Bereitschaft netto',N(Math.round(Number(r.standby||0)*100)/100)+' h']];
  const intro=adminAccount?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Nur Mitarbeiter haben ein persönliches Stundenkonto.':
