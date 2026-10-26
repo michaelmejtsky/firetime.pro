@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261026-v1821';
+const FT_SHELL_CACHE='firetime-shell-20261026-v1822';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
@@ -19,9 +19,9 @@ self.addEventListener('activate',event=>{
   )).then(()=>self.clients.claim())
  );
 });
-// Fast app shell: stored code/graphics render instantly on subsequent launches.
-// Do NOT cache API, config.js, secrets, staff records or employee data.
-// A validated background network response refreshes the shell for next launch.
+// An installed PWA must never keep serving stale HTML while online.
+// Only root and index.html are app-shell navigations; diagnostics and other
+// HTML pages must be fetched normally. API and config.js are never cached.
 self.addEventListener('fetch',event=>{
  const req=event.request;
  if(req.method!=='GET')return;
@@ -29,10 +29,29 @@ self.addEventListener('fetch',event=>{
  if(url.origin!==self.location.origin)return;
  if(/\/config\.js$/.test(url.pathname))return;
  const isPage=req.mode==='navigate';
+ const rootPath=FT_BASE.pathname;
+ const isAppPage=isPage&&(url.pathname===rootPath||
+  url.pathname===rootPath+'index.html');
+ if(isPage&&!isAppPage)return; // E.g. /firetime.pro/diagnose.html
  const shell=FT_SHELL_URLS.includes(url.href.split('?')[0]);
- if(!isPage&&!shell)return;
- const cacheKey=isPage?new URL('index.html',FT_BASE).href:req;
+ if(!isAppPage&&!shell)return;
+ const cacheKey=isAppPage?new URL('index.html',FT_BASE).href:req;
  event.respondWith((async()=>{
+  if(isAppPage){
+   // Network-first fixes the "browser works / installed app fails" mismatch.
+   // Previously stale HTML was returned first even when online.
+   try{
+    const response=await fetch(req,{cache:'no-store'});
+    if(response.ok&&response.type==='basic'){
+     const cache=await caches.open(FT_SHELL_CACHE);
+     event.waitUntil(cache.put(cacheKey,response.clone()));
+    }
+    return response;
+   }catch{
+    return (await caches.match(cacheKey,{ignoreSearch:true}))||Response.error();
+   }
+  }
+  // Static icons/manifest remain cache-first for fast repeat launches.
   const saved=await caches.match(cacheKey,{ignoreSearch:true});
   if(saved){
    event.waitUntil(fetch(req,{cache:'no-store'}).then(async response=>{
@@ -50,7 +69,7 @@ self.addEventListener('fetch',event=>{
     event.waitUntil(cache.put(cacheKey,response.clone()));
    }
    return response;
-  }catch{return (await caches.match(new URL('index.html',FT_BASE).href))||Response.error();}
+  }catch{return Response.error();}
  })());
 });
 
