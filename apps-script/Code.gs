@@ -223,13 +223,17 @@ function ft_publicRow_(r){const o=Object.assign({},r);delete o.__row;return o;}
 /** FireTime Pro 1.1 | Developed by Michael Mejtsky | 02_Anmeldung.gs */
 function ft_auth_(token){if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Bitte anmelden.');const h=ft_sha_(token),s=ft_get_('Sessions').find(x=>x.id===h);if(!s||new Date(s.expiresAt).getTime()<Date.now())throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');const u=ft_one_('Users',s.userId);if(!u||u.status!=='ACTIVE')throw Error('Zugang nicht aktiv.');return u;}
 
-function ft_login(email,password){
+function ft_login(email,password,remember){
  const em=ft_email_(email),cache=CacheService.getScriptCache(),key='login:'+ft_sha_(em),tries=Number(cache.get(key)||0);
  if(tries>=7)throw Error('Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.');
  const u=ft_get_('Users').find(x=>x.email===em&&x.status==='ACTIVE');
  if(!u||!u.salt||ft_password_(String(password||''),u.salt)!==u.passwordHash){cache.put(key,String(tries+1),900);throw Error('E-Mail-Adresse oder Passwort ungültig.');}
- cache.remove(key);const token=ft_rand_();ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt:new Date(Date.now()+12*3600000).toISOString()}));
- return {token,user:ft_safe_(u)};
+ // Installed personal devices may opt in to a 14-day authenticated session.
+ // No password is stored on the phone. Logout and password resets revoke it.
+ cache.remove(key);
+ const token=ft_rand_(),expiresAt=new Date(Date.now()+(remember===true?14*86400000:12*3600000)).toISOString();
+ ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt}));
+ return {token,expiresAt,user:ft_safe_(u)};
 }
 
 function ft_activate(invite,password){
@@ -3725,7 +3729,7 @@ function doPost(e) {
     let result;
     switch(String(req.type||'')) {
       case 'login':
-        result=ft_login(req.email,req.password);
+        result=ft_login(req.email,req.password,req.remember===true);
         break;
       case 'activate':
         result=ft_activate(req.invite,req.password);
