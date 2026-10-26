@@ -2975,16 +2975,19 @@ function ft_adminOverview_(actor,p){
 function ft_home_(u,p){
  const cid=u.role==='SYSADMIN'?String(p.companyId||''):u.companyId;
  const month=ft_month_(p.month||ft_localMonth_(new Date()));
- const companies=u.role==='SYSADMIN'?ft_get_('Companies').map(ft_companyData_):[];
+ const requested=String(p.view||'all');
+ // Compact responses omit unchanged presentation metadata only. Authentication,
+ // company scope, licensing, and requested live records are always checked.
+ const compact=p.compact===true&&['time','leave','work','standby','sick','availability'].includes(requested);
+ const companies=u.role==='SYSADMIN'&&!compact?ft_get_('Companies').map(ft_companyData_):[];
  const c=cid?ft_company_(u,cid):null;
  if(u.role!=='SYSADMIN'&&!c)throw Error('Firma nicht zugeordnet.');
  const mods=c?ft_license_(c):[],isAdmin=u.role!=='STAFF';
  const access=(m)=>mods.includes(m);
  // Keep old API clients compatible: without view, provide every section.
- const requested=String(p.view||'all');
  const need=(...names)=>requested==='all'||names.includes(requested);
- const directory=c?ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE').map(x=>({id:x.id,name:x.name})):[];
- const users=c?ft_get_('Users').filter(x=>x.companyId===c.id&&(isAdmin||x.id===u.id)).map(ft_safe_):[];
+ const directory=c&&!compact?ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE').map(x=>({id:x.id,name:x.name})):[];
+ const users=c&&!compact?ft_get_('Users').filter(x=>x.companyId===c.id&&(isAdmin||x.id===u.id)).map(ft_safe_):[];
  const within=x=>x.companyId===c.id&&(isAdmin||x.userId===u.id);
  const activities=c&&access('TIME')&&need('time')?ft_get_('Activities').filter(x=>within(x)&&(String(x.start||'').slice(0,7)===month||String(x.end||'').slice(0,7)===month)).map(ft_publicRow_):[];
  const availability=c&&access('AVAILABILITY')&&need('availability','standby')?ft_get_('Availability').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
@@ -3014,8 +3017,9 @@ function ft_home_(u,p){
   const reportUsers=reportsMode==='self'?users.filter(x=>x.id===u.id):reportsMode==='selected'?users.filter(x=>x.id===String(p.userId||users[0]?.id||u.id)):users;
   reportUsers.forEach(x=>reports[x.id]=ft_publicReport_(c,ft_report_(c,x,month,false,source)));
  }
- return {me:ft_safe_(u),month,company:c?ft_companyData_(c):null,
-  logo:c&&need('dashboard','settings')?ft_logoData_(c):'',companies,modules:mods,profile:c?ft_profileFor_(c):null,
+ return {me:ft_safe_(u),month,company:c?ft_companyData_(c):null,compact,
+  logo:c&&need('dashboard','settings')&&p.skipLogo!==true?ft_logoData_(c):'',
+  companies,modules:mods,profile:c&&!compact?ft_profileFor_(c):null,
   loginUrl:c?ft_clientUrl_(c):'',directory,users,activities,availability,
   availSubmissions,shifts,workShifts,leaves,months,reports,...extra,
   standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
