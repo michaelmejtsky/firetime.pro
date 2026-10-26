@@ -3446,13 +3446,28 @@ if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
 if(a==='adminOverviewRefresh'){
  ST.adminOverview=null;await ftAdminOverviewFetch_(true);return;
 }
+function ftCommUpdateLocalTask_(threadId,status,result={}){
+ if(!ST.comm)return;
+ const thread=ST.comm.threads?.find(t=>String(t.id)===String(threadId));
+ if(thread){thread.status=status;thread.updatedAt=result.updatedAt||new Date().toISOString();thread.unread=false;}
+ const summary=ST.comm.taskOverview?.find(t=>String(t.id)===String(threadId));
+ if(summary){summary.status=status;summary.updatedAt=thread?.updatedAt||summary.updatedAt;
+  if(status==='DONE')summary.evidence=true;}
+ if(result.evidenceReply){
+  ST.comm.replies=ST.comm.replies||[];
+  if(!ST.comm.replies.some(r=>r.id===result.evidenceReply.id))
+   ST.comm.replies.push(result.evidenceReply);
+ }
+ page();
+}
 if(a==='taskFilter'){ST.taskFilter=id;page();return;}
 if(a==='commAccept'||a==='commReopen'){
  if(a==='commReopen'&&!confirm('Aufgabe erneut öffnen?'))return;
  btn.disabled=true;
  try{
-  await api('commTaskStatus',{companyId:firm().id,threadId:id,status:a==='commAccept'?'ACCEPTED':'OPEN'});
-  await ftCommFetch_(true);
+  const status=a==='commAccept'?'ACCEPTED':'OPEN';
+  const result=await api('commTaskStatus',{companyId:firm().id,threadId:id,status});
+  ftCommUpdateLocalTask_(id,status,result);
   say(a==='commAccept'?'Aufgabe angenommen. Der Auftraggeber wurde informiert.':'Aufgabe wieder geöffnet.');
  }catch(err){say('Aufgabenstatus: '+String(err.message||err),true);}
  finally{if(btn.isConnected)btn.disabled=false;}
@@ -3463,9 +3478,21 @@ if(a==='commCloseCompose'){ST.commCompose=false;page();return;}
 if(a==='commRefresh'){ST.comm=null;await ftCommFetch_(true);return;}
 if(a==='commOpen'){
  ST.commOpen=id;
- try{await api('commRead',{companyId:firm().id,threadId:id});
-  await ftCommFetch_(true);}
- catch(e){say(String(e.message||e),true);page();}
+ // Open the already loaded conversation immediately, even on slow mobile data.
+ const thread=ST.comm?.threads?.find(t=>String(t.id)===String(id));
+ const wasUnread=Boolean(thread?.unread);
+ if(thread)thread.unread=false;
+ if(wasUnread)ftCommSetBadge_(Math.max(0,Number(ST.comm?.unread||0)-1));
+ if(ST.comm)ST.comm.unread=Math.max(0,Number(ST.comm.unread||0)-(wasUnread?1:0));
+ page();
+ // Persist read state independently, never gate the UI on the network.
+ const cid=firm()?.id,token=ST.token;
+ api('commRead',{companyId:cid,threadId:id}).catch(e=>{
+  if(ST.token===token&&firm()?.id===cid){
+   if(thread)thread.unread=wasUnread;
+   say('Lesebestätigung konnte nicht gespeichert werden: '+String(e.message||e),true);
+  }
+ });
  return;
 }
 if(a==='commPhoto'){
@@ -3829,7 +3856,16 @@ if(form.id==='ftCommCreateForm'){
   const result=await api('commCreate',{companyId:firm().id,kind:p.kind||'MESSAGE',recipientId:p.recipientId,
    title:p.title,body:p.body,dueDate:p.dueDate||'',photo});
   ST.commCompose=false;ST.commOpen=result.thread?.id||'';
-  await ftCommFetch_(true);
+  if(ST.comm&&result.thread){
+   ST.comm.threads=[{...result.thread,unread:false},...(ST.comm.threads||[])];
+   if(result.thread.kind==='TASK'){
+    ST.comm.taskOverview=ST.comm.taskOverview||[];
+    ST.comm.taskOverview.unshift({id:result.thread.id,recipientId:result.thread.recipientId,
+      status:'OPEN',title:result.thread.title,dueDate:result.thread.dueDate,
+      updatedAt:result.thread.updatedAt,evidence:false});
+   }
+   page();
+  }else await ftCommFetch_(true);
   say(result.mailSent?'Nachricht und E-Mail versendet.':'Nachricht gespeichert. E-Mail-Versand bitte prüfen.',!result.mailSent);
  }catch(err){say('Senden fehlgeschlagen: '+String(err.message||err),true);}
  finally{if(button?.isConnected)button.disabled=false;}return;
@@ -3841,7 +3877,7 @@ if(form.id==='ftCommCompleteForm'){
   if(!photo)throw Error('Bitte zuerst ein Abschlussfoto aufnehmen oder auswählen.');
   const result=await api('commTaskStatus',{companyId:firm().id,threadId:form.dataset.thread,status:'DONE',
    photo,note:String(p.note||'')});
-  await ftCommFetch_(true);
+  ftCommUpdateLocalTask_(form.dataset.thread,'DONE',result);
   say(result.mailSent?'Aufgabe abgeschlossen, Foto gespeichert und Auftraggeber benachrichtigt.':
    'Aufgabe und Foto gespeichert. E-Mail-Benachrichtigung bitte prüfen.',!result.mailSent);
  }catch(err){say('Aufgabe konnte nicht abgeschlossen werden: '+String(err.message||err),true);}
@@ -3853,7 +3889,13 @@ if(form.id==='ftCommReplyForm'){
  try{
   const photo=await ftCommPhotoData_(form.elements.namedItem('photo'));
   const result=await api('commReply',{companyId:firm().id,threadId:form.dataset.thread,body:p.body,photo});
-  await ftCommFetch_(true);
+  if(ST.comm&&result.reply){
+   ST.comm.replies=ST.comm.replies||[];
+   ST.comm.replies.push(result.reply);
+   const thread=ST.comm.threads?.find(x=>String(x.id)===String(result.reply.threadId));
+   if(thread){thread.updatedAt=result.reply.createdAt;thread.unread=false;}
+   page();
+  }else await ftCommFetch_(true);
   say(result.mailSent?'Antwort und E-Mail versendet.':'Antwort gespeichert. E-Mail-Versand bitte prüfen.',!result.mailSent);
  }catch(err){say('Antwort fehlgeschlagen: '+String(err.message||err),true);}
  finally{if(button?.isConnected)button.disabled=false;}return;
