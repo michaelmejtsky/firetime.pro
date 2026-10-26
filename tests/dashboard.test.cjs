@@ -99,7 +99,7 @@ test('admin sees company-wide next duties and company metrics, not personal hour
   const output = api.dashboard();
   assert.match(output, /Nächste Bereitschaften der Firma/);
   assert.match(output, /Mitarbeiter 2/);
-  assert.match(output, /Bereitschaften im Monat \\(geplant\\)/);
+  assert.match(output, /Bereitschaften im Monat [(]geplant[)]/);
   assert.match(output, /Personal & laufende Dienste/);
   assert.doesNotMatch(output, /Monatssoll/);
   assert.doesNotMatch(output, /Plus\/Minus/);
