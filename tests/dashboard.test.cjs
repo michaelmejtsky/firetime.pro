@@ -99,7 +99,8 @@ test('admin sees company-wide next duties and company metrics, not personal hour
   const output = api.dashboard();
   assert.match(output, /Nächste Bereitschaften der Firma/);
   assert.match(output, /Mitarbeiter 2/);
-  assert.match(output, /Bereitschaften im Monat/);
+  assert.match(output, /Bereitschaften geplant/);
+  assert.match(output, /Personal & laufende Dienste/);
   assert.doesNotMatch(output, /Monatssoll/);
   assert.doesNotMatch(output, /Plus\/Minus/);
 });
@@ -109,7 +110,7 @@ test('staff gets personal monthly hours, not admin statistics', () => {
   const output = api.dashboard();
   assert.match(output, /Monatssoll/);
   assert.match(output, /Bereitschaft netto/);
-  assert.doesNotMatch(output, /Bereitschaften im Monat/);
+  assert.doesNotMatch(output, /Bereitschaften geplant/);
 });
 
 test('empty state stays concise with full-plan navigation', () => {
