@@ -3803,6 +3803,8 @@ function ft_syncShiftParts_(c,s){
 }
 
 function doPost(e) {
+  const ftPerfStart=Date.now();
+  let ftPerfAction='request';
   // Bei jeder signierten Anfrage einen frischen, mandantenunabhaengigen Lesecache beginnen.
   FT_REQUEST_CACHE={db:null,sheets:Object.create(null),tables:Object.create(null),profiles:null,rules:null};
   try {
@@ -3847,6 +3849,8 @@ function doPost(e) {
       throw new Error('Anfrage ungültig.');
     }
     let result;
+    const perfName=String(req.type==='api'?req.action:req.type||'request');
+    if(/^[A-Za-z][A-Za-z0-9]{0,34}$/.test(perfName))ftPerfAction=perfName;
     switch(String(req.type||'')) {
       case 'login':
         result=ft_login(req.email,req.password,req.remember===true);
@@ -3883,6 +3887,10 @@ function doPost(e) {
     const status=/Sitzung|anmelden|Passwort|E-Mail-Adresse oder Passwort|Zugang/.test(msg)
       ? 401 : /Berechtigung|Kein Zugriff|freigeschaltet/.test(msg) ? 403 : 400;
     return ft_gatewayResponse_({ok:false,error:msg,status:status});
+  } finally {
+    // Logs operation and duration only: no password, token, person or company.
+    const elapsed=Date.now()-ftPerfStart;
+    if(elapsed>=1500)console.info('FireTime Tempo '+ftPerfAction+': '+elapsed+' ms');
   }
 }
 function ft_gatewayResponse_(value) {
