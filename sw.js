@@ -1,6 +1,6 @@
 // FireTime Pro V1.8.7: keine Sitzungsdaten oder API-Ergebnisse offline zwischenspeichern.
 // Die PWA darf sowohl unter / als auch unter /firetime.pro/ (GitHub Pages) laufen.
-const FT_SHELL_CACHE='firetime-shell-20261026-v1816';
+const FT_SHELL_CACHE='firetime-shell-20261026-v1817';
 const FT_BASE=new URL('./',self.registration.scope);
 const FT_PATHS=['','index.html','manifest.webmanifest','assets/firetime-192.png','assets/firetime-512.png'];
 const FT_SHELL_URLS=FT_PATHS.map(part=>new URL(part,FT_BASE).href);
