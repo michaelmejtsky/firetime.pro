@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.14-password-recovery-20261024';
+const FT_VERSION='1.8.15-tasks-login-speed-20261026';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2544,6 +2544,12 @@ function ft_commList_(actor,p){
   unread:!(read.some(z=>z.threadId===x.id&&z.userId===actor.id&&Date.parse(z.seenAt)>=Date.parse(x.updatedAt)))})),
   replies:replies.map(x=>({id:x.id,threadId:x.threadId,authorId:x.authorId,body:ft_commDecode_(x.bodyEncoded),
   createdAt:x.createdAt,hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''})),
+  // Only authored TASK records, never private colleague-to-colleague messages.
+  // Admin dashboard does not gain access to otherwise-private conversations.
+  taskOverview:actor.role==='STAFF'?[]:threads.filter(x=>x.kind==='TASK'&&x.createdBy===actor.id)
+   .map(x=>({id:x.id,recipientId:x.recipientId,status:x.status,dueDate:x.dueDate||'',
+     title:ft_commDecode_(x.titleEncoded),updatedAt:x.updatedAt,
+     evidence:replies.some(r=>r.threadId===x.id&&r.authorId===x.recipientId&&Boolean(r.attachmentId))})),
   recipients:ft_commRecipients_(actor,c),users,unread:ft_commUnread_(actor,c)};
 }
 function ft_commMail_(c,recipient,sender,thread,eventId,activity){
@@ -2619,16 +2625,43 @@ function ft_commTaskStatus_(actor,p){
  const thread=ft_commThread_(actor,p.threadId);
  if(thread.kind!=='TASK')throw Error('Das ist keine Aufgabe.');
  const next=String(p.status||'');
- if(!['OPEN','DONE'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
- if(actor.role==='STAFF'&&(next!=='DONE'||thread.recipientId!==actor.id))
-  throw Error('Du kannst nur deine eigenen Aufgaben als erledigt melden.');
- if(thread.status===next)return {ok:true};
- const before=thread.status;thread.status=next;thread.updatedAt=ft_commNextUpdateTime_(thread);
- ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);ft_commRead_(actor,thread);
- const c=ft_company_(actor,thread.companyId),other=ft_one_('Users',thread.createdBy===actor.id?thread.recipientId:thread.createdBy);
- if(other&&other.status==='ACTIVE')ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');
- ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,{status:before},{status:next});
- return {ok:true};
+ if(!['OPEN','ACCEPTED','DONE'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
+ const owner=String(thread.recipientId)===String(actor.id);
+ const creator=String(thread.createdBy)===String(actor.id);
+ // Employees can accept and complete ONLY their personal assigned tasks.
+ if(next==='ACCEPTED'&&(!owner||thread.status!=='OPEN'))
+  throw Error('Nur die zugewiesene Person kann eine offene Aufgabe annehmen.');
+ if(next==='DONE'&&(!owner||thread.status!=='ACCEPTED'))
+  throw Error('Bitte die eigene Aufgabe zuerst annehmen, bevor du sie abschließt.');
+ if(next==='OPEN'&&(!creator||actor.role==='STAFF'))
+  throw Error('Nur der Auftraggeber kann die Aufgabe wieder öffnen.');
+ if(thread.status===next)return {ok:true,status:next};
+ const c=ft_company_(actor,thread.companyId);
+ let evidenceId='',evidenceReply=null;
+ if(next==='DONE'){
+  if(!p.photo)throw Error('Zum Abschließen der Aufgabe ist ein Foto als Dokumentation erforderlich.');
+  // Store a real image, protected by the same company-scoped private Drive
+  // retrieval as existing photos. Never accept an arbitrary external image URL.
+  evidenceId=ft_commPhotoSave_(actor,c,p.photo);
+  evidenceReply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
+   bodyEncoded:ft_commEncode_(ft_str_(p.note||'Aufgabe durchgeführt – Fotodokumentation',1000)),
+   createdAt:ft_commNextUpdateTime_(thread),attachmentId:evidenceId};
+  ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,evidenceReply);
+ }
+ const before=thread.status;thread.status=next;
+ thread.updatedAt=evidenceReply?.createdAt||ft_commNextUpdateTime_(thread);
+ ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);
+ ft_commRead_(actor,thread);
+ const other=ft_one_('Users',creator?thread.recipientId:thread.createdBy);
+ // A push/email failure never rolls back a successfully saved task status.
+ let mailSent=false;
+ if(other&&other.status==='ACTIVE'){
+  try{mailSent=ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');}
+  catch(err){console.warn('Aufgabenstatus wurde gespeichert, Benachrichtigung fehlgeschlagen.');}
+ }
+ ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,
+  {status:before},{status:next,attachment:Boolean(evidenceId)});
+ return {ok:true,status:next,mailSent,hasEvidence:Boolean(evidenceId)};
 }
 
 // -----------------------------------------------------------------
