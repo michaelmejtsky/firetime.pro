@@ -62,7 +62,7 @@ test('admin task summary lists only own authored company tasks, never DMs',()=>{
  assert.match(frontend,/data-act="taskFilter"/);
 });
 test('cached shell starts fast, API and configuration remain network-only',()=>{
- assert.match(sw,/const FT_SHELL_CACHE='firetime-shell-20261026-v1815'/);
+ assert.match(sw,/const FT_SHELL_CACHE='firetime-shell-20261026-v1816'/);
  assert.match(sw,/if\(req\.method!=='GET'\)return/);
  assert.match(sw,/if\(url\.origin!==self\.location\.origin\)return/);
  assert.match(sw,/if\(\/\\\/config\\\.js\$\/.test\(url\.pathname\)\)return/);
