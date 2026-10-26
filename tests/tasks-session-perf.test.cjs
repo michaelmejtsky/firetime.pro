@@ -62,7 +62,7 @@ test('admin task summary lists only own authored company tasks, never DMs',()=>{
  assert.match(frontend,/data-act="commAccept"/);
  assert.match(frontend,/data-act="taskFilter"/);
 });
-test('cached shell starts fast, API and configuration remain network-only',()=>{
+test('fresh app shell is network-first and configuration remains network-only',()=>{
  const version=frontend.match(/const FT_VISIBLE_VERSION='(\d+\.\d+\.\d+)'/);
  assert.ok(version,'the UI publishes a semantic version');
  const cache=sw.match(/const FT_SHELL_CACHE='firetime-shell-\d+-v(\d+)'/);
@@ -73,7 +73,11 @@ test('cached shell starts fast, API and configuration remain network-only',()=>{
  assert.match(sw,/if\(\/\\\/config\\\.js\$\/.test\(url\.pathname\)\)return/);
  assert.match(sw,/const saved=await caches\.match/);
  assert.match(sw,/if\(saved\)\{/);
+ assert.match(sw,/if\(isPage&&!isAppPage\)return/);
+ assert.match(sw,/if\(isAppPage\)\{/);
+ assert.match(sw,/const response=await fetch\(req,\{cache:'no-store'\}\)/);
  assert.match(sw,/event\.waitUntil\(fetch\(req,\{cache:'no-store'\}\)/);
+ assert.match(frontend,/updateViaCache:'none'/);
  assert.match(frontend,/api\('commPulse'/);
  assert.match(frontend,/ftCommPoll_\(\),60000/);
  assert.doesNotThrow(()=>new vm.Script(frontend.slice(frontend.indexOf('<script>')+8,frontend.lastIndexOf('</script>'))));
