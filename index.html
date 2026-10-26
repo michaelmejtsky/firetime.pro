@@ -710,6 +710,25 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-task-complete{border:1px solid rgba(125,145,165,.35);border-radius:12px;padding:14px;margin:14px 0}
 @media(max-width:600px){.ft-task-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
  .ft-task-item{grid-template-columns:minmax(0,1fr) auto}.ft-task-item .btn{grid-column:1/-1}}
+
+/* Admin's at-a-glance roster. Mobile cards keep labels beside actual totals. */
+.ft-admin-overview{margin-top:14px}
+.ft-admin-staff-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:14px 0}
+.ft-admin-staff-list{display:grid;gap:10px}
+.ft-admin-staff-row{display:grid;grid-template-columns:minmax(180px,1.5fr) repeat(4,minmax(95px,1fr));
+ gap:12px;padding:13px;border-radius:12px;background:rgba(15,35,56,.7);border:1px solid rgba(140,160,180,.20)}
+.ft-admin-staff-row>div{min-width:0}.ft-admin-staff-row strong{display:block;font-size:15px;overflow-wrap:anywhere}
+.ft-admin-name{display:flex;flex-direction:column;gap:4px}
+.ft-admin-caption{display:block;font-size:11px;color:#a8c2d5;margin-bottom:5px}
+.ft-admin-negative{color:#ff9f9f}.ft-admin-positive{color:#a6e2b3}
+.ft-admin-duty-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}
+.ft-admin-duties{border:1px solid rgba(140,160,180,.23);padding:12px;border-radius:12px}
+.ft-admin-duty{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;
+ border-bottom:1px solid rgba(140,160,180,.20)}
+.ft-admin-duty:last-child{border-bottom:0}.ft-admin-duty>div{display:flex;flex-direction:column;gap:2px}
+@media(max-width:900px){.ft-admin-staff-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ft-admin-staff-row .ft-admin-name{grid-column:1/-1}.ft-admin-duty-grid{grid-template-columns:1fr}}
+@media(max-width:390px){.ft-admin-staff-row{gap:10px;padding:11px}.ft-admin-staff-row strong{font-size:13px}}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -1705,6 +1724,7 @@ function page(){
  if(ST.tab==='reports')ftResumePdfJob();
  if(ST.tab==='leave'&&has('LEAVE'))Promise.resolve().then(()=>ftAbsenceFetch_(false));
  if(ST.tab==='staff'&&isAdmin())ftStaffVacationSync_();
+ if(ST.tab==='dashboard'&&isAdmin()&&firm())Promise.resolve().then(()=>ftAdminOverviewFetch_());
  if(ST.tab==='messages'&&ST.h?.commSupported&&!ST.comm&&!ST.commLoading)ftCommFetch_();
  if(ST.tab==='profile'&&ST.h?.backgroundPushSupported&&!ST.pushSettings)ftPushRefresh_();
 }
@@ -1764,6 +1784,68 @@ function ftHomeQuickLinks_(){
   links.map(([tab,label,icon])=>'<button class="ft-home-quick-link" data-tab="'+tab+'">'+E(label)+' →</button>').join('')+
   '</section>':'';
 }
+
+/* Dashboard totals arrive separately, never delaying the fast app shell. */
+let FT_ADMIN_OVERVIEW_BUSY=false,FT_ADMIN_OVERVIEW_STAMP=0;
+function ftAdminOverviewKey_(){
+ return [ST.token,me()?.id||'',firm()?.id||'',ST.month].join('|');
+}
+async function ftAdminOverviewFetch_(force=false){
+ if(!ST.token||!firm()?.id||!isAdmin()||ST.tab!=='dashboard'||FT_ADMIN_OVERVIEW_BUSY)return;
+ const key=ftAdminOverviewKey_();
+ if(!force&&ST.adminOverview?.key===key&&Date.now()-FT_ADMIN_OVERVIEW_STAMP<60000)return;
+ FT_ADMIN_OVERVIEW_BUSY=true;
+ try{
+  const data=await api('adminOverview',{companyId:firm().id,month:ST.month});
+  if(ST.tab!=='dashboard'||ftAdminOverviewKey_()!==key)return;
+  ST.adminOverview={key,data};FT_ADMIN_OVERVIEW_STAMP=Date.now();
+  const node=document.getElementById('ft-admin-overview');
+  if(node)node.innerHTML=ftAdminOverviewContents_(data);
+ }catch(err){
+  const el=document.getElementById('ft-admin-overview');
+  if(el)el.innerHTML='<p class="muted small">Stundenübersicht konnte nicht geladen werden. '+
+   E(String(err.message||err))+'</p><button class="btn" data-act="adminOverviewRefresh">Erneut laden</button>';
+ }finally{FT_ADMIN_OVERVIEW_BUSY=false;}
+}
+function ftAdminOverviewContents_(data){
+ if(!data)return '<p class="muted">Mitarbeiterzahlen werden geladen …</p>';
+ const hours=v=>v===null||v===undefined?'–':ftReportHours_(v)+' h';
+ const days=v=>v===null||v===undefined?'–':ftReportHours_(v)+' T';
+ const employees=data.employees||[];
+ const staffRows=employees.map(person=>{
+  const signed=person.runningBalance;
+  const cls=Number.isFinite(signed)?signed<0?'ft-admin-negative':signed>0?'ft-admin-positive':'':'';
+  return '<div class="ft-admin-staff-row"><div class="ft-admin-name"><strong>'+E(person.name)+'</strong>'+
+   '<span class="muted small">'+E(person.standbyDuties)+' Bereitschaften · '+E(person.workDuties)+' Arbeitsdienste geplant</span></div>'+
+   '<div><span class="ft-admin-caption">Gearbeitet / Soll</span><strong>'+E(hours(person.worked))+
+   ' / '+E(hours(person.target))+'</strong></div>'+
+   '<div><span class="ft-admin-caption">Plus/Minus kumuliert</span><strong class="'+cls+'">'+E(hours(signed))+'</strong></div>'+
+   '<div><span class="ft-admin-caption">Bereitschaft netto</span><strong>'+E(hours(person.standby))+'</strong></div>'+
+   '<div><span class="ft-admin-caption">Resturlaub</span><strong>'+E(days(person.leaveBalance))+'</strong></div></div>';
+ }).join('');
+ const section=(heading,records,empty)=>'<div class="ft-admin-duties"><h3>'+E(heading)+'</h3>'+
+  (records.length?records.map(x=>'<div class="ft-admin-duty"><div><strong>'+E(x.employeeName)+'</strong>'+
+   '<span class="muted small">'+(x.kind==='WORK'?'Arbeitsdienst':'Bereitschaft')+'</span></div>'+
+   '<span>'+E(ftHomeShiftRange_(x))+'</span></div>').join(''):'<p class="muted small">'+E(empty)+'</p>')+'</div>';
+ return '<div class="ft-admin-staff-heading"><h3>Mitarbeiter · '+E(ftPdfMonthLabel(data.month))+
+  '</h3><span class="muted small">'+employees.length+' Mitarbeiter</span></div>'+
+  '<div class="ft-admin-staff-list">'+(staffRows||'<p class="muted">Noch keine aktiven Mitarbeiter.</p>')+'</div>'+
+  '<div class="ft-admin-duty-grid">'+
+  section('🟢 Läuft gerade',data.ongoing||[],'Zurzeit läuft kein veröffentlichter Dienst.')+
+  section('📅 Morgen',data.tomorrowDuties||[],'Für morgen ist kein Dienst eingeteilt.')+'</div>'+
+  '<p class="muted small">Bereitschaft netto = bereits bestätigte, anrechenbare Stunden im ausgewählten Monat. '+
+  'Die laufende und morgige Einteilung ist eine Planung, keine bestätigte Istzeit. '+
+  'Kumuliertes Plus/Minus gemäß Monatsbericht.</p>';
+}
+function ftAdminOverview_(){
+ const key=ftAdminOverviewKey_();
+ const data=ST.adminOverview?.key===key?ST.adminOverview.data:null;
+ return '<section class="card ft-admin-overview" aria-label="Mitarbeiter- und Dienstübersicht">'+
+  '<div class="row between"><div><h2>Personal & laufende Dienste</h2>'+
+  '<p class="muted small">Arbeitszeiten, Urlaub, Bereitschaften und morgige Einteilungen auf einen Blick.</p></div>'+
+  '<button class="btn" type="button" data-act="adminOverviewRefresh">Aktualisieren</button></div>'+
+  '<div id="ft-admin-overview">'+ftAdminOverviewContents_(data)+'</div></section>';
+}
 function dashboard(){
  if(me().role==='SYSADMIN'&&!firm())
   return hint('Das ist deine FireTime-Pro-Zentrale. Eine Kundenfirma öffnet sich erst, wenn du sie ausdrücklich auswählst.')+
@@ -1776,18 +1858,19 @@ function dashboard(){
   '<div class="grid">'+Array.from({length:4},()=>'<div class="card ft-loading-card"><div class="ft-loading-line"></div><div class="ft-loading-line ft-loading-line-short"></div></div>').join('')+'</div>';
  const adminAccount=me().role!=='STAFF',r=ST.h?.reports?.[me().id]||{};
  const metrics=adminAccount?
-  [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF').length)],
-   ['Bereitschaften im Monat',String(ftHomePublishedCount_(ST.h.shifts))],
-   ['Arbeitsdienste im Monat',String(ftHomePublishedCount_(ST.h.workShifts))]]:
+  [['Mitarbeiter',String((ST.h.users||[]).filter(u=>u.role==='STAFF'&&u.status==='ACTIVE').length)],
+   ['Bereitschaften geplant',String(ftHomePublishedCount_(ST.h.shifts))],
+   ['Arbeitsdienste geplant',String(ftHomePublishedCount_(ST.h.workShifts))]]:
   [['Monatssoll',N(Math.round(Number(r.target||0)*100)/100)+' h'],['Aktive Arbeitszeit',N(Math.round(Number(r.worked||0)*100)/100)+' h'],
    ['Plus/Minus',N(Math.round(Number(r.saldo||0)*100)/100)+' h'],['Bereitschaft netto',N(Math.round(Number(r.standby||0)*100)/100)+' h']];
  const intro=adminAccount?'Firmenübersicht für '+ftPdfMonthLabel(ST.month)+'. Nur Mitarbeiter haben ein persönliches Stundenkonto.':
   'Meine Übersicht für '+ftPdfMonthLabel(ST.month)+'. Geplante Dienste sind keine geleisteten Stunden.';
  let html='<div class="ft-home-intro">'+E(intro)+'</div>'+
  '<div class="grid ft-home-metrics">'+metrics.map(([k,v])=>'<div class="card"><span class="muted small">'+E(k)+'</span><div class="metric">'+E(v)+'</div></div>').join('')+'</div>';
+ if(adminAccount)html+=ftAdminOverview_();
  if(has('STANDBY'))html+=ftHomeSchedule_('STANDBY');
  if(has('WORKPLAN'))html+=ftHomeSchedule_('WORK');
- if(has('LEAVE')){
+ if(has('LEAVE')&&!adminAccount){
   const leave=adminAccount?
    '<div class="ft-vacation-kicker">Urlaubsverwaltung · '+E(firm()?.name||'')+'</div>'+
    '<div class="ft-vacation-total">'+E((ST.h.users||[]).filter(u=>u.role==='STAFF').length)+' <span>Mitarbeiterkonten</span></div>'+
@@ -3359,6 +3442,9 @@ if(a==='pushEnable'||a==='pushDisable'||a==='pushTest'){
  }catch(err){say('Push: '+String(err.message||err),true);}
  finally{if(btn.isConnected){btn.disabled=false;btn.textContent=label;}}
  return;
+}
+if(a==='adminOverviewRefresh'){
+ ST.adminOverview=null;await ftAdminOverviewFetch_(true);return;
 }
 if(a==='taskFilter'){ST.taskFilter=id;page();return;}
 if(a==='commAccept'||a==='commReopen'){
