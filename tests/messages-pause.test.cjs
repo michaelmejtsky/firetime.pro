@@ -246,12 +246,15 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.match(frontend,/URL\.createObjectURL/);
  assert.match(frontend,/ft-photo-viewer/);
  assert.match(frontend,/Anhang konnte nicht geöffnet werden/);
- assert.match(frontend,/const FT_VISIBLE_VERSION='1\.8\.16'/);
+ const version=frontend.match(/const FT_VISIBLE_VERSION='(\d+\.\d+\.\d+)'/);
+ assert.ok(version,'current UI version must be provided');
  assert.match(frontend,/ft-help-header/);
  assert.match(frontend,/Stand der geladenen App-Oberfläche/);
  const sw=fs.readFileSync(path.join(root,'sw.js'),'utf8');
  assert.doesNotThrow(()=>new vm.Script(sw));
  assert.match(sw,/self\.registration\.scope/);
  assert.match(sw,/cache:'no-store'/);
- assert.match(sw,/firetime-shell-20261026-v1816/);
+ const cache=sw.match(/const FT_SHELL_CACHE='firetime-shell-\d+-v(\d+)'/);
+ assert.ok(cache,'versioned PWA cache must be present');
+ assert.equal(cache[1],version[1].replace(/\./g,''),'PWA cache matches UI version');
 });
