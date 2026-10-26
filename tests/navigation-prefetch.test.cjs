@@ -12,7 +12,8 @@ function env(){
  const ST={token:'session-one',cid:'a',h:{me:{id:'u1',role:'STAFF'},company:{id:'a'}},
   tab:'dashboard',month:'2026-10',selected:'',edit:'',commCompose:false};
  const ctx={ST,Map,Set,Date,Number,String,Promise,console,
-  FT_VIEWS_LOADED:new Set(),firm:()=>ST.h.company,me:()=>ST.h.me,isAdmin:()=>false,
+  FT_VIEWS_LOADED:new Set(),FT_META_LAST_FETCH:Date.now(),
+  firm:()=>ST.h.company,me:()=>ST.h.me,isAdmin:()=>false,
   document:{getElementById:()=>null},
   api:async(action,p)=>{
    requests.push({action,...p});return {me:{id:'u1'},company:{id:p.companyId},view:p.view};
