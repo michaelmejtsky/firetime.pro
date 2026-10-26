@@ -2549,7 +2549,7 @@ function ft_commPhoto_(actor,p){
  const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':pdf?'application/pdf':'';
  if(!mime)throw Error('Der Anhang hat kein unterstütztes Bild- oder PDF-Format.');
  return {mime,data:Utilities.base64Encode(bytes),size,
-  name:String(file.getName()||'Anhang').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90)};
+  name:String((typeof file.getName==='function'?file.getName():'Anhang')||'Anhang').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90)};
 }
 
 function ft_commList_(actor,p){
