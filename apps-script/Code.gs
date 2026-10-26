@@ -2703,6 +2703,7 @@ function ft_api(token,action,p){
  ft_requireAction_(u,action,p);
  switch(action){
   case 'home':return ft_home_(u,p);
+  case 'adminOverview':return ft_adminOverview_(u,p);
   case 'onboard':return ft_lock_(()=>ft_customerOnboard_(u,p));
   case 'companyCreate':return ft_lock_(()=>ft_companyCreate_(u,p));
   case 'companyUpdate':return ft_lock_(()=>{
@@ -2882,6 +2883,75 @@ function ft_api(token,action,p){
   case 'calendarResync':return ft_lock_(()=>ft_calendarResync_(u,p));
   default:throw Error('Unbekannte Funktion: '+action);
  }
+}
+/**
+ * Compact company dashboard only for the company's authorized administrators.
+ * Runs separately from the fast shell request, so totals never hold up navigation.
+ * Reuse a single dataset and the existing payroll/report calculations, rather
+ * than reading each employee's Sheets separately or guessing the hour balance.
+ */
+function ft_adminOverview_(actor,p){
+ ft_allowed_(actor,['ADMIN','SYSADMIN']);
+ const cid=actor.role==='SYSADMIN'?String(p.companyId||''):String(actor.companyId);
+ if(!cid)throw Error('Bitte zuerst eine Kundenfirma auswählen.');
+ const company=ft_company_(actor,cid),month=ft_month_(p.month||ft_localMonth_(new Date()));
+ const modules=ft_license_(company);
+ const allowed=m=>modules.includes(m),now=new Date(),nowMs=now.getTime();
+ const tomorrow=new Date(nowMs+24*3600000),
+  todayKey=Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd'),
+  tomorrowKey=Utilities.formatDate(tomorrow,FT_TZ,'yyyy-MM-dd');
+ const users=ft_get_('Users').filter(x=>x.companyId===cid&&x.role==='STAFF'&&x.status==='ACTIVE');
+ const source={
+  Activities:allowed('REPORTS')?ft_get_('Activities'):[],
+  Shifts:allowed('STANDBY')||allowed('REPORTS')?ft_get_('Shifts'):[],
+  ShiftSegments:allowed('STANDBY')||allowed('REPORTS')?ft_get_('ShiftSegments'):[],
+  SickLeaves:allowed('REPORTS')?ft_get_('SickLeaves'):[],
+  Leaves:allowed('REPORTS')?ft_get_('Leaves'):[],
+  Months:allowed('REPORTS')?ft_get_('Months'):[]
+ };
+ const candidate=(allowed('STANDBY')?ft_accountableShifts_(source):[])
+  .filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&Number.isFinite(Date.parse(x.start))&&Number.isFinite(Date.parse(x.end)));
+ const work=allowed('WORKPLAN')?ft_workRows_().filter(x=>x.companyId===cid&&x.status==='PUBLISHED'):[];
+ const rowFor=x=>({
+  id:x.id||x.shiftId||'',userId:x.userId,kind:x.kind||'STANDBY',
+  start:x.start,end:x.end,
+  employeeName:users.find(y=>y.id===x.userId)?.name||'Mitarbeiter'
+ });
+ const ongoing=candidate.filter(x=>Date.parse(x.start)<=nowMs&&Date.parse(x.end)>nowMs)
+  .map(rowFor);
+ const nextDay=candidate.filter(x=>Utilities.formatDate(new Date(x.start),FT_TZ,'yyyy-MM-dd')===tomorrowKey)
+  .map(rowFor);
+ // Show active WORKPLAN duties too; never call their hours "standby".
+ for(const x of work){
+  const start=Date.parse(x.start),end=Date.parse(x.end);
+  if(!Number.isFinite(start)||!Number.isFinite(end))continue;
+  if(start<=nowMs&&end>nowMs)ongoing.push({...rowFor(x),kind:'WORK'});
+  if(Utilities.formatDate(new Date(start),FT_TZ,'yyyy-MM-dd')===tomorrowKey)
+   nextDay.push({...rowFor(x),kind:'WORK'});
+ }
+ const monthStart=month+'-';
+ const staff=users.map(user=>{
+  let rep=null;
+  if(allowed('REPORTS'))rep=ft_report_(company,user,month,false,source);
+  const countShifts=candidate.filter(x=>x.userId===user.id&&
+   Utilities.formatDate(new Date(x.start),FT_TZ,'yyyy-MM').startsWith(month)).length;
+  const countWork=work.filter(x=>x.userId===user.id&&String(x.start).slice(0,7)===month).length;
+  return {
+   id:user.id,name:user.name,
+   worked:rep?Number(rep.worked)||0:null,
+   target:rep?Number(rep.target)||0:null,
+   saldo:rep?Number(rep.saldo)||0:null,
+   runningBalance:rep?Number(rep.runningBalance)||0:null,
+   standby:rep?Number(rep.standby)||0:null,
+   leaveBalance:allowed('LEAVE')?Number(user.leaveBalance)||0:null,
+   standbyDuties:countShifts,workDuties:countWork
+  };
+ });
+ ongoing.sort((a,b)=>Date.parse(a.end)-Date.parse(b.end));
+ nextDay.sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+ return {month,today:todayKey,tomorrow:tomorrowKey,employees:staff,
+  ongoing:ongoing.slice(0,25),tomorrowDuties:nextDay.slice(0,25),
+  updatedAt:ft_now_()};
 }
 function ft_home_(u,p){
  const cid=u.role==='SYSADMIN'?String(p.companyId||''):u.companyId;
