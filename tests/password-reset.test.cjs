@@ -11,6 +11,7 @@ assert.ok(start>0&&end>start,'Password recovery implementation is present');
 const source=backend.slice(start,end);
 function env(){
  const token='a'.repeat(64),mail=[],audit=[],cache=new Map();
+ cache.set('ftsess:oldsession','previously-cached-session');
  const users=[
   {id:'u1',role:'STAFF',companyId:'c1',name:'Beispiel Mitarbeiter',email:'staff@example.test',
    status:'ACTIVE',passwordHash:'old',salt:'oldsalt',mustChange:false},
@@ -25,8 +26,11 @@ function env(){
  const actor={id:'u2',role:'ADMIN',companyId:'c1'};
  const ctx={
   Date,Math,Number,String,Error,JSON,console,
-  CacheService:{getScriptCache:()=>({get:key=>cache.get(key)||null,put:(key,v)=>cache.set(key,v)})},
+  CacheService:{getScriptCache:()=>({
+   get:key=>cache.get(key)||null,put:(key,v)=>cache.set(key,v),remove:key=>cache.delete(key)
+  })},
   ft_sha_:value=>'sha:'+value,ft_rand_:()=>token,
+  ft_sessionCacheKey_:hash=>'ftsess:'+hash,
   ft_email_:value=>String(value).toLowerCase(),
   ft_now_:()=>new Date('2026-10-24T08:00:00Z').toISOString(),
   ft_sendMail_:o=>mail.push(o),
@@ -70,6 +74,7 @@ test('one-time token changes password, invalidates session, and cannot be reused
  assert.match(response,/Passwort erfolgreich/);
  assert.notEqual(a.users[0].passwordHash,old);
  assert.equal(a.tables.Sessions.length,0);
+ assert.equal(a.cache.has('ftsess:oldsession'),false,'old session cache is revoked');
  assert.ok(a.tables.Invites[0].usedAt);
  assert.throws(()=>a.methods.ft_passwordResetConfirm_(a.token,'another-password-123'),/bereits verwendet|abgelaufen/);
  assert.ok(a.audit.some(x=>x[1]==='PASSWORD_RESET_COMPLETED'));
