@@ -32,7 +32,10 @@ function testEnv(){
 }
 test('private multi-page PDF is uploaded and all original pages survive retrieval',()=>{
  const e=testEnv();
- const bytes=Buffer.from('%PDF-1.7\n1 0 obj\n/Type /Page\nendobj\n2 0 obj\n/Type /Page\nendobj\n%%EOF\n');
+ const bytes=Buffer.concat([
+  Buffer.from('%PDF-1.7\n1 0 obj\n/Type /Page\nendobj\n2 0 obj\n/Type /Page\nendobj\n%%EOF\n'),
+  Buffer.alloc(2_200_000,32) // Regression: an originally valid PDF over the old 2 MB limit.
+ ]);
  const id=e.api.ft_commPhotoSave_(e.actor,{id:'firm1'},
   {mime:'application/pdf',name:'Protokoll zweiseitig.pdf',data:bytes.toString('base64')});
  assert.equal(e.saved[0].mime,'application/pdf');
@@ -48,7 +51,7 @@ test('fake PDF and over-limit payload are rejected server-side',()=>{
  assert.throws(()=>e.api.ft_commPhotoSave_(e.actor,{id:'firm1'},
   {mime:'application/pdf',data:Buffer.from('this is not a PDF').toString('base64')}),/Dateityp|Format/);
  assert.throws(()=>e.api.ft_commPhotoSave_(e.actor,{id:'firm1'},
-  {mime:'application/pdf',data:'A'.repeat(3000000)}),/groß/);
+  {mime:'application/pdf',data:'A'.repeat(Math.ceil(10*1024*1024*4/3)+16)}),/groß/);
 });
 test('only the authorized participants can fetch private photos or PDFs',()=>{
  const e=testEnv();
