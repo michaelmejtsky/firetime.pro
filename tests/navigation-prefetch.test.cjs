@@ -18,7 +18,7 @@ function env(){
    requests.push({action,...p});return {me:{id:'u1'},company:{id:p.companyId},view:p.view};
   }
  };
- const fns=vm.runInNewContext(part('const FT_WARM_CACHE=new Map();','function ftViennaParts(')
+ const fns=vm.runInNewContext(part('const FT_WARM_CACHE=new Map();','const E=v=>')
   +';({ftWarmSchedule_,ftWarmTake_,ftWarmPayload_,ftWarmKey_,FT_WARM_CACHE})',ctx);
  return {fns,requests,ST};
 }
