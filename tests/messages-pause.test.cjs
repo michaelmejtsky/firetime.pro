@@ -239,7 +239,7 @@ test('existing Drive photos open by file signature even if content type is gener
  }
  assert.throws(()=>fn(actor,{threadId:'thread-1',attachmentId:'other'}),/gehört nicht/);
  bytes=[60,115,99,114,105,112,116,62];
- assert.throws(()=>fn(actor,{threadId:'thread-1',attachmentId:'photo-1'}),/unterstütztes Bildformat/);
+ assert.throws(()=>fn(actor,{threadId:'thread-1',attachmentId:'photo-1'}),/unterstütztes Bild- oder PDF-Format/);
 });
 test('image viewer and contextual UI are current, and PWA cache works in subpaths',()=>{
  assert.match(frontend,/function ftCommPhotoPreview_\(/);
