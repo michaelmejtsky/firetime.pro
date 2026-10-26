@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-24-password-recovery-v1814"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-task-board-session-perf-v1815"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -786,7 +786,29 @@ function ftUpdateLoginBrand(){
  holder.innerHTML=ftLoginBrandHtml();
 }
 
-const ST={token:sessionStorage.getItem('ft_token')||'',cid:'',h:null,tab:['messages','availability','standby','leave','time','reports','sick','work'].includes(new URLSearchParams(location.search).get('tab'))?new URLSearchParams(location.search).get('tab'):'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE),reset:/^[a-f0-9]{64}$/.test(FT_RESET_TOKEN),forgot:false};
+// Optional remembered device session, never persist the password.
+const FT_SESSION_STORAGE_KEY='ft_remembered_session_v1';
+function ftStoredSession_(){
+ try{
+  const value=JSON.parse(localStorage.getItem(FT_SESSION_STORAGE_KEY)||'null');
+  if(value&&/^[a-f0-9]{64}$/.test(value.token||'')&&Date.parse(value.expiresAt)>Date.now())
+   return value.token;
+  localStorage.removeItem(FT_SESSION_STORAGE_KEY);
+ }catch(_){}
+ return '';
+}
+function ftForgetSession_(){
+ try{localStorage.removeItem(FT_SESSION_STORAGE_KEY);}catch(_){}
+ try{sessionStorage.removeItem('ft_token');}catch(_){}
+}
+function ftSaveSession_(result,remember){
+ sessionStorage.setItem('ft_token',result.token);
+ if(remember&&result.expiresAt){
+  try{localStorage.setItem(FT_SESSION_STORAGE_KEY,
+   JSON.stringify({token:result.token,expiresAt:result.expiresAt}));}catch(_){}
+ }else try{localStorage.removeItem(FT_SESSION_STORAGE_KEY);}catch(_){}
+}
+const ST={token:sessionStorage.getItem('ft_token')||ftStoredSession_(),cid:'',h:null,tab:['messages','availability','standby','leave','time','reports','sick','work'].includes(new URLSearchParams(location.search).get('tab'))?new URLSearchParams(location.search).get('tab'):'dashboard',month:monthOf(new Date()),rules:null,brand:ftCachedBrand(SLUG),logoNew:'',avail:{},availMonth:'',edit:'',selected:'',leaveYear:String(new Date().getFullYear()),leaveUserFilter:'',absenceFromYear:new Date().getFullYear(),absenceToYear:new Date().getFullYear(),absenceUserId:'',invite:/^[a-f0-9]{64}$/.test(INVITE),reset:/^[a-f0-9]{64}$/.test(FT_RESET_TOKEN),forgot:false};
 const FT_SAVED_EMAIL_KEY='ft_saved_email_v1';
 let FT_LOGIN_BUSY=false;
 // Monatsauswahl ist pro Ansicht getrennt. Planung fuer November darf
@@ -878,7 +900,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.14';
+const FT_VISIBLE_VERSION='1.8.15';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -952,7 +974,7 @@ async function rpc(name,...args){
   }
   let request;
   switch(name){
-    case 'ft_login': request={type:'login',email:args[0],password:args[1]};break;
+    case 'ft_login': request={type:'login',email:args[0],password:args[1],remember:args[2]===true};break;
     case 'ft_activate': request={type:'activate',invite:args[0],password:args[1]};break;
     case 'ft_resetRequest':request={type:'resetRequest',email:args[0]};break;
     case 'ft_resetConfirm':request={type:'resetConfirm',resetToken:args[0],password:args[1]};break;
@@ -1034,7 +1056,7 @@ function auth(){
   ?`<h2>Zugang aktivieren</h2><form id="activateForm">${input('Neues Passwort (mindestens 12 Zeichen)','password','','password','required minlength="12"')}<button class="btn primary" style="width:100%">Aktivieren</button></form><button type="button" class="btn" data-act="normalLogin">Zur Anmeldung</button>`
   :forgot
   ?`<h2>Passwort vergessen?</h2><p class="muted small">Trage deine hinterlegte E-Mail-Adresse ein. Falls ein aktives Konto besteht, bekommst du einen einmaligen Link. Der Link ist 30 Minuten gültig.</p><form id="forgotPasswordForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}<button class="btn primary" style="width:100%">Zurücksetzen-Link anfordern</button></form><button type="button" class="btn" data-act="normalLogin">Zur Anmeldung</button>`
-  :`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<button class="btn primary" style="width:100%">Anmelden</button></form><button type="button" class="btn" data-act="forgotPassword">Passwort vergessen?</button>`;
+  :`<h2>Anmelden</h2><form id="loginForm">${input('E-Mail-Adresse','email',localStorage.getItem(FT_SAVED_EMAIL_KEY)||'','email','required autocomplete="username" inputmode="email"')}${input('Passwort','password','','password','required autocomplete="current-password"')}<label class="field" style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><input type="checkbox" name="remember" checked style="width:auto"> Auf diesem Gerät 14 Tage angemeldet bleiben</label><button class="btn primary" style="width:100%">Anmelden</button></form><button type="button" class="btn" data-act="forgotPassword">Passwort vergessen?</button>`;
  app.innerHTML=`<div class="login-wrap"><div class="login"><div class="brand" style="text-align:center"><em>♨</em> FireTime Pro</div><div id="ft-login-brand" aria-live="polite">${ftLoginBrandHtml()}</div><p class="muted" style="text-align:center">Personal · Arbeitszeit · Dienstplanung</p>${content}<p class="muted small" style="text-align:center">Developed by Michael Mejtsky · V${FT_VISIBLE_VERSION}</p></div></div>`;
 }
 // Schneller, authentifizierter App-Start ohne teure Monatsabrechnung.
@@ -1162,7 +1184,7 @@ async function load(options={}){
     if(loadSeq!==FT_LOAD_SEQ)return;
     const message=String(err?.message||'Unbekannter Fehler.');
     if(/Sitzung abgelaufen|Bitte anmelden|Zugang nicht aktiv|Sitzung oder Benutzerdaten ungültig/i.test(message)){
-      ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();
+      ST.token='';ST.h=null;ftForgetSession_();auth();
     }else if(ST.h?.me){
       if(!background){
        const pane=document.getElementById('content');
@@ -3353,7 +3375,7 @@ if(a==='toggleOpeningSign'){
 }
 if(a==='forgotPassword'){ST.forgot=true;ST.invite=false;ST.reset=false;auth();return;}
 if(a==='normalLogin'){ST.invite=false;ST.forgot=false;ST.reset=false;auth();return;}
-if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');auth();await run(()=>rpc('ft_logout',old));return;}
+if(a==='logout'){++FT_LOAD_SEQ;FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;const old=ST.token;ST.token='';ST.h=null;ftForgetSession_();auth();await run(()=>rpc('ft_logout',old));return;}
 if(a==='back'){ST.cid='';ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='openFirm'){ST.cid=id;ST.tab='dashboard';ST.pushSettings=null;ST.rules=null;FT_RULES_KEY='';ST.selected='';ST.absenceUserId='';ST.leaveUserFilter='';ST.edit='';FT_ABSENCE_SEQ++;await load();return;}
 if(a==='homeOpenStandby'||a==='homeOpenWork'){
@@ -3578,10 +3600,10 @@ if(form.getAttribute('id')==='loginForm'){
  if(button){button.disabled=true;button.textContent='Anmeldung läuft …';}
  const email=String(p.email||'').trim().toLowerCase();
  try{
-  const result=await rpc('ft_login',email,p.password);
+  const result=await rpc('ft_login',email,p.password,form.querySelector('[name="remember"]')?.checked===true);
   try{localStorage.setItem(FT_SAVED_EMAIL_KEY,email);}catch(e){}
   FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();FT_RULES_KEY='';ST.rules=null;ST.selected='';ST.h=null;
-  ST.token=result.token;sessionStorage.setItem('ft_token',result.token);ST.cid='';ST.pushSettings=null;
+  ST.token=result.token;ftSaveSession_(result,form.querySelector('[name="remember"]')?.checked===true);ST.cid='';ST.pushSettings=null;
   ST.tab=new URLSearchParams(location.search).get('tab')==='messages'?'messages':'dashboard';
   if(button)button.textContent='Konto bestätigt – Arbeitsbereich öffnet …';
   await ftOpenShell();
@@ -3610,7 +3632,7 @@ if(form.id==='resetPasswordForm'){
  try{
   const message=await rpc('ft_resetConfirm',FT_RESET_TOKEN,p.password);
   ST.reset=false;ST.forgot=false;ST.invite=false;
-  ST.token='';ST.h=null;sessionStorage.removeItem('ft_token');
+  ST.token='';ST.h=null;ftForgetSession_();
   auth();say(String(message));
  }catch(err){say('Passwort-Zurücksetzung: '+String(err.message||err),true);}
  finally{if(button?.isConnected)button.disabled=false;}
@@ -3737,7 +3759,7 @@ if(form.getAttribute('id')==='workForm')return run(async()=>{await api('workSave
 if(form.getAttribute('id')==='settingsForm')return run(async()=>{await api('companyUpdate',{...p,id:firm().id});await load();},'Firmeneinstellungen gespeichert.');
 if(form.getAttribute('id')==='profileForm')return run(async()=>{await api('profileSave',{...p,companyId:firm().id});await load();},'Arbeitsmodell gespeichert.');
 if(form.getAttribute('id')==='rulesForm')return run(async()=>{const types={};['nightTypes','sundayTypes','holidayTypes'].forEach(k=>types[k]=[...form.querySelectorAll(`[name="${k}"]:checked`)].map(x=>x.value));await api('rulesSave',{...p,...types,companyId:firm().id});ST.rules=null;FT_RULES_KEY='';ST.month=p.effectiveMonth;await load();},'Neue Zuschlagsregel gespeichert.');
-if(form.getAttribute('id')==='passwordForm')return run(async()=>{await rpc('ft_changePassword',ST.token,p.current,p.next);ST.token='';sessionStorage.removeItem('ft_token');auth();},'Passwort geändert. Bitte neu anmelden.');
+if(form.getAttribute('id')==='passwordForm')return run(async()=>{await rpc('ft_changePassword',ST.token,p.current,p.next);ST.token='';ftForgetSession_();auth();},'Passwort geändert. Bitte neu anmelden.');
 }
 async function fileAsData(file){if(!file)return null;if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){say('Logo: PNG/JPG/WEBP maximal 2 MB.',true);return null;}return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error('Datei nicht lesbar.'));reader.readAsDataURL(file);});}
 async function uploadFile(input){const str=await fileAsData(input.files[0]);if(!str)return;if(input.id==='newLogo'){ST.logoNew=str;const el=document.getElementById('newLogoLabel');if(el)el.textContent='Ausgewählt: '+input.files[0].name;}else if(input.id==='existingLogo')await run(async()=>{await api('logoUpload',{companyId:firm().id,data:str});await load();},'Firmenlogo gespeichert.');}
