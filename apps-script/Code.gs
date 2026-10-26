@@ -231,7 +231,7 @@ function ft_login(email,password,remember){
  // Installed personal devices may opt in to a 14-day authenticated session.
  // No password is stored on the phone. Logout and password resets revoke it.
  cache.remove(key);
- const token=ft_rand_(),expiresAt=new Date(Date.now()+(remember===true?14*86400000:12*3600000)).toISOString();
+ const token=ft_rand_(),expiresAt=new Date(Date.now()+(remember===true?30*86400000:12*3600000)).toISOString();
  ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt}));
  return {token,expiresAt,user:ft_safe_(u)};
 }
