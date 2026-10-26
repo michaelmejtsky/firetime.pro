@@ -275,7 +275,12 @@ export default {
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ts,nonce,payload,signature}),
         redirect:'follow',
-        signal:AbortSignal.timeout(25000)
+        // Large private PDFs need time to traverse GAS and Drive, while ordinary
+        // menu requests retain the short deadline.
+        signal:AbortSignal.timeout(
+          input.type==='api'&&(input.action==='commPhoto'||
+            (LARGE_ATTACHMENT_ACTIONS.has(input.action)&&input.data?.photo?.mime==='application/pdf'))
+          ? 75000 : 25000)
       });
       if (!backend.ok) {
         return output({ok:false,error:'Google-Backend antwortet nicht korrekt.'},502,allowed);
