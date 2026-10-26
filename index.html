@@ -917,7 +917,7 @@ function ftSnapshotRestore_(tab){
  FT_VIEWS_LOADED.clear();FT_VIEW_FETCHED_AT.clear();
  for(const v of cached.views)FT_VIEWS_LOADED.add(v);
  for(const [v,at] of cached.times)FT_VIEW_FETCHED_AT.set(v,at);
- FT_META_LAST_FETCH=Math.min(FT_META_LAST_FETCH,Date.now()-60000);
+ // Keep the existing metadata freshness timestamp; only view data is restored.
  FT_DASHBOARD_LOADING=false;
  FT_MONTH_SNAPSHOTS.delete(key);FT_MONTH_SNAPSHOTS.set(key,cached);
  return true;
