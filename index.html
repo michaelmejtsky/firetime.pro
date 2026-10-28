@@ -3276,7 +3276,7 @@ function ftStandbyDayRow_(date,shift,split,staff){
   '<td class="ft-standby-avail-cell">'+availNames+details+'</td>'+
   '<td>'+selectHtml+assignedLine+warning+'</td>'+
   '<td data-standby-status="1">'+E(ftStandbyStatusText_(shift?.status))+
- (shift?.id?'<div class="ft-standby-delete"><button type="button" class="btn danger" data-act="planDelete" data-id="'+E(shift.id)+'" data-day="'+E(date)+'" aria-label="Bereitschaft am '+E(ftRosterDate_(date))+' löschen">Dienst löschen</button></div>':'')+
+ (shift?.id&&ST.h?.standbyDeleteSupported?'<div class="ft-standby-delete"><button type="button" class="btn danger" data-act="planDelete" data-id="'+E(shift.id)+'" data-day="'+E(date)+'" aria-label="Bereitschaft am '+E(ftRosterDate_(date))+' löschen">Dienst löschen</button></div>':'')+
  '</td></tr>';
 }
 
