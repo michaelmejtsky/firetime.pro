@@ -1,0 +1,47 @@
+name: FireTime Pro Web Push Regression
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/worker.js'
+      - 'sw.js'
+      - 'index.html'
+      - 'apps-script/Code.gs'
+      - 'tests/webpush.test.cjs'
+      - 'tests/messages-pause.test.cjs'
+      - 'tests/operational-push.test.cjs'
+      - 'tests/account-push.test.cjs'
+      - 'tests/background-badge.test.cjs'
+      - 'tests/fast-refresh.test.cjs'
+      - 'tests/password-reset.test.cjs'
+      - 'tests/pdf-attachments.test.cjs'
+      - 'tests/tasks-session-perf.test.cjs'
+      - '.github/workflows/webpush-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/worker.js'
+      - 'sw.js'
+      - 'index.html'
+      - 'apps-script/Code.gs'
+      - 'tests/webpush.test.cjs'
+      - 'tests/messages-pause.test.cjs'
+      - 'tests/operational-push.test.cjs'
+      - 'tests/account-push.test.cjs'
+      - 'tests/background-badge.test.cjs'
+      - 'tests/fast-refresh.test.cjs'
+      - 'tests/password-reset.test.cjs'
+      - 'tests/pdf-attachments.test.cjs'
+      - 'tests/tasks-session-perf.test.cjs'
+      - '.github/workflows/webpush-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/*.test.cjs

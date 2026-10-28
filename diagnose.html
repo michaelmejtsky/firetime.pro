@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FireTime Pro – Verbindung prüfen</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:#edf4fb;background:#0b1828;color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;padding:28px 18px}main{max-width:760px;margin:auto}h1{font-size:1.6rem}h2{font-size:1.1rem;margin:0 0 8px}
+p,li{line-height:1.6}small,.muted{color:#adc0d2}
+article{background:#142740;border:1px solid #34536e;border-radius:14px;padding:17px;margin:14px 0}
+button,a.button{border:0;border-radius:10px;padding:12px 17px;font:inherit;background:#ff8c58;color:#151e2a;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}
+button.secondary{background:#314760;color:#f1f6fb}button:disabled{opacity:.6;cursor:not-allowed}
+.status{font-weight:700}.status.ok{color:#83e2b5}.status.bad{color:#ffa3a5}.status.wait{color:#f9df98}
+code{word-wrap:break-word}pre{background:#07131f;padding:15px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+.actions{display:flex;gap:12px;flex-wrap:wrap}
+</style></head><body><main>
+<h1>FireTime Pro – Verbindungstest</h1>
+<p>Dieser Test verwendet <strong>keine Zugangsdaten</strong> und verändert keine Arbeitszeiten, Mitarbeiter oder Google-Sheets-Daten. Er prüft nur die Erreichbarkeit der drei Systemteile.</p>
+<div class="actions"><button id="run">Verbindung jetzt prüfen</button><button id="copy" class="secondary" disabled>Ergebnis kopieren</button><a class="button" href="./">Zur FireTime-App</a></div>
+<article><h2>1. Website und Konfiguration</h2><div id="config" class="status wait">Noch nicht geprüft</div><p class="muted">Website-Adresse: <code id="origin"></code></p></article>
+<article><h2>2. Cloudflare-Worker / CORS</h2><div id="worker" class="status wait">Noch nicht geprüft</div><p class="muted">Prüft, ob der Browser mit der öffentlichen FireTime-API sprechen kann – ohne Google Apps Script.</p></article>
+<article><h2>3. Google Apps Script / Datenbankverbindung</h2><div id="backend" class="status wait">Noch nicht geprüft</div><p class="muted">Sendet eine unverändernde Abfrage nach einem nicht vorhandenen Firmenkürzel. Es werden keine Personen- oder Firmendaten angezeigt.</p></article>
+<article><h2>Ergebnis und Hilfe</h2><p id="help">Starte den Test oben. Wenn Cloudflare fehlschlägt, prüfe <strong>PUBLIC_ORIGIN</strong> im Worker: <code>https://michaelmejtsky.github.io</code> (ohne Pfad).</p><pre id="detail">Noch keine Testergebnisse.</pre></article>
+<p class="muted">Bei Problemen einen Screenshot dieser Seite schicken. Geheime Schlüssel, Sitzungstokens und Passwörter werden hier nie abgefragt.</p>
+</main><script>
+"use strict";
+const API='https://firetime-pro-api.firetime-pro.workers.dev/api';
+const results=[],out=document.getElementById('detail');
+document.getElementById('origin').textContent=location.origin;
+const byId=id=>document.getElementById(id);
+function status(id,level,message){const el=byId(id);el.className='status '+level;el.textContent=message;results.push(id+': '+message);}
+async function jsonPost(body,ms){
+ const c=new AbortController(),timer=setTimeout(()=>c.abort(),ms);
+ try{
+  const r=await fetch(API,{method:'POST',mode:'cors',credentials:'omit',cache:'no-store',
+   headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:c.signal});
+  let data=null;try{data=await r.json()}catch{}
+  return {code:r.status,data};
+ }finally{clearTimeout(timer)}
+}
+async function run(){
+ results.length=0;
+ const btn=byId('run');btn.disabled=true;byId('copy').disabled=true;
+ byId('help').textContent='Test läuft. Nicht erneut klicken.';
+ for(const id of ['config','worker','backend']){const el=byId(id);el.className='status wait';el.textContent='Prüfung läuft …'}
+ try{
+  const stamp=Date.now();
+  try{
+   const response=await fetch('./config.js?probe='+stamp,{cache:'no-store'});
+   if(!response.ok)throw Error('HTTP '+response.status);
+   const text=await response.text();
+   const match=text.match(/FT_API_URL\s*=\s*['"]([^'"]+)['"]/);
+   if(!match)throw Error('FT_API_URL fehlt');
+   if(match[1]!==API)throw Error('Andere API-Adresse konfiguriert: '+match[1]);
+   status('config','ok','OK – GitHub Pages und config.js erreichbar');
+  }catch(e){status('config','bad','FEHLER – '+String(e.message||e).slice(0,170));}
+  const start=performance.now();
+  try{
+   const r=await jsonPost({type:'pushInfo'},12000);
+   if(r.code!==200||r.data?.ok!==true)
+    throw Error('Worker HTTP '+r.code+': '+String(r.data?.error||'Unerwartete Antwort').slice(0,140));
+   status('worker','ok','OK – Cloudflare antwortet nach '+Math.round(performance.now()-start)+' ms');
+  }catch(e){
+   const hint=e.name==='AbortError'?'Zeitüberschreitung':String(e.message||e);
+   status('worker','bad','FEHLER – '+hint.slice(0,160));
+   status('backend','wait','Übersprungen, solange der Worker nicht erreichbar ist');
+   byId('help').textContent='Cloudflare antwortet dem Browser nicht. Prüfe PUBLIC_ORIGIN (genau https://michaelmejtsky.github.io), die Veröffentlichung des Workers sowie die Netzwerkverbindung. Bei „Failed to fetch“ kann auch eine CORS-Sperre vorliegen.';
+   return;
+  }
+  const started=performance.now();
+  try{
+   const r=await jsonPost({type:'brand',slug:'__firetime_connection_diagnostic_nonexistent__'},42000);
+   if(r.code!==200||r.data?.ok!==true)
+    throw Error('HTTP '+r.code+': '+String(r.data?.error||'Ungültige Antwort').slice(0,140));
+   status('backend','ok','OK – Google Apps Script antwortet nach '+Math.round(performance.now()-started)+' ms');
+   byId('help').textContent='Alle Verbindungen erfolgreich. Tritt der Fehler nur in der App auf, App vollständig schließen und erneut öffnen; wenn er wiederkommt, Zeitpunkt und betroffene Aktion notieren.';
+  }catch(e){
+   const hint=e.name==='AbortError'?'Zeitüberschreitung':String(e.message||e);
+   status('backend','bad','FEHLER – '+hint.slice(0,160));
+   byId('help').textContent='Cloudflare ist erreichbar, aber die Backend-Abfrage ist fehlgeschlagen. Prüfe im Worker GAS_WEBAPP_URL, GAS_SHARED_KEY und in Google Apps Script die letzte Ausführung. Keine Setup-Funktion erneut starten.';
+  }
+ }finally{
+  out.textContent=['FireTime Pro Verbindungstest',new Date().toLocaleString('de-AT'),
+   'Origin: '+location.origin,'API: '+API,...results].join('\n');
+  btn.disabled=false;byId('copy').disabled=false;
+ }
+}
+byId('run').addEventListener('click',run);
+byId('copy').addEventListener('click',()=>{
+ const text=out.textContent;
+ if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text);
+ else {const r=document.createRange();r.selectNodeContents(out);getSelection().removeAllRanges();getSelection().addRange(r)}
+});
+</script></body></html>

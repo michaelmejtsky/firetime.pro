@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.5.0-github-google';
+const FT_VERSION='1.8.24-single-calendar-duty-20261028';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -22,16 +22,26 @@ const FT_HEADERS={
  Users:['id','companyId','role','name','email','passwordHash','salt','status','monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours','startDate','workdays','mustChange','createdAt'],
  Sessions:['id','userId','expiresAt'],
  Invites:['id','userId','expiresAt','usedAt'],
- Activities:['id','companyId','userId','type','start','end','breakMinutes','object','description','createdAt','updatedAt'],
+ Activities:['id','companyId','userId','type','start','end','breakMinutes','object','description','createdAt','updatedAt','activityOptionId'],
  Availability:['id','companyId','userId','month','day','answer','updatedAt'],
  AvailabilitySubmissions:['id','companyId','userId','month','submittedAt'],
  Shifts:['id','companyId','userId','day','start','end','status','eventId','actualStatus','confirmedAt','updatedAt'],
  Leaves:['id','companyId','userId','from','to','days','creditHours','reason','status','reviewerId','reviewedAt','createdAt'],
  Months:['id','companyId','userId','month','status','submittedAt','reviewerId','reviewedAt','note','pdfId','snapshot','snapshotHash'],
+  ShiftSegments:['id','companyId','shiftId','userId','start','end','actualStatus','confirmedAt','calendarEventId','updatedAt'],
+  ShiftChanges:['id','companyId','shiftId','fromUserId','toUserId','start','end','reason','status','createdAt','respondedAt','reviewedAt','reviewerId'],
+  SickLeaves:['id','companyId','userId','from','to','note','status','reportedBy','createdAt','reviewerId','reviewedAt','creditMode','creditHours','standbyCreditHours','reviewNote'],
+ PlanMonths:['id','companyId','month','fixedHash','fixedAt','fixedBy','publishedHash','publishedAt','publishedBy','sharedHash','sharedAt','sharedBy','shareStatus','calendarEvents','warnings','sharedAssignments','updatedAt'],
+ ActivityTimers:['id','companyId','userId','type','activityOptionId','start','object','description','createdAt','updatedAt'],
+ ActivityTypes:['id','companyId','type','label','active','sort','createdAt','updatedAt'],
  Notifications:['id','companyId','userId','kind','reference','sentAt','status','error'],
  Audit:['id','at','actorId','companyId','action','entity','entityId','previous','next']
 };
 const FT_ROLES=['SYSADMIN','ADMIN','STAFF'];
+// Read-through cache nur fuer eine einzelne doPost-Anfrage; kein Cache ueber Benutzer hinweg.
+let FT_REQUEST_CACHE=null;
+function ft_invalidate_(name){if(FT_REQUEST_CACHE)delete FT_REQUEST_CACHE.tables[name];}
+
 
 function ft_prop_(k){return PropertiesService.getScriptProperties().getProperty(k);}
 
@@ -39,17 +49,65 @@ function ft_now_(){return new Date().toISOString();}
 
 function ft_uuid_(){return Utilities.getUuid();}
 
-function ft_db_(){const id=ft_prop_('FT_DB_ID');if(!id)throw Error('FireTime Pro ist noch nicht eingerichtet. ft_setup() ausführen.');return SpreadsheetApp.openById(id);}
+function ft_db_(){
+  if(FT_REQUEST_CACHE?.db)return FT_REQUEST_CACHE.db;
+  const id=ft_prop_('FT_DB_ID');
+  if(!id)throw Error('FireTime Pro ist noch nicht eingerichtet. ft_setup() ausführen.');
+  const db=SpreadsheetApp.openById(id);
+  if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.db=db;
+  return db;
+}
 
-function ft_sheet_(name){const s=ft_db_().getSheetByName(name);if(!s)throw Error('Fehlende Datenbanktabelle: '+name);return s;}
+function ft_sheet_(name){
+  if(FT_REQUEST_CACHE?.sheets[name])return FT_REQUEST_CACHE.sheets[name];
+  const s=ft_db_().getSheetByName(name);
+  if(!s)throw Error('Fehlende Datenbanktabelle: '+name);
+  if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.sheets[name]=s;
+  return s;
+}
 
-function ft_get_(name){const sheet=ft_sheet_(name), values=sheet.getDataRange().getValues(),head=FT_HEADERS[name];return values.slice(1).map((r,i)=>{const o={__row:i+2};head.forEach((h,j)=>o[h]=r[j] instanceof Date?r[j].toISOString():r[j]);return o;}).filter(x=>x.id!=='');}
+/**
+ * Google Sheets erkennt Monate und reine ISO-Daten bei getValues() gelegentlich
+ * automatisch als Date. Die API verwendet dafuer jedoch Strings (YYYY-MM
+ * bzw. YYYY-MM-DD). Zeitstempel bleiben unveraendert in ISO-Form.
+ * Dies gilt auch fuer bereits vorhandene Daten; keine Tabellenmigration.
+ */
+function ft_readCell_(table,field,value){
+  const monthOnly=(field==='month'&&['Availability','AvailabilitySubmissions','Months','PlanMonths'].includes(table));
+  const dateOnly=(field==='startDate'&&table==='Users') ||
+    (field==='day'&&['Shifts'].includes(table)) ||
+    (['from','to'].includes(field)&&table==='Leaves');
+  if(value instanceof Date){
+    if(!Number.isFinite(value.getTime()))return '';
+    if(monthOnly)return Utilities.formatDate(value,FT_TZ,'yyyy-MM');
+    if(dateOnly)return Utilities.formatDate(value,FT_TZ,'yyyy-MM-dd');
+    return value.toISOString();
+  }
+  // Aeltere Eintraege koennen zuvor als ISO-Text geschrieben worden sein.
+  if(typeof value==='string'){
+    if(monthOnly&&/^20\d{2}-\d{2}-\d{2}T/.test(value))return value.slice(0,7);
+    if(dateOnly&&/^20\d{2}-\d{2}-\d{2}T/.test(value))return value.slice(0,10);
+  }
+  return value;
+}
+
+function ft_get_(name){
+  if(FT_REQUEST_CACHE&&Object.prototype.hasOwnProperty.call(FT_REQUEST_CACHE.tables,name))return FT_REQUEST_CACHE.tables[name];
+  const sheet=ft_sheet_(name),values=sheet.getDataRange().getValues(),head=FT_HEADERS[name];
+  const rows=values.slice(1).map((r,i)=>{
+    const o={__row:i+2};
+    head.forEach((h,j)=>o[h]=ft_readCell_(name,h,r[j]));
+    return o;
+  }).filter(x=>x.id!=='');
+  if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[name]=rows;
+  return rows;
+}
 
 function ft_pick_(name,o){return FT_HEADERS[name].map(h=>{const v=o[h];if(v===undefined||v===null)return '';if(typeof v==='string'&&/^[\s]*[=+@-]/.test(v))return '\''+v;return v;});}
 
-function ft_add_(name,o){ft_sheet_(name).appendRow(ft_pick_(name,o));return o;}
+function ft_add_(name,o){ft_sheet_(name).appendRow(ft_pick_(name,o));ft_invalidate_(name);return o;}
 
-function ft_save_(name,o){if(!o.__row)throw Error('Fehlende Tabellenzeile');ft_sheet_(name).getRange(o.__row,1,1,FT_HEADERS[name].length).setValues([ft_pick_(name,o)]);return o;}
+function ft_save_(name,o){if(!o.__row)throw Error('Fehlende Tabellenzeile');ft_sheet_(name).getRange(o.__row,1,1,FT_HEADERS[name].length).setValues([ft_pick_(name,o)]);ft_invalidate_(name);return o;}
 
 function ft_one_(name,id){return ft_get_(name).find(r=>String(r.id)===String(id));}
 
@@ -61,7 +119,67 @@ function ft_sha_(s){return ft_hex_(Utilities.computeDigest(Utilities.DigestAlgor
 
 function ft_rand_(){return ft_sha_(ft_uuid_()+ft_uuid_()+ft_now_());}
 
-function ft_password_(password,salt){let v=salt+'|'+password+'|'+ft_prop_('FT_PEPPER');for(let i=0;i<1500;i++)v=ft_sha_(v+salt);return v;}
+/** SHA-256 in local V8 CPU. Same digest as Utilities.computeDigest(SHA_256, UTF_8),
+ * but avoids 1500 cross-service digest calls for each login.
+ * Existing password hashes and peppers remain unchanged. */
+const FT_SHA256_K_ = [
+ 0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+ 0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+ 0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+ 0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+ 0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+ 0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+ 0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+ 0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+];
+function ft_fastSha256Utf8_(value){
+ const data=unescape(encodeURIComponent(String(value)));
+ const len=data.length,total=Math.ceil((len+9)/64)*64;
+ const bytes=new Uint8Array(total);
+ for(let i=0;i<len;i++)bytes[i]=data.charCodeAt(i);
+ bytes[len]=0x80;
+ const bitLength=len*8;
+ // Length modulo 2^64, with a high word for large inputs.
+ const high=Math.floor(bitLength/0x100000000),low=bitLength>>>0;
+ bytes[total-8]=(high>>>24)&255;bytes[total-7]=(high>>>16)&255;
+ bytes[total-6]=(high>>>8)&255;bytes[total-5]=high&255;
+ bytes[total-4]=(low>>>24)&255;bytes[total-3]=(low>>>16)&255;
+ bytes[total-2]=(low>>>8)&255;bytes[total-1]=low&255;
+ let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a;
+ let h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+ const w=new Uint32Array(64);
+ for(let pos=0;pos<total;pos+=64){
+  for(let t=0;t<16;t++){
+   const o=pos+t*4;
+   w[t]=((bytes[o]<<24)|(bytes[o+1]<<16)|(bytes[o+2]<<8)|bytes[o+3])>>>0;
+  }
+  for(let t=16;t<64;t++){
+   const a=w[t-15],b=w[t-2];
+   const s0=((a>>>7)|(a<<25))^((a>>>18)|(a<<14))^(a>>>3);
+   const s1=((b>>>17)|(b<<15))^((b>>>19)|(b<<13))^(b>>>10);
+   w[t]=(w[t-16]+s0+w[t-7]+s1)>>>0;
+  }
+  let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
+  for(let t=0;t<64;t++){
+   const s1=((e>>>6)|(e<<26))^((e>>>11)|(e<<21))^((e>>>25)|(e<<7));
+   const ch=(e&f)^(~e&g);
+   const tmp1=(h+s1+ch+FT_SHA256_K_[t]+w[t])>>>0;
+   const s0=((a>>>2)|(a<<30))^((a>>>13)|(a<<19))^((a>>>22)|(a<<10));
+   const maj=(a&b)^(a&c)^(b&c);
+   const tmp2=(s0+maj)>>>0;
+   h=g;g=f;f=e;e=(d+tmp1)>>>0;d=c;c=b;b=a;a=(tmp1+tmp2)>>>0;
+  }
+  h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;
+  h4=(h4+e)>>>0;h5=(h5+f)>>>0;h6=(h6+g)>>>0;h7=(h7+h)>>>0;
+ }
+ return [h0,h1,h2,h3,h4,h5,h6,h7].map(v=>v.toString(16).padStart(8,'0')).join('');
+}
+function ft_password_(password,salt){
+ let v=salt+'|'+password+'|'+ft_prop_('FT_PEPPER');
+ for(let i=0;i<1500;i++)v=ft_fastSha256Utf8_(v+salt);
+ return v;
+}
+
 
 function ft_email_(v){const s=String(v||'').trim().toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)||s.length>200)throw Error('Ungültige E-Mail-Adresse');return s;}
 
@@ -83,7 +201,7 @@ function ft_datetime_(s){if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(s||''
 
 function ft_audit_(u,action,entity,id,before,after){ft_add_('Audit',{id:ft_uuid_(),at:ft_now_(),actorId:u?u.id:'SYSTEM',companyId:(after&&after.companyId)||(before&&before.companyId)||(u&&u.companyId)||'',action,entity,entityId:id,previous:JSON.stringify(before||{}).slice(0,25000),next:JSON.stringify(after||{}).slice(0,25000)});}
 
-function ft_safe_(u){return {id:u.id,companyId:u.companyId,role:u.role,name:u.name,email:u.email,monthlyHours:Number(u.monthlyHours)||0,hourlyRate:Number(u.hourlyRate)||0,leaveEntitlement:Number(u.leaveEntitlement)||0,leaveBalance:Number(u.leaveBalance)||0,openingHours:Number(u.openingHours)||0,startDate:u.startDate,workdays:u.workdays||'1,2,3,4,5',status:u.status,mustChange:ft_bool_(u.mustChange)};}
+function ft_safe_(u){return {id:u.id,companyId:u.companyId,role:u.role,name:u.name,email:u.email,monthlyHours:Number(u.monthlyHours)||0,hourlyRate:Number(u.hourlyRate)||0,leaveEntitlement:Number(u.leaveEntitlement)||0,leaveBalance:Number(u.leaveBalance)||0,openingHours:Number(u.openingHours)||0,startDate:u.startDate,workdays:u.workdays||'1,2,3,4,5',status:u.status,mustChange:ft_bool_(u.mustChange),hoursStartMonth:ft_balanceStartMonth_(u),...ft_leaveStaffPublic_(u)};}
 
 function ft_allowed_(u,roles){if(!roles.includes(u.role))throw Error('Keine Berechtigung für diese Funktion.');}
 
@@ -103,15 +221,53 @@ function ft_publicRow_(r){const o=Object.assign({},r);delete o.__row;return o;}
 // 02_Anmeldung
 // -----------------------------------------------------------------
 /** FireTime Pro 1.1 | Developed by Michael Mejtsky | 02_Anmeldung.gs */
-function ft_auth_(token){if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Bitte anmelden.');const h=ft_sha_(token),s=ft_get_('Sessions').find(x=>x.id===h);if(!s||new Date(s.expiresAt).getTime()<Date.now())throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');const u=ft_one_('Users',s.userId);if(!u||u.status!=='ACTIVE')throw Error('Zugang nicht aktiv.');return u;}
+/**
+ * The session sheet is append-only for logins and can become the slowest part
+ * of EVERY page click. Keep a very short, token-scoped read-through entry.
+ * Actual expiry is still taken from the Sessions row. User status, password
+ * fingerprint and company privileges are revalidated with the live Users row
+ * on every call; nothing tenant-wide is cached.
+ */
+function ft_sessionCacheKey_(hash){return 'ftsess:'+hash;}
+function ft_auth_(token){
+ if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Bitte anmelden.');
+ const h=ft_sha_(token),cache=CacheService.getScriptCache(),key=ft_sessionCacheKey_(h);
+ let cached=null;
+ try{const raw=cache.get(key);if(raw)cached=JSON.parse(raw);}catch(_){}
+ let s=cached&&cached.userId&&cached.expiresAt?cached:null;
+ if(!s||Date.parse(s.expiresAt)<=Date.now()){
+  s=ft_get_('Sessions').find(x=>x.id===h);
+  if(!s||Date.parse(s.expiresAt)<=Date.now()){
+   cache.remove(key);throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');
+  }
+  cached=null;
+ }
+ const u=ft_one_('Users',s.userId);
+ if(!u||u.status!=='ACTIVE')throw Error('Zugang nicht aktiv.');
+ const proof=String(u.passwordHash||'').slice(0,24);
+ if(cached&&cached.proof!==proof){
+  cache.remove(key);throw Error('Sitzung abgelaufen. Bitte erneut anmelden.');
+ }
+ if(!cached){
+  const remaining=Math.floor((Date.parse(s.expiresAt)-Date.now())/1000);
+  if(remaining>0)cache.put(key,JSON.stringify({userId:u.id,expiresAt:s.expiresAt,proof}),Math.min(120,remaining));
+ }
+ return u;
+}
 
-function ft_login(email,password){
+function ft_login(email,password,remember){
  const em=ft_email_(email),cache=CacheService.getScriptCache(),key='login:'+ft_sha_(em),tries=Number(cache.get(key)||0);
  if(tries>=7)throw Error('Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.');
  const u=ft_get_('Users').find(x=>x.email===em&&x.status==='ACTIVE');
  if(!u||!u.salt||ft_password_(String(password||''),u.salt)!==u.passwordHash){cache.put(key,String(tries+1),900);throw Error('E-Mail-Adresse oder Passwort ungültig.');}
- cache.remove(key);const token=ft_rand_();ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt:new Date(Date.now()+12*3600000).toISOString()}));
- return {token,user:ft_safe_(u)};
+ // Installed personal devices may opt in to a 30-day authenticated session.
+ // No password is stored on the phone. Logout and password resets revoke it.
+ cache.remove(key);
+ const token=ft_rand_(),expiresAt=new Date(Date.now()+(remember===true?30*86400000:12*3600000)).toISOString();
+ ft_lock_(()=>ft_add_('Sessions',{id:ft_sha_(token),userId:u.id,expiresAt}));
+ CacheService.getScriptCache().put(ft_sessionCacheKey_(ft_sha_(token)),
+  JSON.stringify({userId:u.id,expiresAt,proof:String(u.passwordHash||'').slice(0,24)}),120);
+ return {token,expiresAt,user:ft_safe_(u)};
 }
 
 function ft_activate(invite,password){
@@ -119,9 +275,107 @@ function ft_activate(invite,password){
  return ft_lock_(()=>{const key=ft_sha_(invite),i=ft_one_('Invites',key);if(!i||i.usedAt||new Date(i.expiresAt)<new Date())throw Error('Einladung ungültig oder abgelaufen.');const u=ft_one_('Users',i.userId);if(!u)throw Error('Benutzer nicht gefunden.');const before=ft_safe_(u);u.salt=ft_rand_();u.passwordHash=ft_password_(password,u.salt);u.status='ACTIVE';u.mustChange=false;ft_save_('Users',u);i.usedAt=ft_now_();ft_save_('Invites',i);ft_audit_(u,'ACTIVATE','Users',u.id,before,ft_safe_(u));return 'Konto aktiviert. Du kannst dich jetzt anmelden.';});
 }
 
-function ft_changePassword(token,current,next){const u=ft_auth_(token);if(String(next||'').length<12)throw Error('Neues Passwort mindestens 12 Zeichen');if(ft_password_(String(current||''),u.salt)!==u.passwordHash)throw Error('Bisheriges Passwort falsch');return ft_lock_(()=>{u.salt=ft_rand_();u.passwordHash=ft_password_(next,u.salt);u.mustChange=false;ft_save_('Users',u);ft_get_('Sessions').filter(s=>s.userId===u.id).sort((a,b)=>b.__row-a.__row).forEach(s=>ft_sheet_('Sessions').deleteRow(s.__row));return 'Passwort geändert. Bitte neu anmelden.';});}
+function ft_changePassword(token,current,next){const u=ft_auth_(token);if(String(next||'').length<12)throw Error('Neues Passwort mindestens 12 Zeichen');if(ft_password_(String(current||''),u.salt)!==u.passwordHash)throw Error('Bisheriges Passwort falsch');return ft_lock_(()=>{u.salt=ft_rand_();u.passwordHash=ft_password_(next,u.salt);u.mustChange=false;ft_save_('Users',u);ft_get_('Sessions').filter(s=>s.userId===u.id).sort((a,b)=>b.__row-a.__row).forEach(s=>{
+  CacheService.getScriptCache().remove(ft_sessionCacheKey_(s.id));
+  ft_sheet_('Sessions').deleteRow(s.__row);
+ });return 'Passwort geändert. Bitte neu anmelden.';});}
 
-function ft_logout(token){const h=ft_sha_(String(token||'')),s=ft_one_('Sessions',h);if(s)ft_lock_(()=>ft_sheet_('Sessions').deleteRow(s.__row));return true;}
+/**
+ * Password recovery reuses the pre-existing Invites table without migration:
+ * reset keys have the "reset:" prefix and cannot activate a new account.
+ * No password or raw reset token is stored in Sheets or returned to callers.
+ */
+function ft_passwordResetLink_(user,actor){
+ if(!user||user.status!=='ACTIVE'||!user.email)throw Error('Für dieses Konto ist keine Passwort-Wiederherstellung verfügbar.');
+ const cache=CacheService.getScriptCache(),rateKey='ftreset:'+ft_sha_(String(user.email).toLowerCase());
+ if(cache.get(rateKey))return false; // suppress repeated emails, incl. manager retries
+ const token=ft_rand_(),hash='reset:'+ft_sha_(token);
+ const company=user.companyId?ft_one_('Companies',user.companyId):null;
+ const base=company?ft_clientUrl_(company):ft_publicGithubUrl_();
+ if(!/^https:\/\//.test(String(base||'')))throw Error('Die öffentliche FireTime-Adresse ist nicht konfiguriert.');
+ const link=base+(base.includes('?')?'&':'?')+'reset='+encodeURIComponent(token);
+ const sentTo=ft_email_(user.email);
+ // Mail first: a mail delivery error must not revoke a working password or create a dead token.
+ ft_sendMail_({to:sentTo,subject:'FireTime Pro – Passwort zurücksetzen',
+  body:'Hallo '+user.name+'!\n\nFür deinen FireTime-Pro-Zugang wurde eine Passwort-Zurücksetzung angefordert.'+
+   '\nÖffne innerhalb von 30 Minuten diesen einmaligen Link und vergib ein neues Passwort (mindestens 12 Zeichen):\n'+link+
+   '\n\nWenn du keine Zurücksetzung angefordert hast, ignoriere die E-Mail. Dein bisheriges Passwort bleibt unverändert.'+
+   '\n\nFireTime Pro – Developed by Michael Mejtsky',name:'FireTime Pro'});
+ // No new schema: mark earlier reset links for this user consumed.
+ ft_lock_(()=>{
+  for(const old of ft_get_('Invites').filter(x=>x.userId===user.id&&
+      String(x.id).startsWith('reset:')&&!x.usedAt)){
+   old.usedAt=ft_now_();ft_save_('Invites',old);
+  }
+  ft_add_('Invites',{id:hash,userId:user.id,
+   expiresAt:new Date(Date.now()+30*60000).toISOString(),usedAt:''});
+  ft_audit_(actor||null,'PASSWORD_RESET_REQUEST','Users',user.id,
+   {companyId:user.companyId},{companyId:user.companyId,email:user.email});
+ });
+ cache.put(rateKey,'1',600);
+ return true;
+}
+function ft_passwordResetRequest_(email){
+ // Same response whether the address exists, is inactive or just rate-limited.
+ const generic='Falls ein aktives FireTime-Pro-Konto für diese E-Mail-Adresse besteht, wurde ein Zurücksetzen-Link versendet. Bitte auch den Spam-Ordner prüfen.';
+ const em=String(email||'').trim().toLowerCase();
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)||em.length>200)return generic;
+ const user=ft_get_('Users').find(x=>String(x.email).toLowerCase()===em&&x.status==='ACTIVE');
+ if(user){
+  try{ft_passwordResetLink_(user,null);}
+  catch(err){console.warn('Passwort-Wiederherstellung konnte nicht versendet werden.');}
+ }
+ return generic;
+}
+function ft_passwordResetForUser_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const user=ft_user_(actor,String(p.id||''));
+ if(user.status!=='ACTIVE')throw Error('Passwort-Zurücksetzung nur für aktive Konten möglich.');
+ if(actor.role==='ADMIN'&&user.role!=='STAFF')
+  throw Error('Nur der Systemadministrator darf Administrator-Passwörter zurücksetzen.');
+ if(user.role==='SYSADMIN'&&user.id!==actor.id)
+  throw Error('Systemadministrator-Zugang kann nur selbst wiederhergestellt werden.');
+ const sent=ft_passwordResetLink_(user,actor);
+ return sent?'Passwort-Link an '+user.email+' versendet. 30 Minuten gültig.':
+  'Für diesen Zugang wurde kürzlich bereits ein Passwort-Link verschickt. Bitte E-Mail prüfen.';
+}
+function ft_passwordResetConfirm_(token,password){
+ if(!/^[a-f0-9]{64}$/.test(String(token||'')))throw Error('Zurücksetzen-Link ungültig oder abgelaufen.');
+ if(String(password||'').length<12||String(password||'').length>150)
+  throw Error('Das neue Passwort muss 12 bis 150 Zeichen lang sein.');
+ return ft_lock_(()=>{
+  const key='reset:'+ft_sha_(token),row=ft_one_('Invites',key);
+  if(!row||row.usedAt||!Number.isFinite(Date.parse(row.expiresAt))||
+    Date.parse(row.expiresAt)<Date.now())
+   throw Error('Zurücksetzen-Link ungültig, abgelaufen oder bereits verwendet.');
+  const user=ft_one_('Users',row.userId);
+  if(!user||user.status!=='ACTIVE')throw Error('Konto ist nicht aktiv.');
+  const before=ft_safe_(user);
+  user.salt=ft_rand_();user.passwordHash=ft_password_(String(password),user.salt);
+  user.mustChange=false;ft_save_('Users',user);
+  // Invalidate all sessions and all unused reset links for that user.
+  ft_get_('Sessions').filter(x=>x.userId===user.id)
+   .sort((a,b)=>b.__row-a.__row).forEach(x=>{
+    CacheService.getScriptCache().remove(ft_sessionCacheKey_(x.id));
+    ft_sheet_('Sessions').deleteRow(x.__row);
+   });
+  for(const invite of ft_get_('Invites').filter(x=>x.userId===user.id&&
+      String(x.id).startsWith('reset:')&&!x.usedAt)){
+   invite.usedAt=ft_now_();ft_save_('Invites',invite);
+  }
+  ft_audit_(user,'PASSWORD_RESET_COMPLETED','Users',user.id,before,ft_safe_(user));
+  return 'Passwort erfolgreich geändert. Bitte mit dem neuen Passwort anmelden.';
+ });
+}
+
+function ft_logout(token){
+ const h=ft_sha_(String(token||''));
+ // Revoke the cache even if the backing session was already removed.
+ CacheService.getScriptCache().remove(ft_sessionCacheKey_(h));
+ const s=ft_one_('Sessions',h);
+ if(s)ft_lock_(()=>ft_sheet_('Sessions').deleteRow(s.__row));
+ return true;
+}
 
 function ft_invite_(actor,user){
  if(!user.email)throw Error('E-Mail fehlt.');
@@ -184,13 +438,97 @@ function ft_logoData_(c){if(!c||!c.logoId)return '';try{const blob=DriveApp.getF
 
 function ft_publicBrand(slug){return ft_brandForLogin(slug);}
 
+
+/** Übernommenes Stundenkonto: Der Anfangssaldo gilt VOR dem ersten
+ * abzurechnenden FireTime-Monat, nicht seit dem Beschäftigungsbeginn.
+ * Historische Users-Zeilen, Months-Snapshots und PDFs bleiben unverändert.
+ */
+const FT_BALANCE_START_COLS_=['id','companyId','userId','startMonth','updatedBy','updatedAt'];
+function ft_balanceStartRows_(){
+ const key='FT_BALANCE_START';
+ if(FT_REQUEST_CACHE&&FT_REQUEST_CACHE.tables[key])return FT_REQUEST_CACHE.tables[key];
+ const rows=ft_absenceRows_('TimeBalanceStarts',FT_BALANCE_START_COLS_,false);
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[key]=rows;
+ return rows;
+}
+function ft_balanceStartMonth_(user){
+ if(/^20\d{2}-(0[1-9]|1[0-2])$/.test(String(user.hoursStartMonth||'')))
+  return String(user.hoursStartMonth);
+ const found=ft_balanceStartRows_().find(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ if(found){
+  const raw=String(found.startMonth||'');
+  if(/^20\d{2}-(0[1-9]|1[0-2])/.test(raw))return raw.slice(0,7);
+  throw Error('Der Abrechnungsbeginn des Stundenkontos ist ungültig.');
+ }
+ const created=String(user.createdAt||''),hired=String(user.startDate||'');
+ const c=/^20\d{2}-(0[1-9]|1[0-2])/.test(created)?created.slice(0,7):'';
+ const h=/^20\d{2}-(0[1-9]|1[0-2])/.test(hired)?hired.slice(0,7):'';
+ if(c&&h)return c>h?c:h;
+ if(c||h)return c||h;
+ return ft_localMonth_(new Date());
+}
+function ft_balanceStartSave_(actor,user,month){
+ const start=ft_month_(String(month||''));
+ if(user.startDate&&start<String(user.startDate).slice(0,7))
+  throw Error('Stundenabrechnung kann nicht vor dem Beschäftigungsbeginn starten.');
+ const rows=ft_balanceStartRows_();
+ const original=rows.find(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ const before=ft_balanceStartMonth_(user);
+ if(before===start)return start;
+ const record=original||{id:ft_uuid_(),companyId:user.companyId,userId:user.id};
+ Object.assign(record,{startMonth:start,updatedBy:actor.id,updatedAt:ft_now_()});
+ const sheet=ft_absenceSheet_('TimeBalanceStarts',FT_BALANCE_START_COLS_,true);
+ sheet.getRange('D:D').setNumberFormat('@');
+ if(original)ft_absenceSave_('TimeBalanceStarts',FT_BALANCE_START_COLS_,record);
+ else ft_absenceAdd_('TimeBalanceStarts',FT_BALANCE_START_COLS_,record);
+ if(FT_REQUEST_CACHE)delete FT_REQUEST_CACHE.tables.FT_BALANCE_START;
+ ft_audit_(actor,'BALANCE_START','Users',user.id,{hoursStartMonth:before},
+  {companyId:user.companyId,hoursStartMonth:start});
+ return start;
+}
+
 // -----------------------------------------------------------------
 // 04_Mitarbeiter
 // -----------------------------------------------------------------
 /** FireTime Pro 1.1 | Developed by Michael Mejtsky | 04_Mitarbeiter.gs */
-function ft_userCreate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId),role=String(p.role||'STAFF');if(!['STAFF','ADMIN'].includes(role))throw Error('Ungültige Rolle');const email=ft_email_(p.email),name=ft_str_(p.name,100);if(!name)throw Error('Name fehlt');if(ft_get_('Users').some(x=>x.email===email))throw Error('E-Mail ist bereits im System vergeben');const u={id:ft_uuid_(),companyId:c.id,role,name,email,passwordHash:'',salt:'',status:'INVITED',monthlyHours:ft_number_(p.monthlyHours||0,0,300,'Monatssoll'),hourlyRate:ft_number_(p.hourlyRate||0,0,10000,'Stundensatz'),leaveEntitlement:ft_number_(p.leaveEntitlement||0,0,366,'Urlaubsanspruch'),leaveBalance:ft_number_(p.leaveBalance||0,0,1000,'Resturlaub'),openingHours:ft_number_(p.openingHours||0,-10000,10000,'Startsaldo'),startDate:p.startDate||ft_localDate_(new Date()),workdays:ft_str_(p.workdays||'1,2,3,4,5',30),mustChange:false,createdAt:ft_now_()};ft_date_(u.startDate);ft_add_('Users',u);ft_audit_(actor,'CREATE','Users',u.id,{},ft_safe_(u));let message='Mitarbeiter angelegt. ';try{message+=ft_invite_(actor,u);}catch(e){message+='Einladung noch nicht verschickt: '+e.message;}return {user:ft_safe_(u),message};}
+function ft_userCreate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId),role=String(p.role||'STAFF');if(!['STAFF','ADMIN'].includes(role))throw Error('Ungültige Rolle');const email=ft_email_(p.email),name=ft_str_(p.name,100);if(!name)throw Error('Name fehlt');if(ft_get_('Users').some(x=>x.email===email))throw Error('E-Mail ist bereits im System vergeben');const u={id:ft_uuid_(),companyId:c.id,role,name,email,passwordHash:'',salt:'',status:'INVITED',monthlyHours:ft_number_(p.monthlyHours||0,0,300,'Monatssoll'),hourlyRate:ft_number_(p.hourlyRate||0,0,10000,'Stundensatz'),leaveEntitlement:ft_number_(p.leaveEntitlement||0,0,366,'Urlaubsanspruch'),leaveBalance:ft_number_(p.leaveBalance||0,0,1000,'Resturlaub'),openingHours:ft_number_(p.openingHours||0,-10000,10000,'Startsaldo'),startDate:p.startDate||ft_localDate_(new Date()),workdays:ft_str_(p.workdays||'1,2,3,4,5',30),mustChange:false,createdAt:ft_now_()};ft_date_(u.startDate);
+ if(p.hoursStartMonth!==undefined){
+  ft_month_(String(p.hoursStartMonth));
+  if(String(p.hoursStartMonth)<String(u.startDate).slice(0,7))
+   throw Error('Beginn der FireTime-Abrechnung darf nicht vor dem Beschäftigungsbeginn liegen.');
+ }
+ const hasLeaveRule=p.leaveYearMode!==undefined||p.leaveRuleType!==undefined;
+ const leaveRule=hasLeaveRule?ft_leaveStaffCheck_(p,u,false):null;
+ const flexRule=p.leaveWorkModel!==undefined?ft_leaveFlexValidate_(p,u,false):null;
+ if(leaveRule)ft_absenceSheet_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,true);
+ ft_add_('Users',u);
+ if(p.hoursStartMonth!==undefined)ft_balanceStartSave_(actor,u,p.hoursStartMonth);
+ if(leaveRule)ft_leaveStaffSave_(actor,u,leaveRule);
+ if(flexRule)ft_leaveFlexSave_(actor,u,flexRule);
+ ft_audit_(actor,'CREATE','Users',u.id,{},ft_safe_(u));
+ // Bei neuen Frontends: zuerst erfolgreich speichern und rueckmelden.
+ // Der E-Mail-Versand laeuft danach in einem separaten API-Aufruf.
+ if(p.deferInvite===true)return {user:ft_safe_(u),message:'Mitarbeiter angelegt.',invitePending:true};
+ let message='Mitarbeiter angelegt. ';
+ try{message+=ft_invite_(actor,u);}catch(e){message+='Einladung noch nicht verschickt: '+e.message;}
+ return {user:ft_safe_(u),message};}
 
-function ft_userUpdate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=ft_user_(actor,p.id);if(u.role==='SYSADMIN')throw Error('Systemadmin nicht über Firmenverwaltung ändern');const before=ft_safe_(u);const fields=['name','monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours','startDate','workdays','status'];fields.forEach(k=>{if(p[k]===undefined)return;if(['monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours'].includes(k))u[k]=ft_number_(p[k],k==='openingHours'?-10000:0,k==='openingHours'?10000:k==='monthlyHours'?300:k==='hourlyRate'?10000:1000,k);else u[k]=ft_str_(p[k],100);});if(p.role&&['ADMIN','STAFF'].includes(p.role))u.role=p.role;if(!['ACTIVE','DISABLED','INVITED'].includes(u.status))throw Error('Ungültiger Status');if(!/^[1-7](,[1-7])*$/.test(u.workdays)||new Set(u.workdays.split(',')).size!==u.workdays.split(',').length)throw Error('Arbeitstage im Format 1,2,3,4,5 eingeben, ohne Duplikate.');if(u.startDate)ft_date_(u.startDate);ft_save_('Users',u);ft_audit_(actor,'UPDATE','Users',u.id,before,ft_safe_(u));return ft_safe_(u);}
+function ft_userUpdate_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=ft_user_(actor,p.id);if(u.role==='SYSADMIN')throw Error('Systemadmin nicht über Firmenverwaltung ändern');const before=ft_safe_(u);
+ if(p.startDate!==undefined&&p.startDate!==u.startDate&&ft_leaveLedgerRows_(false).some(x=>x.companyId===u.companyId&&x.userId===u.id&&x.kind==='GRANT')&&before.leaveYearMode==='ANNIVERSARY')
+  throw Error('Das Eintrittsdatum nach bereits verbuchten Jahresgutschriften bitte nicht ohne kontrollierte Urlaubsjahr-Umstellung ändern.');
+ if(p.leaveBalance!==undefined&&Number(p.leaveBalance)!==Number(u.leaveBalance))ft_leaveEnsureOpening_(u,actor);const fields=['name','monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours','startDate','workdays','status'];fields.forEach(k=>{if(p[k]===undefined)return;if(['monthlyHours','hourlyRate','leaveEntitlement','leaveBalance','openingHours'].includes(k))u[k]=ft_number_(p[k],k==='openingHours'?-10000:0,k==='openingHours'?10000:k==='monthlyHours'?300:k==='hourlyRate'?10000:1000,k);else u[k]=ft_str_(p[k],100);});if(p.role&&['ADMIN','STAFF'].includes(p.role))u.role=p.role;if(!['ACTIVE','DISABLED','INVITED'].includes(u.status))throw Error('Ungültiger Status');if(!/^[1-7](,[1-7])*$/.test(u.workdays)||new Set(u.workdays.split(',')).size!==u.workdays.split(',').length)throw Error('Arbeitstage im Format 1,2,3,4,5 eingeben, ohne Duplikate.');if(u.startDate)ft_date_(u.startDate);
+ if(p.hoursStartMonth!==undefined){
+  ft_month_(String(p.hoursStartMonth));
+  if(u.startDate&&String(p.hoursStartMonth)<String(u.startDate).slice(0,7))
+   throw Error('Beginn der FireTime-Abrechnung darf nicht vor dem Beschäftigungsbeginn liegen.');
+ }
+ const hasLeaveRule=p.leaveYearMode!==undefined||p.leaveRuleType!==undefined;
+ const leaveRule=hasLeaveRule?ft_leaveStaffCheck_(p,u,true):null;
+ const flexRule=p.leaveWorkModel!==undefined?ft_leaveFlexValidate_(p,u,true):null;
+ if(leaveRule)ft_absenceSheet_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,true);
+ ft_save_('Users',u);
+ if(p.hoursStartMonth!==undefined)ft_balanceStartSave_(actor,u,p.hoursStartMonth);
+ if(leaveRule)ft_leaveStaffSave_(actor,u,leaveRule);if(flexRule)ft_leaveFlexSave_(actor,u,flexRule);if(p.leaveBalance!==undefined&&Number(p.leaveBalance)!==Number(before.leaveBalance))ft_leaveLedgerRecord_(actor,u,'ADJUST',Number(u.leaveBalance)-Number(before.leaveBalance),'USER_UPDATE_'+ft_uuid_(),'Administrator-Korrektur des Urlaubssaldos');ft_audit_(actor,'UPDATE','Users',u.id,before,ft_safe_(u));return ft_safe_(u);}
 
 // -----------------------------------------------------------------
 // 05_Zeiterfassung
@@ -203,6 +541,7 @@ function ft_hours_(a,b){return Math.max(0,(new Date(b)-new Date(a))/3600000);}
 function ft_overlap_(a,b,c,d){return Math.max(0,Math.min(+new Date(b),+new Date(d))-Math.max(+new Date(a),+new Date(c)))/3600000;}
 
 function ft_2_(v){return Math.round((Number(v)||0)*100)/100;}
+function ft_hourRound_(v){return Math.round((Number(v)||0)*1e8)/1e8;}
 
 function ft_easter_(year){const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k+7)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),day=(h+l-7*m+114)%31+1;return new Date(year,mo-1,day,12);}
 
@@ -212,15 +551,143 @@ function ft_holiday_(str){const y=Number(str.slice(0,4)),fixed=['01-01','01-06',
 
 function ft_categoryHours_(start,end,c){const result={night:0,sunday:0,holiday:0};let t=+new Date(start),stop=+new Date(end);let guard=0;while(t<stop&&guard++<1000){const next=Math.min(stop,Math.floor(t/3600000+1)*3600000),mid=new Date((t+next)/2),hours=(next-t)/3600000;const local=ft_localDate_(mid),hour=Number(Utilities.formatDate(mid,FT_TZ,'H')),weekday=Number(Utilities.formatDate(mid,FT_TZ,'u'));const ns=Number(c.nightStart||22),ne=Number(c.nightEnd===0?0:c.nightEnd||6);if(ns<=ne?(hour>=ns&&hour<ne):(hour>=ns||hour<ne))result.night+=hours;if(weekday===7)result.sunday+=hours;if(ft_holiday_(local))result.holiday+=hours;t=next;}return result;}
 
-function ft_activitySave_(actor,p){const uid=actor.role==='STAFF'?actor.id:p.userId||actor.id,u=ft_user_(actor,uid),c=ft_company_(actor,u.companyId);const type=String(p.type||'OBJECT');if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Ungültige Tätigkeit');const start=ft_datetime_(p.start),end=ft_datetime_(p.end);if(end<=start||ft_hours_(start,end)>48)throw Error('Ende muss nach Beginn liegen; maximal 48 Stunden.');const br=ft_number_(p.breakMinutes||0,0,1440,'Pausen');if(br>=ft_hours_(start,end)*60)throw Error('Pause darf nicht die ganze Schicht umfassen.');const dates=[ft_localMonth_(start),ft_localMonth_(new Date(end.getTime()-1))];dates.forEach(m=>ft_requireMonthOpen_(c.id,u.id,m));const entries=ft_get_('Activities').filter(x=>x.companyId===c.id&&x.userId===u.id&&x.id!==p.id);if(entries.some(x=>ft_overlap_(start,end,x.start,x.end)>0))throw Error('Aktive Arbeitszeiten dürfen sich nicht überschneiden. Objektkontrollen während Bereitschaft sind erlaubt.');let row=p.id?ft_one_('Activities',p.id):null;if(p.id&&(!row||row.userId!==u.id||row.companyId!==c.id))throw Error('Zeiteintrag nicht gefunden');const before=row?ft_publicRow_(row):{};row=row||{id:ft_uuid_(),companyId:c.id,userId:u.id,createdAt:ft_now_()};Object.assign(row,{type,start:start.toISOString(),end:end.toISOString(),breakMinutes:br,object:ft_str_(p.object,150),description:ft_str_(p.description,1000),updatedAt:ft_now_()});if(row.__row)ft_save_('Activities',row);else ft_add_('Activities',row);ft_audit_(actor,p.id?'UPDATE':'CREATE','Activities',row.id,before,ft_publicRow_(row));return ft_publicRow_(row);}
+
+/**
+ * Pausenregel bei einer zusammenhängenden Objektkontrolle: mehr als 6 Stunden
+ * Zeitspanne erfordert eine ausdrückliche Angabe von mindestens 30 Minuten
+ * tatsächlich genommener Pause. Kein automatischer Pausenabzug.
+ *
+ * Mehrere getrennte Tätigkeitsbuchungen am Tag werden nicht ohne Kenntnis
+ * der tatsächlich genommenen Pausen zusammengezogen. Der Arbeitgeber muss
+ * die Tagesarbeitszeit und eventuelle Zwischenpausen zusätzlich prüfen.
+ */
+function ft_objectPauseRequired_(type,start,end){
+ return String(type)==='OBJECT'&&ft_hours_(start,end)>6+1/3600000;
+}
+function ft_objectPausePending_(row){
+ return ft_objectPauseRequired_(row.type,row.start,row.end)&&Number(row.breakMinutes||0)<30;
+}
+function ft_objectPauseOpenInMonth_(companyId,userId,month){
+ return ft_get_('Activities').filter(x=>x.companyId===companyId&&x.userId===userId&&
+   x.type==='OBJECT'&&(ft_localMonth_(new Date(x.start))===month||
+   ft_localMonth_(new Date(new Date(x.end).getTime()-1))===month)&&ft_objectPausePending_(x));
+}
+function ft_objectPauseEnsureReady_(companyId,userId,month){
+ const pending=ft_objectPauseOpenInMonth_(companyId,userId,month);
+ if(pending.length){
+  const date=ft_localDate_(new Date(pending[0].start));
+  throw Error('Objektkontrolle vom '+date+': Mehr als 6 Stunden erfasst, aber keine 30 Minuten Pause bestätigt. '+
+   'Bitte die tatsächlich genommene Pause in der Zeiterfassung nachtragen. Es wird nichts automatisch abgezogen.');
+ }
+}
+
+function ft_activitySave_(actor,p,internalAllowPausePending){const uid=actor.role==='STAFF'?actor.id:p.userId||actor.id,u=ft_user_(actor,uid),c=ft_company_(actor,u.companyId);const type=String(p.type||'OBJECT');if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Ungültige Tätigkeit');const start=ft_datetime_(p.start),end=ft_datetime_(p.end);if(end<=start||ft_hours_(start,end)>48)throw Error('Ende muss nach Beginn liegen; maximal 48 Stunden.');const br=ft_number_(p.breakMinutes||0,0,1440,'Pausen');if(br>=ft_hours_(start,end)*60)throw Error('Pause darf nicht die ganze Schicht umfassen.');if(ft_objectPauseRequired_(type,start,end)&&br<30&&!internalAllowPausePending)throw Error('Objektkontrolle über 6 Stunden: Bitte mindestens 30 Minuten tatsächlich genommene Pause eintragen. Nichts wird automatisch abgezogen. Wenn keine Pause stattgefunden hat, Arbeitszeit nicht falsch kürzen und mit dem Arbeitgeber klären.');const dates=[ft_localMonth_(start),ft_localMonth_(new Date(end.getTime()-1))];dates.forEach(m=>ft_requireMonthOpen_(c.id,u.id,m));const entries=ft_get_('Activities').filter(x=>x.companyId===c.id&&x.userId===u.id&&x.id!==p.id);if(entries.some(x=>ft_overlap_(start,end,x.start,x.end)>0))throw Error('Aktive Arbeitszeiten dürfen sich nicht überschneiden. Objektkontrollen während Bereitschaft sind erlaubt.');let row=p.id?ft_one_('Activities',p.id):null;if(p.id&&(!row||row.userId!==u.id||row.companyId!==c.id))throw Error('Zeiteintrag nicht gefunden');const before=row?ft_publicRow_(row):{};row=row||{id:ft_uuid_(),companyId:c.id,userId:u.id,createdAt:ft_now_()};
+ const activityOptionId=String(p.activityOptionId||'').trim();
+ if(activityOptionId){
+   const choice=ft_activityTypesFor_(c).find(x=>x.id===activityOptionId&&x.type===type);
+   if(!choice)throw Error('Tätigkeitsauswahl gehört nicht zu dieser Firma oder Tätigkeitsart.');
+ }
+ const note=' [Pausenangabe offen – bitte nachtragen]';
+ let description=ft_str_(p.description,1000).replace(/ \[Pausenangabe offen – bitte nachtragen\]/g,'');
+ if(internalAllowPausePending&&ft_objectPauseRequired_(type,start,end)&&br<30)description=description.slice(0,1000-note.length)+note;
+ Object.assign(row,{type,start:start.toISOString(),end:end.toISOString(),breakMinutes:br,object:ft_str_(p.object,150),description,activityOptionId,updatedAt:ft_now_()});if(row.__row)ft_save_('Activities',row);else ft_add_('Activities',row);ft_audit_(actor,p.id?'UPDATE':'CREATE','Activities',row.id,before,ft_publicRow_(row));return ft_publicRow_(row);}
 
 function ft_activityDelete_(actor,p){const r=ft_one_('Activities',p.id);if(!r)throw Error('Eintrag nicht gefunden');ft_scope_(actor,r.companyId);if(actor.role==='STAFF'&&r.userId!==actor.id)throw Error('Keine Berechtigung');[ft_localMonth_(new Date(r.start)),ft_localMonth_(new Date(new Date(r.end).getTime()-1))].forEach(m=>ft_requireMonthOpen_(r.companyId,r.userId,m));ft_sheet_('Activities').deleteRow(r.__row);ft_audit_(actor,'DELETE','Activities',r.id,r,{});return true;}
 
+function ft_leaveDaysRange_(start,end){const s=ft_date_(start),e=ft_date_(end);if(s>e||Math.round((e-s)/86400000)>100)throw Error('Ungültiger Urlaubszeitraum');return true;}
 function ft_leaveDays_(u,start,end){const work=String(u.workdays||'1,2,3,4,5').split(',').map(Number);const s=ft_date_(start),e=ft_date_(end);if(s>e||Math.round((e-s)/86400000)>100)throw Error('Ungültiger Urlaubszeitraum');let count=0;for(let d=new Date(s);d<=e;d.setDate(d.getDate()+1)){const weekday=Number(Utilities.formatDate(d,FT_TZ,'u'));if(work.includes(weekday)&&!ft_holiday_(ft_localDate_(d)))count++;}return count;}
 
-function ft_leaveRequest_(actor,p){const u=actor.role==='STAFF'?actor:ft_user_(actor,p.userId||actor.id);ft_scope_(actor,u.companyId);const days=ft_leaveDays_(u,p.from,p.to);if(!days)throw Error('Der Zeitraum enthält keine konfigurierten Arbeitstage.');if(ft_get_('Leaves').some(x=>x.companyId===u.companyId&&x.userId===u.id&&x.status!=='REJECTED'&&!(p.to<x.from||p.from>x.to)))throw Error('Überlappender Urlaubsantrag vorhanden.');const row={id:ft_uuid_(),companyId:u.companyId,userId:u.id,from:p.from,to:p.to,days,creditHours:0,reason:ft_str_(p.reason,300),status:'PENDING',reviewerId:'',reviewedAt:'',createdAt:ft_now_()};ft_add_('Leaves',row);ft_audit_(actor,'REQUEST','Leaves',row.id,{},row);return row;}
+function ft_leaveRequest_(actor,p){const u=actor.role==='STAFF'?actor:ft_user_(actor,p.userId||actor.id);ft_scope_(actor,u.companyId);const flex=ft_leaveFlexFor_(u).leaveWorkModel==='FLEX';
+ const days=flex?(ft_leaveDaysRange_(p.from,p.to),0):ft_leaveDays_(u,p.from,p.to);
+ if(!flex&&!days)throw Error('Der Zeitraum enthält keine konfigurierten Arbeitstage.');if(ft_get_('Leaves').some(x=>x.companyId===u.companyId&&x.userId===u.id&&!['REJECTED','WITHDRAWN','CANCELLED'].includes(x.status)&&!(p.to<x.from||p.from>x.to)))throw Error('Überlappender Urlaubsantrag vorhanden.');const row={id:ft_uuid_(),companyId:u.companyId,userId:u.id,from:p.from,to:p.to,days,creditHours:0,reason:ft_str_(p.reason,300),status:'PENDING',reviewerId:'',reviewedAt:'',createdAt:ft_now_()};ft_add_('Leaves',row);ft_audit_(actor,'REQUEST','Leaves',row.id,{},row);return row;}
 
-function ft_leaveReview_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const l=ft_one_('Leaves',p.id);if(!l)throw Error('Antrag nicht gefunden');ft_scope_(actor,l.companyId);if(l.status!=='PENDING')throw Error('Dieser Antrag wurde bereits bearbeitet.');const u=ft_user_(actor,l.userId),before=ft_publicRow_(l),approve=p.status==='APPROVED';if(!approve&&p.status!=='REJECTED')throw Error('Ungültiger Status');if(approve){if(Number(u.leaveBalance)<Number(l.days))throw Error('Resturlaub reicht nicht aus');u.leaveBalance=ft_2_(Number(u.leaveBalance)-Number(l.days));l.creditHours=ft_number_(p.creditHours||0,0,300,'Urlaubs-Zeitgutschrift');ft_save_('Users',u);ft_audit_(actor,'LEAVE_BALANCE','Users',u.id,{leaveBalance:Number(u.leaveBalance)+Number(l.days)},{leaveBalance:u.leaveBalance});}l.status=p.status;l.reviewerId=actor.id;l.reviewedAt=ft_now_();ft_save_('Leaves',l);ft_audit_(actor,'REVIEW','Leaves',l.id,before,l);return l;}
+function ft_leaveUpdate_(actor,p){
+ const l=ft_one_('Leaves',p.id);
+ if(!l)throw Error('Urlaubsantrag nicht gefunden.');
+ ft_scope_(actor,l.companyId);
+ if(actor.role==='STAFF'&&l.userId!==actor.id)throw Error('Keine Berechtigung.');
+ if(l.status!=='PENDING')throw Error('Nur offene Urlaubsanträge können bearbeitet werden.');
+ const u=ft_user_(actor,l.userId),before=ft_publicRow_(l);
+ const from=String(p.from||''),to=String(p.to||'');
+ const flex=ft_leaveFlexFor_(u).leaveWorkModel==='FLEX';
+ const days=flex?(ft_leaveDaysRange_(from,to),0):ft_leaveDays_(u,from,to);
+ if(!flex&&!days)throw Error('Der Zeitraum enthält keine Arbeitstage.');
+ if(ft_get_('Leaves').some(x=>x.id!==l.id&&x.companyId===l.companyId&&x.userId===l.userId&&
+    !['REJECTED','WITHDRAWN','CANCELLED'].includes(x.status)&&!(to<x.from||from>x.to)))
+   throw Error('Überlappender Urlaubsantrag vorhanden.');
+ Object.assign(l,{from,to,days,reason:ft_str_(p.reason,300)});
+ ft_save_('Leaves',l);
+ ft_audit_(actor,'UPDATE','Leaves',l.id,before,ft_publicRow_(l));
+ return ft_publicRow_(l);
+}
+function ft_leaveWithdraw_(actor,p){
+ const l=ft_one_('Leaves',p.id);
+ if(!l)throw Error('Urlaubsantrag nicht gefunden.');
+ ft_scope_(actor,l.companyId);
+ if(actor.role==='STAFF'&&l.userId!==actor.id)throw Error('Keine Berechtigung.');
+ const before=ft_publicRow_(l);
+ if(l.status==='PENDING')l.status='WITHDRAWN';
+ else if(l.status==='APPROVED')l.status='CANCEL_PENDING';
+ else throw Error('Für diesen Urlaubsantrag ist kein Rückzug möglich.');
+ ft_save_('Leaves',l);
+ ft_audit_(actor,'WITHDRAW','Leaves',l.id,before,ft_publicRow_(l));
+ return ft_publicRow_(l);
+}
+function ft_leaveReview_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const l=ft_one_('Leaves',p.id);
+ if(!l)throw Error('Antrag nicht gefunden');
+ ft_scope_(actor,l.companyId);
+ const status=String(p.status||''),before=ft_publicRow_(l);
+ const u=ft_user_(actor,l.userId);
+ if(l.status==='CANCEL_PENDING'){
+   if(!['CANCELLED','APPROVED'].includes(status))throw Error('Stornierung nur bestätigen oder ablehnen.');
+   if(status==='CANCELLED'){
+     ft_leaveEnsureOpening_(u,actor);
+     const old=Number(u.leaveBalance)||0;
+     u.leaveBalance=ft_2_(old+Number(l.days||0));
+     ft_save_('Users',u);
+     ft_audit_(actor,'LEAVE_BALANCE','Users',u.id,{leaveBalance:old},{leaveBalance:u.leaveBalance});
+     l.status='CANCELLED';l.creditHours=0;
+   }else l.status='APPROVED';
+ }else{
+   if(l.status!=='PENDING')throw Error('Dieser Antrag wurde bereits bearbeitet.');
+   if(!['APPROVED','REJECTED'].includes(status))throw Error('Ungültiger Status');
+   if(status==='APPROVED'){
+     const flex=ft_leaveFlexFor_(u);
+     if(flex.leaveWorkModel==='FLEX'){
+       if(!flex.leaveFlexConfigured)throw Error('Flexibler Urlaub: rechnerische Urlaubstage/Woche und geprüfte Bewertungsgrundlage müssen zuerst hinterlegt werden. Keine automatische Abbuchung.');
+       if(p.flexBasisConfirmed!==true)throw Error('Flexibler Urlaub muss vom Administrator ausdrücklich nach dokumentierter Grundlage bestätigt werden.');
+       const days=ft_number_(p.flexDays,1,100,'Genehmigte Urlaubstage');
+       if(!Number.isInteger(days))throw Error('Bitte ganze Urlaubstage gemäß der dokumentierten Vereinbarung angeben.');
+       if(!Number.isFinite(Number(p.creditHours))||Number(p.creditHours)<=0)throw Error('Die Sollstundengutschrift für flexiblen Urlaub ausdrücklich erfassen.');
+       l.days=days;
+     }
+     if(Number(l.days)<=0)throw Error('Ohne nachvollziehbare Bewertung dürfen keine null Urlaubstage genehmigt werden.');
+     if(Number(u.leaveBalance)<Number(l.days))throw Error('Resturlaub reicht nicht aus');
+     ft_leaveEnsureOpening_(u,actor);
+     const old=Number(u.leaveBalance);
+     u.leaveBalance=ft_2_(old-Number(l.days));
+     l.creditHours=ft_number_(p.creditHours||0,0,300,'Urlaubs-Zeitgutschrift');
+     ft_save_('Users',u);
+     ft_audit_(actor,'LEAVE_BALANCE','Users',u.id,{leaveBalance:old},{leaveBalance:u.leaveBalance});
+   }
+   l.status=status;
+ }
+ l.reviewerId=actor.id;l.reviewedAt=ft_now_();
+ ft_save_('Leaves',l);
+ if(l.status==='APPROVED'&&before.status==='PENDING'&&ft_leaveFlexFor_(u).leaveWorkModel==='FLEX'){
+  const rule=ft_leaveFlexFor_(u);
+  ft_absenceAdd_('LeaveFlexApprovals',FT_LEAVE_FLEX_APPROVAL_COLS_,{
+   id:'flex_approval_'+ft_sha_(l.companyId+'|'+l.id),companyId:l.companyId,userId:l.userId,leaveId:l.id,days:l.days,
+   creditHours:l.creditHours,referenceDays:rule.leaveFlexReferenceDays,basis:rule.leaveFlexBasis,
+   reviewerId:actor.id,reviewedAt:l.reviewedAt});
+ }
+ if(l.status==='APPROVED'&&before.status==='PENDING')ft_leaveLedgerRecord_(actor,u,'TAKEN',-Number(l.days||0),l.id,'Genehmigter Urlaubsantrag');
+ if(l.status==='CANCELLED'&&before.status==='CANCEL_PENDING')ft_leaveLedgerRecord_(actor,u,'RESTORE',Number(l.days||0),l.id,'Bestätigte Urlaubstornierung');
+ ft_audit_(actor,'REVIEW','Leaves',l.id,before,ft_publicRow_(l));
+ return ft_publicRow_(l);
+}
 
 // -----------------------------------------------------------------
 // 06_Abrechnung
@@ -230,7 +697,7 @@ function ft_leaveReview_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const 
  */
 function ft_report_(c,u,month,skipCumulative,source){
   source=source||{
-    Activities:ft_get_('Activities'),Shifts:ft_get_('Shifts'),
+    Activities:ft_get_('Activities'),Shifts:ft_get_('Shifts'),ShiftSegments:ft_get_('ShiftSegments'),SickLeaves:ft_get_('SickLeaves'),
     Leaves:ft_get_('Leaves'),Months:ft_get_('Months')
   };
   const locked=source.Months.find(x=>x.companyId===c.id&&x.userId===u.id&&
@@ -273,7 +740,7 @@ function ft_report_(c,u,month,skipCumulative,source){
     add(type,cat,fraction);
   });
   const incidents=activities.filter(x=>x.type==='INCIDENT');
-  const shifts=source.Shifts.filter(s=>s.companyId===c.id&&s.userId===u.id&&
+  const shifts=ft_accountableShifts_(source).filter(s=>s.companyId===c.id&&s.userId===u.id&&
     s.status==='PUBLISHED'&&s.actualStatus==='DONE'&&
     ft_overlap_(s.start,s.end,from,to)>0);
   shifts.forEach(s=>{
@@ -289,7 +756,7 @@ function ft_report_(c,u,month,skipCumulative,source){
   for(const k of ['night','sunday','holiday']){
     t[k]=hoursByType.OBJECT[k]+hoursByType.INCIDENT[k]+hoursByType.OTHER[k];
     t['standby'+k[0].toUpperCase()+k.slice(1)]=hoursByType.STANDBY[k];
-    const included=rule[k+'Types'];
+    const included=ft_rulePremiumTypes_(c,rule[k+'Types']);
     t[k+'PremiumHours']=included.reduce((sum,type)=>sum+hoursByType[type][k],0);
   }
   t.objectSunday=hoursByType.OBJECT.sunday;
@@ -297,15 +764,22 @@ function ft_report_(c,u,month,skipCumulative,source){
   t.incidentSunday=hoursByType.INCIDENT.sunday;
   t.incidentHoliday=hoursByType.INCIDENT.holiday;
   t.statutoryHolidayWorkHours=t.holiday;
-  source.Leaves.filter(l=>l.companyId===c.id&&l.userId===u.id&&l.status==='APPROVED')
+  // A cancellation request keeps its approved credit until an administrator confirms it.
+  source.Leaves.filter(l=>l.companyId===c.id&&l.userId===u.id&&['APPROVED','CANCEL_PENDING'].includes(l.status))
     .forEach(l=>{
       const all=Number(l.days)||1;
       const fromD=l.from>month+'-01'?l.from:month+'-01';
       const endD=l.to<ft_localDate_(new Date(to.getTime()-3600000))?
         l.to:ft_localDate_(new Date(to.getTime()-3600000));
       if(fromD<=endD)t.leaveCredit+=(Number(l.creditHours)||0)*
-        ft_leaveDays_(u,fromD,endD)/all;
+        (ft_leaveFlexFor_(u).leaveWorkModel==='FLEX'?ft_flexLeaveDaysForMonth_(l,fromD,endD):ft_leaveDays_(u,fromD,endD)/all);
     });
+  t.sickCredit=0;t.sickStandbyCredit=0;
+  (source.SickLeaves||ft_get_('SickLeaves')).filter(x=>x.companyId===c.id&&x.userId===u.id&&x.status==='APPROVED')
+   .forEach(x=>{const dur=ft_hours_(x.from,x.to),part=ft_overlap_(x.from,x.to,from,to);
+     if(dur>0&&part>0){t.sickCredit+=(Number(x.creditHours)||0)*part/dur;
+       t.sickStandbyCredit+=(Number(x.standbyCreditHours)||0)*part/dur;}
+   });
   const wage=Number(u.hourlyRate)||0;
   const rate=Number(rule.standbyRate)||0;
   t.basePay=t.worked*wage;
@@ -313,30 +787,47 @@ function ft_report_(c,u,month,skipCumulative,source){
   // Zuschlagsbasis ist bei Bereitschaft der Bereitschaftssatz,
   // bei Tätigkeiten der Mitarbeiter-Stundensatz.
   for(const k of ['night','sunday','holiday']){
-    const types=rule[k+'Types'];
+    const types=ft_rulePremiumTypes_(c,rule[k+'Types']);
     const base=types.reduce((sum,type)=>sum+
       hoursByType[type][k]*(type==='STANDBY'?rate:wage),0);
     t[k+'Pay']=base*(Number(rule[k+'Pct'])||0)/100;
   }
   t.leavePay=t.leaveCredit*wage;
+  t.sickPay=t.sickCredit*wage;t.sickStandbyPay=t.sickStandbyCredit*rate;
   t.estimatedGross=t.basePay+t.standbyPay+t.nightPay+t.sundayPay+
-    t.holidayPay+t.leavePay;
-  t.saldo=t.worked+t.leaveCredit-t.target;
+    t.holidayPay+t.leavePay+t.sickPay+t.sickStandbyPay;
+  t.saldo=t.worked+t.leaveCredit+t.sickCredit-t.target;
   // Keine Behauptung, dass gesetzliches Feiertagsarbeitsentgelt
   // damit bereits vollständig berechnet wäre.
   t.needsHolidayPayReview=t.statutoryHolidayWorkHours>0;
   if(!skipCumulative){
-    let cur=ft_month_(u.startDate?u.startDate.slice(0,7):month);
+    let cur=ft_balanceStartMonth_(u);
     let balance=t.opening,n=0;
-    while(cur<=month && n++<60){
-      balance+=cur===month?t.saldo:ft_report_(c,u,cur,true,source).saldo;
+    t.balanceStartMonth=cur;
+    t.balanceBreakdown=[];
+    while(cur<=month&&n<60){
+      const current=cur===month?t:ft_report_(c,u,cur,true,source);
+      const delta=Number(current.saldo)||0;
+      balance+=delta;
+      t.balanceBreakdown.push({month:cur,target:Number(current.target)||0,
+        worked:Number(current.worked)||0,leaveCredit:Number(current.leaveCredit)||0,
+        sickCredit:Number(current.sickCredit)||0,saldo:ft_hourRound_(delta)});
+      n++;
       const [y,m]=cur.split('-').map(Number);
       cur=Utilities.formatDate(new Date(y,m,1,12),FT_TZ,'yyyy-MM');
     }
     t.runningBalance=balance;
-    t.balanceLimited=n>=60;
+    t.balanceLimited=cur<=month;
+    t.balanceBeforeStart=t.balanceStartMonth>month;
   }
-  for(const k of Object.keys(t))if(typeof t[k]==='number')t[k]=ft_2_(t[k]);
+  for(const k of Object.keys(t))if(typeof t[k]==='number'){
+   const isHour=['worked','object','incident','other','breaks','night','sunday','holiday',
+    'standby','standbyNight','standbySunday','standbyHoliday','objectSunday','objectHoliday',
+    'incidentSunday','incidentHoliday','sundayPremiumHours','holidayPremiumHours','nightPremiumHours',
+    'statutoryHolidayWorkHours','leaveCredit','sickCredit','sickStandbyCredit','target','opening','saldo',
+    'runningBalance'].includes(k);
+   t[k]=isHour?ft_hourRound_(t[k]):ft_2_(t[k]);
+  }
   return t;
 }
 
@@ -344,9 +835,17 @@ function ft_monthSubmit_(actor,p){
  const uid=actor.role==='STAFF'?actor.id:p.userId||actor.id;
  const u=ft_user_(actor,uid),c=ft_company_(actor,u.companyId),month=ft_month_(p.month);
  if(month>ft_localMonth_(new Date()))throw Error('Zukünftige Monate können nicht eingereicht werden.');
- const pending=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.userId===u.id&&
-  s.status==='PUBLISHED'&&s.day.slice(0,7)===month&&s.actualStatus!=='DONE');
- if(pending)throw Error('Bereitschaft ist noch nicht bestätigt: '+pending.day);
+ const modified=new Set(ft_get_('ShiftSegments').map(x=>x.shiftId));
+ const pendingLegacy=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.userId===u.id&&
+  s.status==='PUBLISHED'&&!modified.has(s.id)&&s.day.slice(0,7)===month&&s.actualStatus!=='DONE');
+ const pendingPart=ft_get_('ShiftSegments').find(x=>x.companyId===c.id&&x.userId===u.id&&
+  ft_localMonth_(new Date(x.start))===month&&x.actualStatus!=='DONE');
+ const pending=pendingLegacy||pendingPart;
+ if(pending)throw Error('Bereitschaft ist noch nicht bestaetigt: '+(pending.day||ft_localDate_(new Date(pending.start))));
+ if(ft_get_('ShiftChanges').some(x=>x.companyId===c.id&&x.status==='PENDING'&&
+  (x.fromUserId===u.id||x.toUserId===u.id)&&ft_localMonth_(new Date(x.start))===month))
+  throw Error('Offene Bereitschaftsuebergabe erst klaeren.');
+ ft_objectPauseEnsureReady_(c.id,u.id,month);
  const existing=ft_get_('Months').find(x=>x.companyId===c.id&&x.userId===u.id&&x.month===month);
  if(existing&&['SUBMITTED','APPROVED','FINAL'].includes(existing.status))throw Error('Monat bereits eingereicht.');
  const row=existing||{id:ft_uuid_(),companyId:c.id,userId:u.id,month};
@@ -365,75 +864,1053 @@ function ft_monthReview_(actor,p){
  if(!['APPROVED','RETURNED'].includes(p.status))throw Error('Ungültiger Freigabestatus.');
  const before=ft_publicRow_(r);
  if(p.status==='APPROVED'){
+  if(ft_get_('SickLeaves').some(x=>x.companyId===r.companyId&&x.userId===r.userId&&
+     x.status==='PENDING'&&ft_localMonth_(new Date(x.from))<=r.month&&ft_localMonth_(new Date(x.to))>=r.month))
+   throw Error('Krankenstand vor Monatsfreigabe pruefen.');
   const c=ft_company_(actor,r.companyId),u=ft_user_(actor,r.userId);
+  ft_objectPauseEnsureReady_(c.id,u.id,r.month);
   const snap=JSON.stringify(ft_report_(c,u,r.month));
   r.snapshot=snap;r.snapshotHash=ft_sha_(snap);
  }else{r.snapshot='';r.snapshotHash='';}
  r.status=p.status;r.note=ft_str_(p.note,500);
  r.reviewerId=actor.id;r.reviewedAt=ft_now_();
+ if(p.status==='APPROVED'){
+   for(const x of ft_get_('ShiftChanges').filter(x=>x.companyId===r.companyId&&x.status==='ACCEPTED'&&!x.reviewedAt&&
+    (x.fromUserId===r.userId||x.toUserId===r.userId)&&ft_localMonth_(new Date(x.start))===r.month)){
+    x.reviewedAt=ft_now_();x.reviewerId=actor.id;ft_save_('ShiftChanges',x);
+   }
+ }
  ft_save_('Months',r);
  ft_audit_(actor,'REVIEW','Months',r.id,before,r);
  return r;
 }
+function ft_publicReport_(c,report){
+ const out=Object.assign({},report);
+ if(!ft_enabled_(c,'PAY_PREVIEW')){
+  ['basePay','standbyPay','nightPay','sundayPay','holidayPay','leavePay',
+   'sickPay','sickStandbyPay','estimatedGross'].forEach(k=>delete out[k]);
+ }
+ return out;
+}
 function ft_reportApi_(actor,p){
  const uid=actor.role==='STAFF'?actor.id:p.userId||actor.id;
  const u=ft_user_(actor,uid),c=ft_company_(actor,u.companyId),m=ft_month_(p.month);
- return {user:ft_safe_(u),company:ft_companyData_(c),report:ft_report_(c,u,m),
+ return {user:ft_safe_(u),company:ft_companyData_(c),report:ft_publicReport_(c,ft_report_(c,u,m)),
   entries:ft_get_('Activities').filter(a=>a.companyId===c.id&&a.userId===u.id&&
    ft_overlap_(a.start,a.end,...ft_monthBounds_(m))>0).map(ft_publicRow_)};
 }
+/**
+ * FireTime Pro · Moderner PDF-Monatsbericht
+ * Ersetzt ausschliesslich ft_reportPdf_ in der bestehenden Code.gs.
+ * Bestehende Daten / Berechnungen / API unveraendert.
+ * Developed by Michael Mejtsky
+ */
 function ft_reportPdf_(actor,p){
- const {user,company,report:r,entries}=ft_reportApi_(actor,p);
- const doc=DocumentApp.create('FireTime Pro '+company.name+' '+user.name+' '+r.month);
- const body=doc.getBody();
- body.appendParagraph(company.name+' | FireTime Pro').setHeading(DocumentApp.ParagraphHeading.HEADING1);
- if(company.logoId){try{
-  const blob=DriveApp.getFileById(company.logoId).getBlob();
-  const img=body.insertImage(0,blob);
-  if(img.getWidth()>170){const ratio=170/img.getWidth();img.setWidth(170);img.setHeight(Math.round(img.getHeight()*ratio));}
- }catch(e){Logger.log('Logo konnte nicht eingefügt werden: '+e);}}
- body.appendParagraph('Monatsbericht '+r.month).setHeading(DocumentApp.ParagraphHeading.HEADING2);
- body.appendParagraph('Mitarbeiter: '+user.name+' | '+user.email);
- const items=[
-  ['Sollstunden',r.target+' h'],['Arbeit gesamt',r.worked+' h'],
-  ['Objektkontrollen',r.object+' h'],['Bereitschaftseinsätze',r.incident+' h'],
-  ['Bereitschaft netto',r.standby+' h'],
-  ['Sonntagsarbeit (tatsächlich)',r.sunday+' h'],
-  ['Feiertagsarbeit (tatsächlich)',r.holiday+' h'],
-  ['Bereitschaft am Sonntag',r.standbySunday+' h'],
-  ['Bereitschaft am Feiertag',r.standbyHoliday+' h'],
-  ['Zuschlagsrelevante Sonntagsstunden (Firmenregel)',r.sundayPremiumHours+' h'],
-  ['Zuschlagsrelevante Feiertagsstunden (Firmenregel)',r.holidayPremiumHours+' h'],
-  ['Nachtarbeit',r.night+' h'],['Bereitschaft nachts',r.standbyNight+' h'],
-  ['Sonntagszuschlag laut Firmenregel',r.sundayPay.toFixed(2)+' EUR'],
-  ['Feiertagszuschlag laut Firmenregel',r.holidayPay.toFixed(2)+' EUR'],
-  ['Nachtzuschlag laut Firmenregel',r.nightPay.toFixed(2)+' EUR'],
-  ['Bereitschaftsentgelt',r.standbyPay.toFixed(2)+' EUR'],
-  ['Monatssaldo',(r.saldo>=0?'+':'')+r.saldo+' h'],
-  ['Geschätzte Summe',r.estimatedGross.toFixed(2)+' EUR']
- ];
- body.appendTable([['Position','Wert'],...items]);
- if(r.needsHolidayPayReview)body.appendParagraph(
-  'ACHTUNG: Tatsächliche Arbeit an gesetzlichen Feiertagen erfasst. Feiertagsarbeitsentgelt, Feiertagsentgelt und kollektivvertragliche Ansprüche gesondert prüfen.');
- body.appendParagraph('Tätigkeitsnachweise').setHeading(DocumentApp.ParagraphHeading.HEADING2);
- const rows=entries.map(a=>[
-  Utilities.formatDate(new Date(a.start),FT_TZ,'dd.MM.yyyy HH:mm'),
-  Utilities.formatDate(new Date(a.end),FT_TZ,'dd.MM.yyyy HH:mm'),
-  a.type,a.object||'',a.description||''
- ]);
- body.appendTable([['Beginn','Ende','Art','Objekt','Beschreibung'],...(rows.length?rows:[['–','–','–','–','Keine Einträge']])]);
- body.appendParagraph('Schätzung, keine rechtsverbindliche Lohnabrechnung. Sonderzahlungen und KV gesondert prüfen.');
- body.appendParagraph('Erstellt mit FireTime Pro · Developed by Michael Mejtsky');
- doc.saveAndClose();
- const folder=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
- const pdf=folder.createFile(DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF)
-  .setName('FireTimePro_'+company.slug+'_'+user.name.replace(/[^a-z0-9äöü -]/gi,'_')+'_'+r.month+'.pdf'));
- DriveApp.getFileById(doc.getId()).setTrashed(true);
- ft_audit_(actor,'PDF','Reports',pdf.getId(),{}, {companyId:company.id,userId:user.id,month:r.month});
- const b=pdf.getBlob();
- if(b.getSize()>6*1024*1024)throw Error('PDF gespeichert, aber für Direktdownload zu groß.');
- return {name:pdf.getName(),data:'data:application/pdf;base64,'+Utilities.base64Encode(b.getBytes()),id:pdf.getId()};
+  const out=ft_reportApi_(actor,p);
+  const user=out.user, company=out.company, r=out.report, entries=out.entries||[];
+  const month=String(r.month||p.month||'');
+  const germanMonths=['Jänner','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const parts=month.split('-').map(Number);
+  const period=(parts.length===2&&parts[1]>=1&&parts[1]<=12)?germanMonths[parts[1]-1]+' '+parts[0]:month;
+  const primary=/^#[0-9a-fA-F]{6}$/.test(String(company.color||''))?company.color:'#2874B8';
+  const navy='#14273D', soft='#EFF4F9', ink='#253244', muted='#667587', line='#DDE5ED', white='#FFFFFF';
+  const n=v=>Number.isFinite(Number(v))?Number(v):0;
+  const show=v=>Math.abs(n(v))>0.004;
+  const fmt=v=>n(v).toLocaleString('de-AT',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const hours=v=>fmt(v)+' h';
+  const euro=v=>fmt(v)+' €';
+  const signed=v=>(n(v)>0?'+':'')+hours(v);
+  const safeDate=value=>{const d=new Date(value);return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'dd.MM.yyyy'):String(value||'–');};
+  const safeTime=value=>{const d=new Date(value);return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'HH:mm'): '–';};
+  const shortDay=value=>{const d=new Date(value);return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'dd.MM. HH:mm'):String(value||'–');};
+  const doc=DocumentApp.create('FireTime Pro | '+company.name+' | '+user.name+' | '+month);
+  const body=doc.getBody();
+  // A4, dezente Raender. Auch bei anderer Dokumentvorlage lauffaehig.
+  for(const [method,arg] of [['setMarginTop',35],['setMarginBottom',38],['setMarginLeft',42],['setMarginRight',42]]){
+    if(typeof body[method]==='function')body[method](arg);
+  }
+  const txt=(str,opt)=>{
+    opt=opt||{};
+    const para=body.appendParagraph(String(str));
+    if(opt.heading)para.setHeading(opt.heading);
+    if(typeof para.setSpacingBefore==='function')para.setSpacingBefore(opt.before||0);
+    if(typeof para.setSpacingAfter==='function')para.setSpacingAfter(opt.after===undefined?5:opt.after);
+    const text=para.editAsText();
+    text.setFontFamily('Arial').setFontSize(opt.size||9).setForegroundColor(opt.color||ink);
+    if(opt.bold)text.setBold(true);
+    return para;
+  };
+  const cell=(c,opts)=>{
+    opts=opts||{};
+    if(opts.bg)c.setBackgroundColor(opts.bg);
+    for(const [method,size] of [['setPaddingTop',opts.padTop===undefined?7:opts.padTop],
+      ['setPaddingBottom',opts.padBottom===undefined?7:opts.padBottom],
+      ['setPaddingLeft',opts.padLeft===undefined?8:opts.padLeft],
+      ['setPaddingRight',opts.padRight===undefined?8:opts.padRight]]){
+      if(typeof c[method]==='function')c[method](size);
+    }
+    const text=c.editAsText();
+    if(c.getText()){
+      text.setFontFamily('Arial').setFontSize(opts.size||9).setForegroundColor(opts.color||ink);
+      if(opts.bold)text.setBold(true);
+    }
+    return c;
+  };
+  const table=(data,opt)=>{
+    opt=opt||{};
+    const t=body.appendTable(data.map(row=>row.map(x=>String(x===null||x===undefined?'':x))));
+    if(typeof t.setBorderWidth==='function')t.setBorderWidth(opt.border===undefined?0:opt.border);
+    if(typeof t.setBorderColor==='function')t.setBorderColor(line);
+    for(let ri=0;ri<data.length;ri++)for(let ci=0;ci<data[ri].length;ci++){
+      const isHeader=opt.header&&ri===0;
+      const background=isHeader?navy:(ri%2===0?white:'#F5F8FB');
+      cell(t.getRow(ri).getCell(ci),{bg:background,color:isHeader?white:ink,
+        bold:isHeader||Boolean(opt.boldFirst&&ci===0),size:opt.size||8.5,
+        padTop:opt.pad===undefined?6:opt.pad,padBottom:opt.pad===undefined?6:opt.pad});
+    }
+    return t;
+  };
+  const section=title=>{
+    txt(title.toUpperCase(),{size:10,bold:true,color:navy,before:13,after:5});
+    const bar=body.appendTable([['','']]);
+    if(typeof bar.setBorderWidth==='function')bar.setBorderWidth(0);
+    cell(bar.getRow(0).getCell(0),{bg:primary,padTop:1,padBottom:1});
+    cell(bar.getRow(0).getCell(1),{bg:soft,padTop:1,padBottom:1});
+  };
+  const keyValues=(pairs)=>{
+    if(!pairs.length)return;
+    const t=body.appendTable(pairs.map(([label,value])=>[label,value]));
+    if(typeof t.setBorderWidth==='function')t.setBorderWidth(0);
+    for(let i=0;i<pairs.length;i++){
+      cell(t.getRow(i).getCell(0),{bg:i%2?white:'#F2F6FA',size:8.5,color:muted});
+      cell(t.getRow(i).getCell(1),{bg:i%2?white:'#F2F6FA',bold:true,size:9,color:ink});
+    }
+  };
+  // Firmenlogo an oberster Stelle, links neben dem Unternehmen.
+  const head=body.appendTable([['','']]);
+  if(typeof head.setBorderWidth==='function')head.setBorderWidth(0);
+  const imageCell=head.getRow(0).getCell(0),titleCell=head.getRow(0).getCell(1);
+  cell(imageCell,{bg:white,padTop:6,padBottom:8});
+  cell(titleCell,{bg:navy,padTop:14,padBottom:14});
+  let logoWarning='';
+  if(company.logoId){
+    try{
+      const blob=DriveApp.getFileById(company.logoId).getBlob();
+      if(!/^(image\/png|image\/jpeg|image\/gif|image\/bmp)$/i.test(blob.getContentType()))
+        throw Error('Logo ist kein PNG/JPG/GIF/BMP. Bitte Firmenlogo als PNG oder JPG neu hochladen.');
+      const img=imageCell.appendImage(blob);
+      const w=img.getWidth(),h=img.getHeight();
+      if(w>0&&h>0){const factor=Math.min(1,130/w,66/h);img.setWidth(Math.round(w*factor));img.setHeight(Math.round(h*factor));}
+    }catch(err){logoWarning='Firmenlogo konnte nicht eingebettet werden: '+err.message;
+      cell(imageCell,{bg:soft,bold:true,color:navy,size:12});imageCell.appendParagraph('FT  PRO');
+      Logger.log('FireTime Pro PDF: '+logoWarning);
+    }
+  }else{
+    logoWarning='Für diese Firma ist noch kein Logo hinterlegt. Unter Firmenprofil ein PNG/JPG hochladen.';
+    cell(imageCell,{bg:soft,color:navy});imageCell.appendParagraph('FT  PRO');
+  }
+  const cp=titleCell.appendParagraph(String(company.name||'Firma'));
+  cp.editAsText().setFontFamily('Arial').setFontSize(17).setBold(true).setForegroundColor(white);
+  const sp=titleCell.appendParagraph('MONATSNACHWEIS  ·  FIRETIME PRO');
+  sp.editAsText().setFontFamily('Arial').setFontSize(9).setForegroundColor('#D8E5F4');
+  const periodText=titleCell.appendParagraph(period);
+  periodText.editAsText().setFontFamily('Arial').setFontSize(11).setForegroundColor(white);
+
+  const monthRow=ft_get_('Months').find(x=>x.companyId===company.id&&x.userId===user.id&&String(x.month)===month);
+  const status=monthRow?({SUBMITTED:'Eingereicht',APPROVED:'Freigegeben',FINAL:'Abgeschlossen',RETURNED:'Zurückgegeben'}[monthRow.status]||'Offen'):'Offen';
+  txt('MITARBEITER / MONAT',{size:8,bold:true,color:muted,before:11,after:3});
+  table([['Mitarbeiter','Zeitraum','Status'],[user.name,period,status]],{header:true,size:8.5,pad:7});
+
+  section('Monat auf einen Blick');
+  const cards=[['SOLL',hours(r.target)],['GELEISTET',hours(r.worked)],['SALDO',signed(r.saldo)]];
+  if(show(r.standby))cards.push(['BEREITSCHAFT NETTO',hours(r.standby)]);
+  const summary=body.appendTable([cards.map(x=>x[0]),cards.map(x=>x[1])]);
+  if(typeof summary.setBorderWidth==='function')summary.setBorderWidth(0);
+  cards.forEach((_,i)=>{
+    cell(summary.getRow(0).getCell(i),{bg:soft,color:muted,size:7.5,bold:true,padBottom:3});
+    cell(summary.getRow(1).getCell(i),{bg:soft,color:i===2?(n(r.saldo)<0?'#B42318':'#127154'):navy,size:13,bold:true,padTop:3,padBottom:12});
+  });
+  const balance=[];
+  if(show(r.runningBalance))balance.push(['Gesamtsaldo inkl. Vormonate',signed(r.runningBalance)]);
+  if(show(r.leaveCredit))balance.push(['Genehmigte Urlaubsgutschrift',hours(r.leaveCredit)]);
+  if(show(r.sickCredit))balance.push(['Genehmigte Krankenstands-Sollgutschrift',hours(r.sickCredit)]);
+  if(show(r.sickStandbyCredit))balance.push(['Krankenstand: gesonderter Bereitschaftsanspruch',hours(r.sickStandbyCredit)]);
+  if(balance.length){txt('Zusätzliche Gutschriften / Salden',{size:9,bold:true,color:navy,before:9});keyValues(balance);}
+
+  const components=[
+    ['Objektkontrollen',r.object],['Einsätze (aktive Arbeitszeit)',r.incident],
+    ['Sonstige Arbeitszeit',r.other],['Bestätigte Bereitschaft netto',r.standby],
+    ['Nachtarbeit',r.night],['Bereitschaft in Nachtstunden',r.standbyNight],
+    ['Sonntagsarbeit',r.sunday],['Bereitschaft sonntags',r.standbySunday],
+    ['Feiertagsarbeit',r.holiday],['Bereitschaft feiertags',r.standbyHoliday],
+    ['Zuschlagsfähige Nachtstunden',r.nightPremiumHours],
+    ['Zuschlagsfähige Sonntagsstunden',r.sundayPremiumHours],
+    ['Zuschlagsfähige Feiertagsstunden',r.holidayPremiumHours]
+  ].filter(x=>show(x[1])).map(x=>[x[0],hours(x[1])]);
+  if(components.length){section('Arbeits- und Bereitschaftsarten');keyValues(components);}
+
+  const sorted=entries.slice().sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+  if(sorted.length){
+    section('Tätigkeitsnachweise');
+    const types={OBJECT:'Objektkontrolle',INCIDENT:'Einsatz',OTHER:'Sonstiges'};
+    const items=sorted.map(a=>{
+      const net=Math.max(0,ft_hours_(a.start,a.end)-(n(a.breakMinutes)/60));
+      return [safeDate(a.start),safeTime(a.start)+'–'+safeTime(a.end),types[a.type]||String(a.type||'Arbeit'),hours(net),[a.object,a.description].filter(Boolean).join(' · ').slice(0,160)||'–'];
+    });
+    table([['DATUM','UHRZEIT','ART','DAUER','NOTIZ / OBJEKT'],...items],{header:true,size:7.3,pad:5});
+  }
+
+  // Angezeigt werden nur bestaetigte Bereitschaftsabschnitte. Das beugt
+  // doppelter Anzeige nach Teiluebergabe vor und betrifft nur den aktuellen Monat.
+  const monthly=ft_monthBounds_(month),source={Shifts:ft_get_('Shifts'),ShiftSegments:ft_get_('ShiftSegments')};
+  const confirmed=ft_accountableShifts_(source).filter(s=>s.companyId===company.id&&s.userId===user.id&&
+    s.status==='PUBLISHED'&&s.actualStatus==='DONE'&&ft_overlap_(s.start,s.end,monthly[0],monthly[1])>0)
+    .sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+  if(confirmed.length){
+    section('Bestätigte Bereitschaftsabschnitte');
+    const data=confirmed.map(s=>[shortDay(s.start),shortDay(s.end),hours(ft_overlap_(s.start,s.end,monthly[0],monthly[1])),'Bestätigt']);
+    table([['VON','BIS','BRUTTO','STATUS'],...data],{header:true,size:7.7});
+    txt('Netto-Bereitschaft nach Abzug der Einsatzunterbrechungen: '+hours(r.standby),{size:8,color:muted,after:5});
+  }
+
+  const leaveData=ft_get_('Leaves').filter(x=>x.companyId===company.id&&x.userId===user.id&&
+    x.status==='APPROVED'&&String(x.from).slice(0,7)<=month&&String(x.to).slice(0,7)>=month);
+  const sickData=ft_get_('SickLeaves').filter(x=>x.companyId===company.id&&x.userId===user.id&&
+    x.status==='APPROVED'&&ft_overlap_(x.from,x.to,monthly[0],monthly[1])>0);
+  if(leaveData.length||sickData.length){
+    section('Genehmigte Abwesenheiten');
+    const rows=leaveData.map(x=>['Urlaub',String(x.from)+' – '+String(x.to),show(x.creditHours)?hours(x.creditHours):'–']);
+    sickData.forEach(x=>rows.push(['Krankenstand',safeDate(x.from)+' – '+safeDate(x.to),
+      show(x.creditHours)?hours(x.creditHours)+' Sollgutschrift':'keine Sollgutschrift']));
+    table([['ART','ZEITRAUM','ANRECHNUNG'],...rows],{header:true,size:8});
+  }
+
+  // Entgelt ist eine unverbindliche Vorschau. Null-Positionen werden weggelassen.
+  const pay=[
+    ['Aktive Arbeitszeit',r.basePay],['Bereitschaftsvergütung',r.standbyPay],
+    ['Nachtzuschlag laut Firmenregel',r.nightPay],['Sonntagszuschlag laut Firmenregel',r.sundayPay],
+    ['Feiertagszuschlag laut Firmenregel',r.holidayPay],['Urlaubsgutschrift',r.leavePay],
+    ['Krankenstandsgutschrift',r.sickPay],['Krankenstand: Bereitschaftsanspruch',r.sickStandbyPay]
+  ].filter(x=>show(x[1])).map(x=>[x[0],euro(x[1])]);
+  if(pay.length){
+    section('Unverbindliche Vergütungsvorschau');
+    keyValues(pay);
+    const total=body.appendTable([['GESCHÄTZTE GESAMTSUMME',euro(r.estimatedGross)]]);
+    if(typeof total.setBorderWidth==='function')total.setBorderWidth(0);
+    cell(total.getRow(0).getCell(0),{bg:navy,color:white,bold:true,size:9,padTop:9,padBottom:9});
+    cell(total.getRow(0).getCell(1),{bg:navy,color:white,bold:true,size:12,padTop:9,padBottom:9});
+  }
+
+  if(r.needsHolidayPayReview)txt('HINWEIS: Arbeit an einem gesetzlichen Feiertag ist erfasst. Feiertagsentgelt und Ansprüche nach Gesetz/Kollektivvertrag sind gesondert zu prüfen.',{size:8,color:'#9D3B1B',before:12});
+  if(monthRow&&['APPROVED','FINAL'].includes(monthRow.status)&&monthRow.reviewedAt){
+    txt('Monatsprüfung: '+status+' am '+safeDate(monthRow.reviewedAt),{size:8,bold:true,color:'#127154',before:12});
+  }
+  txt('Hinweis: Dieser Monatsnachweis ist keine rechtsverbindliche Lohn- oder Gehaltsabrechnung. Gesetzliche und kollektivvertragliche Ansprüche sind gesondert zu prüfen.',{size:8,color:muted,before:12,after:8});
+  txt('FireTime Pro  ·  Developed by Michael Mejtsky  ·  Erstellt: '+safeDate(new Date()),{size:8,color:muted});
+  doc.saveAndClose();
+  const folder=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
+  const name='FireTimePro_'+String(company.slug||'firma')+'_'+String(user.name||'Mitarbeiter').replace(/[^a-z0-9äöü -]/gi,'_')+'_'+month+'.pdf';
+  // Google Docs dient nur als temporaere Vorlage; im Drive bleibt das PDF.
+  const docFile=DriveApp.getFileById(doc.getId());
+  const pdf=folder.createFile(docFile.getAs(MimeType.PDF).setName(name));
+  docFile.setTrashed(true);
+  ft_audit_(actor,'PDF','Reports',pdf.getId(),{}, {companyId:company.id,userId:user.id,month});
+  if(pdf.getSize()>6*1024*1024)throw Error('PDF gespeichert, aber für Direktdownload zu groß.');
+  return {name:pdf.getName(),data:p.metadataOnly?'':'data:application/pdf;base64,'+Utilities.base64Encode(pdf.getBlob().getBytes()),id:pdf.getId(),logoWarning};
 }
+
+
+// -----------------------------------------------------------------
+// 06B_PDF_ARCHIV (versionierte, mandantenbezogene Metadaten)
+// -----------------------------------------------------------------
+const FT_PDF_ARCHIVE_HEADERS_=['id','companyId','userId','month','fileId','name','createdAt','version','status'];
+// Auch in PdfArchive/PdfJobs koennen Google-Sheets-Monatswerte Date-Objekte werden.
+function ft_pdfReadCell_(key,value){
+ if(value instanceof Date){
+  if(!Number.isFinite(value.getTime()))return '';
+  return key==='month'?Utilities.formatDate(value,FT_TZ,'yyyy-MM'):value.toISOString();
+ }
+ if(key==='month'){
+  const t=String(value||'').trim();
+  if(/^20\d\d-(0[1-9]|1[0-2])(?:-\d\d|T|$)/.test(t))return t.slice(0,7);
+ }
+ return value;
+}
+function ft_pdfArchiveSheet_(create){
+  let sheet=ft_db_().getSheetByName('PdfArchive');
+  if(!sheet&&create){sheet=ft_db_().insertSheet('PdfArchive');sheet.appendRow(FT_PDF_ARCHIVE_HEADERS_);sheet.setFrozenRows(1);sheet.getRange('D:D').setNumberFormat('@');}
+  if(sheet){
+    const found=sheet.getRange(1,1,1,FT_PDF_ARCHIVE_HEADERS_.length).getValues()[0].map(String);
+    if(found.join('|')!==FT_PDF_ARCHIVE_HEADERS_.join('|'))throw Error('PDF-Archivschema stimmt nicht.');
+  }
+  return sheet;
+}
+function ft_pdfArchiveRows_(){
+  const sheet=ft_pdfArchiveSheet_(false);
+  if(!sheet||sheet.getLastRow()<2)return [];
+  return sheet.getRange(2,1,sheet.getLastRow()-1,FT_PDF_ARCHIVE_HEADERS_.length).getValues().map((v,i)=>{
+    const o={__row:i+2};FT_PDF_ARCHIVE_HEADERS_.forEach((key,j)=>o[key]=ft_pdfReadCell_(key,v[j]));return o;
+  });
+}
+function ft_pdfIdentity_(actor,p){
+  const userId=actor.role==='STAFF'?actor.id:String(p.userId||actor.id);
+  const user=ft_user_(actor,userId),company=ft_company_(actor,user.companyId),month=ft_month_(p.month);
+  ft_need_(actor,company,'REPORTS');
+  return {user,company,month};
+}
+function ft_pdfMetadata_(row){return {id:String(row.id),name:String(row.name),month:String(row.month),createdAt:String(row.createdAt),version:Number(row.version)||1,status:String(row.status||'')};}
+/**
+ * Sicherer Sofort-PDF-Export: Der Browser erstellt die PDF aus dem geladenen
+ * (und serverseitig gespeicherten) Monatsbericht; Apps Script speichert sie
+ * in Drive und indiziert sie im firmenspezifisch geschuetzten Archiv.
+ * Kein Google Docs, kein installierbarer Trigger, kein ft_setup erforderlich.
+ * Die uebertragene PDF wird NICHT als autoritative Zeitbuchung verwendet.
+ */
+function ft_pdfStore_(actor,p){
+  const x=ft_pdfIdentity_(actor,p);
+  const key=String(p.requestId||'');
+  if(!/^[a-zA-Z0-9_-]{12,100}$/.test(key))throw Error('PDF-Anfragekennung fehlt. Bitte Seite aktualisieren.');
+  const data=String(p.base64||'');
+  if(!/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length>2900000||data.length<100)
+    throw Error('PDF ist ungueltig oder zu gross (maximal 2 MB).');
+  const bytes=Utilities.base64Decode(data);
+  if(bytes.length<100||bytes.length>2*1024*1024||
+      bytes.slice(0,5).map(v=>v&255).join(',')!=='37,80,68,70,45')
+    throw Error('Das Dokument ist kein gueltiges PDF (maximal 2 MB).');
+  const suffix=ft_hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+    x.company.id+'|'+x.user.id+'|'+x.month+'|'+key,Utilities.Charset.UTF_8));
+  // Doppelte Anfragen derselben Browser-Aktion erzeugen keine Doppeldateien.
+  const existing=ft_pdfArchiveRows_().find(r=>String(r.id)===suffix&&
+    String(r.companyId)===String(x.company.id)&&String(r.userId)===String(x.user.id));
+  if(existing)return ft_pdfMetadata_(existing);
+  const safeUser=String(x.user.name||'Mitarbeiter').replace(/[^a-z0-9äöü -]/gi,'_').slice(0,65);
+  const filename='FireTimePro_'+String(x.company.slug||'Firma')+'_'+safeUser+'_'+x.month+'_'+key.slice(0,8)+'.pdf';
+  let file=null;
+  try{
+    const folder=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
+    file=folder.createFile(Utilities.newBlob(bytes,MimeType.PDF,filename));
+    // Nur das kurze Index-Schreiben wird gesperrt – keine Docs-Erstellung darin.
+    const recorded=ft_lock_(()=>{
+      const previous=ft_pdfArchiveRows_();
+      const dup=previous.find(r=>String(r.id)===suffix);
+      if(dup)return ft_pdfMetadata_(dup);
+      const version=previous.filter(r=>String(r.companyId)===String(x.company.id)&&
+        String(r.userId)===String(x.user.id)&&String(r.month)===x.month)
+        .reduce((v,r)=>Math.max(v,Number(r.version)||1),0)+1;
+      const record={id:suffix,companyId:x.company.id,userId:x.user.id,month:x.month,
+        fileId:file.getId(),name:filename,createdAt:ft_now_(),version,status:'READY'};
+      ft_pdfArchiveSheet_(true).appendRow(FT_PDF_ARCHIVE_HEADERS_.map(k=>record[k]||''));
+      return ft_pdfMetadata_(record);
+    });
+    // Falls zeitgleich schon dieselbe requestId gespeichert war, die zusaetzliche
+    // Drive-Datei nicht als unindexiertes Duplikat liegenlassen.
+    if(recorded.id===suffix){
+      const hits=ft_pdfArchiveRows_().find(r=>String(r.id)===suffix);
+      if(hits&&String(hits.fileId)!==String(file.getId()))file.setTrashed(true);
+    }
+    return recorded;
+  }catch(err){
+    // Keine verwaisten PDF-Dateien bei nicht vollstaendigem Indexeintrag.
+    if(file)try{
+      const saved=ft_pdfArchiveRows_().some(r=>String(r.id)===suffix&&String(r.fileId)===String(file.getId()));
+      if(!saved)file.setTrashed(true);
+    }catch(_){ }
+    throw err;
+  }
+}
+function ft_pdfArchive_(actor,p){
+  const x=ft_pdfIdentity_(actor,p);
+  return ft_pdfArchiveRows_().filter(r=>String(r.companyId)===String(x.company.id)&&String(r.userId)===String(x.user.id)&&String(r.month)===x.month)
+    .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(ft_pdfMetadata_);
+}
+// -----------------------------------------------------------------
+// PDF-Sammelarchiv: ein Dokument pro gewaehlter Mitarbeitergruppe.
+// Getrennte Index-Tabelle vom persoenlichen PDF-Archiv.
+// -----------------------------------------------------------------
+const FT_PDF_BATCH_COLS_=['id','companyId','month','fileId','name','createdAt','version','creatorId','userIds','status'];
+function ft_pdfBatchSheet_(create){
+ let sh=ft_db_().getSheetByName('PdfBatchArchive');
+ if(!sh&&create){sh=ft_db_().insertSheet('PdfBatchArchive');
+   sh.appendRow(FT_PDF_BATCH_COLS_);sh.setFrozenRows(1);sh.getRange('C:C').setNumberFormat('@');}
+ if(sh){
+  const actual=sh.getRange(1,1,1,FT_PDF_BATCH_COLS_.length).getValues()[0].map(String);
+  if(actual.join('|')!==FT_PDF_BATCH_COLS_.join('|'))throw Error('Sammel-PDF-Archivschema stimmt nicht.');
+ }
+ return sh;
+}
+function ft_pdfBatchRows_(){
+ const sh=ft_pdfBatchSheet_(false);if(!sh||sh.getLastRow()<2)return [];
+ return sh.getRange(2,1,sh.getLastRow()-1,FT_PDF_BATCH_COLS_.length).getValues().map((v,i)=>{
+  const row={__row:i+2};FT_PDF_BATCH_COLS_.forEach((k,j)=>row[k]=ft_pdfReadCell_(k,v[j]));return row;
+ });
+}
+function ft_pdfBatchScope_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const company=ft_company_(actor,p.companyId||actor.companyId);
+ ft_need_(actor,company,'REPORTS');
+ return {company,month:ft_month_(p.month)};
+}
+function ft_pdfBatchMeta_(r){
+ let userIds=[];try{userIds=JSON.parse(String(r.userIds||'[]'));}catch(_){}
+ return {id:String(r.id),month:String(r.month),name:String(r.name),
+  createdAt:String(r.createdAt),version:Number(r.version)||1,
+  status:String(r.status||''),userIds:Array.isArray(userIds)?userIds:[]};
+}
+function ft_pdfBatchStore_(actor,p){
+ const x=ft_pdfBatchScope_(actor,p);
+ const requestId=String(p.requestId||'');
+ if(!/^[a-zA-Z0-9_-]{12,100}$/.test(requestId))throw Error('Ungueltige Sammel-PDF-Anfragekennung.');
+ if(!Array.isArray(p.userIds)||p.userIds.length<1||p.userIds.length>200)
+  throw Error('Bitte 1 bis 200 Mitarbeiter auswaehlen.');
+ const ids=[...new Set(p.userIds.map(String))];
+ if(ids.length!==p.userIds.length)throw Error('Mitarbeiterliste enthaelt Duplikate.');
+ const allUsers=ft_get_('Users');
+ for(const id of ids){const user=allUsers.find(u=>String(u.id)===id);
+  if(!user||String(user.companyId)!==String(x.company.id))throw Error('Unberechtigter Mitarbeiter im Sammelbericht.');
+ }
+ const data=String(p.base64||'');
+ if(!/^[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length<100||data.length>11.2e6)
+  throw Error('Sammel-PDF zu gross oder ungueltig (maximal 8 MB).');
+ const bytes=Utilities.base64Decode(data);
+ if(bytes.length<100||bytes.length>8*1024*1024||
+    bytes.slice(0,5).map(v=>v&255).join(',')!=='37,80,68,70,45')
+  throw Error('Sammel-PDF ungueltig (maximal 8 MB).');
+ const suffix=ft_sha_(x.company.id+'|BATCH|'+x.month+'|'+requestId);
+ const existing=ft_pdfBatchRows_().find(a=>String(a.id)===suffix&&String(a.companyId)===String(x.company.id));
+ if(existing)return ft_pdfBatchMeta_(existing);
+ const filename='FireTimePro_'+String(x.company.slug||'Firma').replace(/[^a-z0-9_-]/gi,'_')+'_'+
+  x.month+'_Sammelbericht_'+ids.length+'_Mitarbeiter_'+requestId.slice(0,8)+'.pdf';
+ let file=null;
+ try{
+  file=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'))
+   .createFile(Utilities.newBlob(bytes,MimeType.PDF,filename));
+  const result=ft_lock_(()=>{
+   const rows=ft_pdfBatchRows_(),dup=rows.find(r=>String(r.id)===suffix);
+   if(dup)return ft_pdfBatchMeta_(dup);
+   const version=rows.filter(r=>String(r.companyId)===String(x.company.id)&&String(r.month)===x.month)
+    .reduce((v,r)=>Math.max(v,Number(r.version)||1),0)+1;
+   const record={id:suffix,companyId:x.company.id,month:x.month,fileId:file.getId(),
+    name:filename,createdAt:ft_now_(),version,creatorId:actor.id,userIds:JSON.stringify(ids),status:'READY'};
+   ft_pdfBatchSheet_(true).appendRow(FT_PDF_BATCH_COLS_.map(k=>record[k]||''));
+   return ft_pdfBatchMeta_(record);
+  });
+  const indexed=ft_pdfBatchRows_().find(a=>String(a.id)===suffix);
+  if(indexed&&String(indexed.fileId)!==String(file.getId()))file.setTrashed(true);
+  return result;
+ }catch(e){
+  if(file)try{if(!ft_pdfBatchRows_().some(r=>String(r.id)===suffix&&String(r.fileId)===String(file.getId())))file.setTrashed(true);}catch(_){}
+  throw e;
+ }
+}
+function ft_pdfBatchArchive_(actor,p){
+ const x=ft_pdfBatchScope_(actor,p);
+ return ft_pdfBatchRows_().filter(r=>String(r.companyId)===String(x.company.id)&&String(r.month)===x.month)
+   .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map(ft_pdfBatchMeta_);
+}
+function ft_pdfBatchChunk_(actor,p){
+ const x=ft_pdfBatchScope_(actor,p);
+ const row=ft_pdfBatchRows_().find(r=>String(r.id)===String(p.id)&&
+  String(r.companyId)===String(x.company.id)&&String(r.month)===x.month);
+ if(!row)throw Error('Sammelbericht nicht vorhanden oder Zugriff verweigert.');
+ const file=DriveApp.getFileById(String(row.fileId));
+ if(file.isTrashed()||file.getMimeType()!==MimeType.PDF)throw Error('PDF-Datei nicht verfuegbar.');
+ const bytes=file.getBlob().getBytes(),chunkSize=65536,total=Math.ceil(bytes.length/chunkSize),index=Number(p.index);
+ if(!Number.isSafeInteger(index)||index<0||index>=total)throw Error('Ungueltiger PDF-Abschnitt.');
+ return {id:String(row.id),index,total,name:String(row.name),size:bytes.length,
+   base64:Utilities.base64Encode(bytes.slice(index*chunkSize,(index+1)*chunkSize))};
+}
+
+// Asynchroner PDF-Auftrag: Google Docs wird NICHT in der Cloudflare-HTTP-Anfrage erzeugt.
+const FT_PDF_JOB_HEAD_=['id','companyId','userId','month','status','createdAt','updatedAt','error','archiveId'];
+function ft_pdfJobsSheet_(create){
+ let s=ft_db_().getSheetByName('PdfJobs');
+ if(!s&&create){s=ft_db_().insertSheet('PdfJobs');s.appendRow(FT_PDF_JOB_HEAD_);s.setFrozenRows(1);s.getRange('D:D').setNumberFormat('@');}
+ if(s){const cols=s.getRange(1,1,1,FT_PDF_JOB_HEAD_.length).getValues()[0].map(String);
+  if(cols.join('|')!==FT_PDF_JOB_HEAD_.join('|'))throw Error('PDF-Auftragsschema nicht korrekt.');}
+ return s;
+}
+function ft_pdfJobsRows_(){const s=ft_pdfJobsSheet_(false);if(!s||s.getLastRow()<2)return [];
+ return s.getRange(2,1,s.getLastRow()-1,FT_PDF_JOB_HEAD_.length).getValues().map((values,i)=>{
+  const o={__row:i+2};FT_PDF_JOB_HEAD_.forEach((k,j)=>o[k]=ft_pdfReadCell_(k,values[j]));return o;});}
+function ft_pdfJobPublic_(r){return {id:String(r.id),status:String(r.status),createdAt:String(r.createdAt),error:String(r.error||''),archiveId:String(r.archiveId||'')};}
+function ft_pdfPrepare_(actor,p){
+ // Schneller Auftragsstart: Keine Google-Drive-Dateipruefung und keine Triggeranlage
+ // innerhalb der globalen Script-Sperre. Der HTTP-Request erstellt KEIN PDF.
+ const x=ft_pdfIdentity_(actor,p);
+ const lock=LockService.getScriptLock();
+ if(!lock.tryLock(4500)){
+   throw Error('PDF-System ist momentan ausgelastet. Bitte wenige Sekunden warten und denselben Auftrag erneut pruefen.');
+ }
+ let result=null,needsTrigger=false;
+ try{
+   const match=r=>String(r.companyId)===String(x.company.id)&&
+     String(r.userId)===String(x.user.id)&&String(r.month)===x.month;
+   const pending=ft_pdfJobsRows_().filter(r=>match(r)&&['QUEUED','RUNNING'].includes(String(r.status)))
+     .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+   if(pending){
+     const age=Date.now()-new Date(pending.updatedAt||pending.createdAt).getTime();
+     // Apps Script beendet einzelne Ausfuehrungen spaetestens nach der Laufzeitgrenze;
+     // ein aelterer RUNNING-Datensatz darf nicht dauerhaft alle neuen PDFs blockieren.
+     if(pending.status==='RUNNING' && age>9*60*1000){
+       pending.status='ERROR';
+       pending.error='PDF-Worker hat die maximale Wartezeit ueberschritten. Der Auftrag kann neu gestartet werden.';
+       pending.updatedAt=ft_now_();
+       ft_pdfJobsSheet_(false).getRange(pending.__row,1,1,FT_PDF_JOB_HEAD_.length)
+         .setValues([FT_PDF_JOB_HEAD_.map(k=>pending[k]||'')]);
+     }else{
+       result=ft_pdfJobPublic_(pending);
+       needsTrigger=pending.status==='QUEUED';
+     }
+   }
+   // Ein vorhandener PDF-Bericht darf explizit neu erstellt werden,
+   // beispielsweise nach nachtraeglich erfassten Stunden in einem OFFENEN Monat.
+   if(!result && !ft_bool_(p.refresh)){
+     const previous=ft_pdfArchiveRows_().filter(match)
+       .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+     if(previous)result={status:'READY',...ft_pdfMetadata_(previous)};
+   }
+   if(!result){
+     const job={id:ft_uuid_(),companyId:x.company.id,userId:x.user.id,month:x.month,
+       status:'QUEUED',createdAt:ft_now_(),updatedAt:ft_now_(),error:'',archiveId:''};
+     ft_pdfJobsSheet_(true).appendRow(FT_PDF_JOB_HEAD_.map(k=>job[k]||''));
+     result=ft_pdfJobPublic_(job);needsTrigger=true;
+   }
+ }finally{lock.releaseLock();}
+ if(needsTrigger){
+   // Ausserhalb der globalen Schreibsperre: andere FireTime-Anfragen blockieren nicht.
+   try{
+     const exists=ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='ft_pdfWorker_');
+     if(!exists)ScriptApp.newTrigger('ft_pdfWorker_').timeBased().after(1000).create();
+   }catch(e){
+     console.error('PDF-Auftrags-Trigger konnte nicht angelegt werden:',e);
+     // Auftrag bleibt auffindbar; beim naechsten Aufruf wird die Triggeranlage erneut versucht.
+     throw Error('PDF-Auftrag gespeichert, aber Hintergrundverarbeitung konnte nicht gestartet werden: '+String(e.message||e));
+   }
+ }
+ return result;
+}
+/** Tageskontrolle: fehlende oder blockierte PDF-Archive nach genehmigtem Monat
+ * selbsttaetig wieder anstossen. Begrenzt auf einen Job pro Aufruf. */
+function ft_pdfRecoverApproved_(){
+ const approved=ft_get_('Months').filter(m=>m.status==='APPROVED')
+   .sort((a,b)=>String(a.reviewedAt).localeCompare(String(b.reviewedAt)));
+ if(!approved.length)return {scheduled:0};
+ const archived=ft_pdfArchiveRows_();
+ for(const month of approved){
+  const same=a=>String(a.companyId)===String(month.companyId)&&
+    String(a.userId)===String(month.userId)&&String(a.month)===String(month.month);
+  if(archived.some(a=>same(a)&&a.status==='READY'&&
+    new Date(a.createdAt).getTime()>=new Date(month.reviewedAt||0).getTime()-1000))continue;
+  const user=ft_one_('Users',month.userId);
+  if(!user||String(user.companyId)!==String(month.companyId))continue;
+  try{
+   const actor={id:user.id,role:'STAFF',companyId:month.companyId};
+   const job=ft_pdfPrepare_(actor,{companyId:month.companyId,userId:month.userId,
+     month:month.month,refresh:true});
+   console.info('FireTime PDF-Wiederaufnahme',job.id,job.status,month.month);
+   return {scheduled:1,status:job.status};
+  }catch(e){console.warn('PDF-Wiederaufnahme fuer '+month.id+': '+String(e.message||e));}
+ }
+ return {scheduled:0};
+}
+/** Einreichen braucht KEIN PDF. Die Freigabe erzeugt stets einen nachvollziehbaren
+ * automatischen, mandantengebundenen PDF-Auftrag. Die Google-Ausfuehrung laeuft
+ * unabhaengig vom Browser weiter; das bestehende Archiv bleibt erhalten. */
+function ft_pdfAutoQueueApproved_(actor,reviewed){
+ if(!reviewed||reviewed.status!=='APPROVED')return {status:'SKIPPED'};
+ return ft_pdfPrepare_(actor,{companyId:reviewed.companyId,userId:reviewed.userId,
+   month:reviewed.month,refresh:true});
+}
+function ft_pdfJobStatus_(actor,p){
+ const x=ft_pdfIdentity_(actor,p);
+ const job=ft_pdfJobsRows_().find(r=>String(r.id)===String(p.id)&&
+   String(r.companyId)===String(x.company.id)&&
+   String(r.userId)===String(x.user.id)&&String(r.month)===x.month);
+ if(!job)throw Error('PDF-Auftrag nicht gefunden.');
+ const result=ft_pdfJobPublic_(job);
+ if(job.status==='READY'&&job.archiveId){
+  const saved=ft_pdfArchiveRows_().find(r=>String(r.id)===String(job.archiveId)&&
+    String(r.companyId)===String(x.company.id)&&String(r.userId)===String(x.user.id));
+  if(saved)return {status:'READY',...ft_pdfMetadata_(saved)};
+  return {status:'ERROR',error:'PDF wurde als fertig markiert, fehlt aber im Dokumentenarchiv.',id:result.id};
+ }
+ if(job.status==='RUNNING' &&
+   Date.now()-new Date(job.updatedAt||job.createdAt).getTime()>9*60*1000){
+  return {status:'ERROR',id:result.id,
+    error:'PDF-Worker hat seine Laufzeit ueberschritten. Der Auftrag ist haengengeblieben. Bitte neuen Auftrag versuchen.'};
+ }
+ if(job.status==='QUEUED' &&
+   Date.now()-new Date(job.updatedAt||job.createdAt).getTime()>45*1000){
+   // Wird nur dann neu eingeplant, wenn kein Trigger mehr vorhanden ist.
+   try{
+     const exists=ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='ft_pdfWorker_');
+     if(!exists)ScriptApp.newTrigger('ft_pdfWorker_').timeBased().after(1000).create();
+   }catch(e){return {status:'ERROR',id:result.id,
+      error:'PDF-Trigger kann nicht gestartet werden: '+String(e.message||e)};}
+ }
+ return result;
+}
+function ft_pdfWorker_(){
+ FT_REQUEST_CACHE={db:null,sheets:Object.create(null),tables:Object.create(null),profiles:null,rules:null};
+ let job=null;
+ try{
+  job=ft_lock_(()=>{
+   const pending=ft_pdfJobsRows_().find(r=>r.status==='QUEUED');
+   if(!pending)return null;
+   pending.status='RUNNING';pending.updatedAt=ft_now_();
+   ft_pdfJobsSheet_(false).getRange(pending.__row,1,1,FT_PDF_JOB_HEAD_.length).setValues([FT_PDF_JOB_HEAD_.map(k=>pending[k]||'')]);
+   return {id:pending.id,companyId:pending.companyId,userId:pending.userId,month:pending.month};
+  });
+  if(!job)return;
+  console.info('FireTime PDF-Worker: beginne Auftrag '+job.id);
+  // Verhindert wiederholte Abfragen mit einem veralteten Request-Cache.
+  FT_REQUEST_CACHE.tables=Object.create(null);
+  const c=ft_one_('Companies',job.companyId),u=ft_one_('Users',job.userId);
+  if(!c||!u||u.companyId!==c.id)throw Error('Firma/Mitarbeiter für PDF-Auftrag nicht mehr verfügbar.');
+  // Worker mit festgelegter Mandantenidentität, keine übergreifenden Abfragen.
+  const actor={id:u.id,role:'STAFF',companyId:c.id};
+  // Falls der Browser die PDF sofort nach Freigabe hochgeladen hat,
+  // denselben genehmigten Monatsbericht nicht erneut erzeugen.
+  const jobRow=ft_pdfJobsRows_().find(x=>x.id===job.id);
+  const existingArchive=ft_pdfArchiveRows_().filter(x=>String(x.companyId)===String(c.id)&&
+    String(x.userId)===String(u.id)&&String(x.month)===job.month&&
+    new Date(x.createdAt).getTime()>=new Date(jobRow?.createdAt||0).getTime()-1000)
+    .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  if(existingArchive){
+   ft_lock_(()=>{
+    const row=ft_pdfJobsRows_().find(x=>x.id===job.id);
+    if(!row||row.status!=='RUNNING')return;
+    row.status='READY';row.archiveId=existingArchive.id;row.updatedAt=ft_now_();
+    ft_pdfJobsSheet_(false).getRange(row.__row,1,1,FT_PDF_JOB_HEAD_.length)
+      .setValues([FT_PDF_JOB_HEAD_.map(k=>row[k]||'')]);
+   });
+   return;
+  }
+  const pdf=ft_reportPdf_(actor,{month:job.month,userId:u.id,companyId:c.id,metadataOnly:true});
+  ft_lock_(()=>{
+   const rows=ft_pdfJobsRows_(),row=rows.find(r=>r.id===job.id);
+   if(!row||row.status!=='RUNNING')return;
+   const lastVersion=ft_pdfArchiveRows_().filter(a=>String(a.companyId)===String(c.id)&&String(a.userId)===String(u.id)&&String(a.month)===job.month).reduce((v,a)=>Math.max(v,Number(a.version)||1),0);
+   const prior=ft_pdfArchiveRows_().filter(a=>String(a.companyId)===String(c.id)&&
+     String(a.userId)===String(u.id)&&String(a.month)===job.month&&
+     new Date(a.createdAt).getTime()>=new Date(row.createdAt).getTime()-1000)[0];
+   if(prior){
+     row.status='READY';row.archiveId=prior.id;row.updatedAt=ft_now_();
+     ft_pdfJobsSheet_(false).getRange(row.__row,1,1,FT_PDF_JOB_HEAD_.length)
+       .setValues([FT_PDF_JOB_HEAD_.map(k=>row[k]||'')]);
+     try{DriveApp.getFileById(pdf.id).setTrashed(true);}catch(e){console.warn(e);}
+     return;
+   }
+   const archive={id:ft_uuid_(),companyId:c.id,userId:u.id,month:job.month,fileId:pdf.id,name:pdf.name,createdAt:ft_now_(),version:lastVersion+1,status:'READY'};
+   ft_pdfArchiveSheet_(true).appendRow(FT_PDF_ARCHIVE_HEADERS_.map(k=>archive[k]||''));
+   row.status='READY';row.archiveId=archive.id;row.updatedAt=ft_now_();
+   console.info('FireTime PDF-Worker: PDF gespeichert, Auftrag '+job.id+', Datei '+pdf.id);
+   ft_pdfJobsSheet_(false).getRange(row.__row,1,1,FT_PDF_JOB_HEAD_.length).setValues([FT_PDF_JOB_HEAD_.map(k=>row[k]||'')]);
+  });
+ }catch(e){
+  console.error('PDF-Worker:',e);
+  if(job){try{ft_lock_(()=>{const r=ft_pdfJobsRows_().find(x=>x.id===job.id);if(!r)return;
+   r.status='ERROR';r.error=String(e.message||e).slice(0,500);r.updatedAt=ft_now_();
+   ft_pdfJobsSheet_(false).getRange(r.__row,1,1,FT_PDF_JOB_HEAD_.length).setValues([FT_PDF_JOB_HEAD_.map(k=>r[k]||'')]);});}catch(inner){console.error(inner);}}
+ }finally{
+  // Trigger-Löschung nur für eigene Einmal-Worker; bestehende Tagestrigger bleiben erhalten.
+  const triggers=ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='ft_pdfWorker_');
+  triggers.forEach(t=>{try{ScriptApp.deleteTrigger(t);}catch(e){console.warn(e.message);}});
+  // Neue Aufträge können während der PDF-Erzeugung hinzugekommen sein.
+  try{if(ft_pdfJobsRows_().some(r=>r.status==='QUEUED'))ScriptApp.newTrigger('ft_pdfWorker_').timeBased().after(1000).create();}catch(e){console.warn('PDF-Folgeauftrag:',e.message);}
+  FT_REQUEST_CACHE=null;
+ }
+}
+function ft_pdfChunk_(actor,p){
+  const x=ft_pdfIdentity_(actor,p);
+  const record=ft_pdfArchiveRows_().find(r=>String(r.id)===String(p.id)&&String(r.companyId)===String(x.company.id)&&String(r.userId)===String(x.user.id)&&String(r.month)===x.month);
+  if(!record)throw Error('PDF nicht gefunden oder keine Zugriffsberechtigung.');
+  const file=DriveApp.getFileById(String(record.fileId));
+  if(file.isTrashed()||file.getMimeType()!==MimeType.PDF)throw Error('PDF-Datei ist nicht verfügbar.');
+  const bytes=file.getBlob().getBytes();
+  const chunkSize=65536,total=Math.ceil(bytes.length/chunkSize);
+  const index=Number(p.index);
+  if(!Number.isSafeInteger(index)||index<0||index>=total)throw Error('Ungültiger PDF-Abschnitt.');
+  return {id:String(record.id),index,total,name:String(record.name),size:bytes.length,base64:Utilities.base64Encode(bytes.slice(index*chunkSize,(index+1)*chunkSize))};
+}
+
+// -----------------------------------------------------------------
+// 23_Dienstplan-Freigabe, nachvollziehbarer Kalender und Stempeluhr
+// -----------------------------------------------------------------
+/** EINMAL NACH VOLLSTAENDIGEM ERSETZEN DER Code.gs AUSFUEHREN.
+ * Erstellt NUR neue Tabellen, erweitert Activities um optionId und einen Zeittrigger.
+ * Bestehende Aktivitaeten, Urlaubs-, Arbeits- und Bereitschaftsdaten werden NICHT neu berechnet.
+ * ft_setup() NIEMALS erneut ausfuehren.
+ */
+function ft_workflowUpgrade(){
+ const db=ft_db_();
+ for(const tab of ['PlanMonths','ActivityTimers','ActivityTypes']){
+  if(!db.getSheetByName(tab)){
+   const sh=db.insertSheet(tab);sh.appendRow(FT_HEADERS[tab]);sh.setFrozenRows(1);
+  }
+ }
+ const acts=db.getSheetByName('Activities');
+ if(!acts)throw Error('Die bestehende Tabelle Activities wurde nicht gefunden.');
+ const headers=acts.getRange(1,1,1,acts.getLastColumn()).getValues()[0];
+ if(!headers.includes('activityOptionId')){
+  const expected=FT_HEADERS.Activities.length;
+  if(acts.getLastColumn()>=expected)acts.insertColumnAfter(expected-1);
+  acts.getRange(1,expected).setValue('activityOptionId');
+ }else if(headers.indexOf('activityOptionId')!==FT_HEADERS.Activities.length-1){
+  throw Error('activityOptionId steht an einer unerwarteten Spalte. Vor der Weiterarbeit Tabellenstruktur kontrollieren.');
+ }
+ // Trigger wird neu eingerichtet, NICHT im bestehenden ft_tick-Lock nachgebildet.
+ const previous=ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='ft_timerTick_');
+ previous.forEach(t=>ScriptApp.deleteTrigger(t));
+ ScriptApp.newTrigger('ft_timerTick_').timeBased().everyMinutes(15).create();
+ return {ok:true,version:FT_VERSION,tables:['PlanMonths','ActivityTimers','ActivityTypes'],timerTrigger:'15 Minuten'};
+}
+function ft_planSheetRows_(){
+ const db=ft_db_(),sheet=db.getSheetByName('PlanMonths');
+ if(!sheet)return [];
+ return ft_get_('PlanMonths');
+}
+function ft_planSchedule_(c,month){
+ const rows=ft_get_('Shifts').filter(s=>s.companyId===c.id&&s.day.startsWith(month)).sort((a,b)=>String(a.day).localeCompare(String(b.day)));
+ const gaps=[];
+ for(let d=1;d<=ft_days_(month);d++){
+  const day=month+'-'+String(d).padStart(2,'0');
+  if(!rows.some(s=>s.day===day&&s.userId))gaps.push(day);
+ }
+ const signature=ft_sha_(JSON.stringify(rows.filter(s=>s.userId).map(s=>[s.day,s.userId,s.start,s.end])));
+ return {rows,gaps,signature};
+}
+function ft_standbyCalendarAssignments_(schedule){
+ const ids=new Set(schedule.rows.map(s=>s.id));
+ const children=ft_get_('ShiftSegments').filter(x=>ids.has(x.shiftId));
+ const grouped=new Map();
+ children.forEach(part=>{if(!grouped.has(part.shiftId))grouped.set(part.shiftId,[]);grouped.get(part.shiftId).push(part);});
+ const current={},missing=[];
+ schedule.rows.forEach(shift=>{
+  const parts=grouped.get(shift.id)||[];
+  if(parts.length){
+   parts.forEach(part=>{
+    current[part.id]=part.userId+'|'+part.start+'|'+part.end;
+    if(!part.calendarEventId)missing.push(part.id);
+   });
+  }else if(shift.userId){
+   current[shift.id]=shift.userId+'|'+shift.start+'|'+shift.end;
+   if(!shift.eventId)missing.push(shift.id);
+  }
+ });
+ return {current,missing};
+}
+function ft_standbyCalendarMatches_(schedule,state){
+ if(!state||state.shareStatus!=='SENT'||state.sharedHash!==schedule.signature)return false;
+ const {current,missing}=ft_standbyCalendarAssignments_(schedule);
+ if(missing.length)return false;
+ let shared={};try{shared=JSON.parse(String(state.sharedAssignments||'{}'));}catch(_){}
+ const keys=Object.keys(current);
+ return keys.length>0&&keys.every(k=>shared[k]===current[k]);
+}
+function ft_planWorkflow_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),schedule=ft_planSchedule_(c,m);
+ const ready=Boolean(ft_db_().getSheetByName('PlanMonths'));
+ if(!ready)return {supported:false,gaps:schedule.gaps.length};
+ const state=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m);
+ const legacyPublished=schedule.rows.some(x=>x.status==='PUBLISHED')&&!state;
+ const fixed=Boolean(state?.fixedHash&&state.fixedHash===schedule.signature);
+ const published=Boolean(fixed&&state.publishedHash===schedule.signature);
+ const shared=Boolean(published&&ft_standbyCalendarMatches_(schedule,state));
+ const calendarEnabled=ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)&&!!c.calendarId;
+ return {supported:true,companyId:c.id,month:m,gaps:schedule.gaps.length,
+  fixed,published,shared,calendarEnabled,
+  fixedAt:state?.fixedAt||'',publishedAt:state?.publishedAt||'',sharedAt:state?.sharedAt||'',
+  fixedBy:state?.fixedBy||'',publishedBy:state?.publishedBy||'',sharedBy:state?.sharedBy||'',
+  shareStatus:state?.shareStatus||'NONE',calendarEvents:Number(state?.calendarEvents||0),
+  warnings:String(state?.warnings||''),legacyPublished,legacyCalendarUnknown:legacyPublished,
+  needsReapproval:Boolean(state?.fixedHash&&!fixed),
+  needsReshare:Boolean(state?.sharedHash&&!shared)};
+}
+function ft_planState_(c,m){
+ let row=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m);
+ if(row)return row;
+ row={id:ft_uuid_(),companyId:c.id,month:m,fixedHash:'',fixedAt:'',fixedBy:'',publishedHash:'',publishedAt:'',publishedBy:'',sharedHash:'',sharedAt:'',sharedBy:'',shareStatus:'NONE',calendarEvents:0,warnings:'',sharedAssignments:'{}',updatedAt:ft_now_()};
+ ft_add_('PlanMonths',row);return ft_one_('PlanMonths',row.id);
+}
+function ft_planFinalize_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),plan=ft_planSchedule_(c,m);
+ if(plan.gaps.length)throw Error('Noch nicht besetzte Bereitschaftstage: '+plan.gaps.join(', '));
+ const state=ft_planState_(c,m),before=ft_publicRow_(state),changed=state.fixedHash!==plan.signature;
+ state.fixedHash=plan.signature;state.fixedAt=ft_now_();state.fixedBy=actor.id;
+ // Alte Freigabe- und Versandnachweise bleiben fuer die Historie erhalten; Hashvergleich erkennt Aenderungen.
+ state.updatedAt=ft_now_();ft_save_('PlanMonths',state);
+ ft_audit_(actor,'PLAN_FINALIZE','PlanMonths',state.id,before,ft_publicRow_(state));
+ return {fixed:true,month:m,changed};
+}
+function ft_planPublishOnly_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),plan=ft_planSchedule_(c,m);
+ if(plan.gaps.length)throw Error('Noch nicht besetzte Bereitschaftstage.');
+ const state=ft_planState_(c,m);
+ if(state.fixedHash!==plan.signature)throw Error('Bitte den aktuellen Plan zuerst festlegen.');
+ let published=0;
+ for(const shift of plan.rows){
+  if(shift.status==='PUBLISHED')continue;
+  const before=ft_publicRow_(shift);shift.status='PUBLISHED';shift.updatedAt=ft_now_();ft_save_('Shifts',shift);
+  ft_audit_(actor,'PUBLISH_NO_INVITE','Shifts',shift.id,before,shift);published++;
+ }
+ const before=ft_publicRow_(state);
+ state.publishedHash=plan.signature;state.publishedAt=ft_now_();state.publishedBy=actor.id;
+ state.updatedAt=ft_now_();ft_save_('PlanMonths',state);
+ ft_audit_(actor,'PLAN_PUBLISH','PlanMonths',state.id,before,ft_publicRow_(state));
+ return {published,warnings:[],calendarInvitationsSent:false};
+}
+function ft_planCalendarShare_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),plan=ft_planSchedule_(c,m),state=ft_planState_(c,m);
+ if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn))throw Error('Google-Kalender ist nicht freigeschaltet oder aktiviert.');
+ if(state.fixedHash!==plan.signature||state.publishedHash!==plan.signature)throw Error('Bitte den geänderten Plan zuerst festlegen und veröffentlichen.');
+ if(ft_standbyCalendarMatches_(plan,state))return {alreadyShared:true,count:state.calendarEvents,warnings:[]};
+ // Prüfen, bevor ein Termin angelegt wird. Eine Teilantwort wird dauerhaft als solche gespeichert.
+ ft_calendar_(c);
+ const warns=[];let count=0;
+ let previous={};try{previous=JSON.parse(String(state.sharedAssignments||'{}'));}catch(_){}
+ for(const shift of plan.rows){
+  try{
+   const split=ft_segmentRows_(shift);
+   if(split.length){
+    for(const part of split){
+     if(part.calendarEventId&&previous[part.id]&&String(previous[part.id]).split('|')[0]!==part.userId){
+      const event=ft_calendar_(c).getEventById(part.calendarEventId);
+      if(event)event.deleteEvent();
+      part.calendarEventId='';ft_save_('ShiftSegments',part);
+     }
+    }
+    ft_syncShiftParts_(c,shift);count+=split.length;
+   }else if(shift.userId){
+    const prevUser=String(previous[shift.id]||'__UNKNOWN_PREVIOUS_GUEST__').split('|')[0];
+    ft_syncShift_(c,shift,{...ft_publicRow_(shift),userId:prevUser});count++;
+   }
+  }catch(err){warns.push(shift.day+': '+String(err.message||err));}
+ }
+ const before=ft_publicRow_(state);
+ state.sharedAt=ft_now_();state.sharedBy=actor.id;state.sharedHash=plan.signature;
+ state.shareStatus=warns.length?'PARTIAL':'SENT';state.calendarEvents=count;
+ state.warnings=warns.join(' | ').slice(0,1000);
+ // Store actual users AND ranges, never stale entries from deleted segments.
+ state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(plan).current);
+ state.updatedAt=ft_now_();ft_save_('PlanMonths',state);
+ ft_audit_(actor,'PLAN_CALENDAR_SHARE','PlanMonths',state.id,before,ft_publicRow_(state));
+ return {count,warnings:warns,shareStatus:state.shareStatus};
+}
+// Standardauswahl ist virtuell: keine Migration, vorhandene historische Daten bleiben unangetastet.
+const FT_STANDARD_ACTIVITIES_=[
+ {id:'FT_STD_INCIDENT',type:'INCIDENT',label:'Bereitschaftseinsatz (von Abfahrt bis Einsatzende)'},
+ {id:'FT_STD_MAINTENANCE',type:'OTHER',label:'Wartungsarbeiten'},
+ {id:'FT_STD_EXTINGUISHER',type:'OTHER',label:'Feuerlöscher'},
+ {id:'FT_STD_OFFICE',type:'OTHER',label:'Büro'},
+ {id:'FT_STD_OTHER',type:'OTHER',label:'Sonstige'}
+];
+function ft_activityTypesRows_(){return ft_db_().getSheetByName('ActivityTypes')?ft_get_('ActivityTypes'):[];}
+function ft_activityTypesFor_(c){
+ const saved=ft_activityTypesRows_().filter(x=>x.companyId===c.id)
+  .sort((a,b)=>Number(a.sort||0)-Number(b.sort||0))
+  .map(x=>({id:x.id,type:x.type,label:x.label,active:ft_bool_(x.active)}));
+ return FT_STANDARD_ACTIVITIES_.map(x=>({...x,active:true,standard:true})).concat(saved);
+}
+function ft_activityTypesGet_(actor,p){
+ const c=ft_company_(actor,p.companyId||actor.companyId);ft_need_(actor,c,'TIME');
+ const rows=ft_activityTypesRows_().filter(x=>x.companyId===c.id);
+ return rows.map(x=>({id:x.id,type:x.type,label:x.label,active:ft_bool_(x.active),sort:Number(x.sort||0)}));
+}
+function ft_activityTypesSave_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const c=ft_company_(actor,p.companyId||actor.companyId);ft_need_(actor,c,'TIME');
+ if(!ft_db_().getSheetByName('ActivityTypes'))throw Error('Einmalig ft_workflowUpgrade ausführen.');
+ const type=String(p.type||''),label=ft_str_(p.label,75).trim();
+ if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Tätigkeitsart ungültig.');
+ if(label.length<2)throw Error('Bitte eine Bezeichnung mit mindestens zwei Zeichen angeben.');
+ let row=p.id?ft_activityTypesRows_().find(x=>x.id===p.id&&x.companyId===c.id):null;
+ if(p.id&&!row)throw Error('Tätigkeitsauswahl nicht gefunden.');
+ const before=row?ft_publicRow_(row):{};
+ row=row||{id:ft_uuid_(),companyId:c.id,createdAt:ft_now_(),sort:ft_activityTypesRows_().filter(x=>x.companyId===c.id).length+1};
+ row.type=type;row.label=label;row.active=p.active===undefined?true:ft_bool_(p.active);row.updatedAt=ft_now_();
+ if(row.__row)ft_save_('ActivityTypes',row);else ft_add_('ActivityTypes',row);
+ ft_audit_(actor,'ACTIVITY_TYPE_SAVE','ActivityTypes',row.id,before,ft_publicRow_(row));
+ return {id:row.id,type:row.type,label:row.label,active:ft_bool_(row.active)};
+}
+
+/** Separate Pausen-Ereignisse ohne Migration der bestehenden ActivityTimers-Tabelle. */
+const FT_TIMER_PAUSE_COLS_=['id','companyId','userId','timerId','start','end'];
+function ft_timerPauseRows_(){return ft_absenceRows_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,false);}
+function ft_timerPauseData_(timer){
+ const rows=ft_timerPauseRows_().filter(x=>x.companyId===timer.companyId&&x.userId===timer.userId&&x.timerId===timer.id);
+ const now=Date.now(),active=rows.find(x=>!x.end);
+ const completed=rows.filter(x=>x.end).reduce((sum,x)=>sum+Math.max(0,(Date.parse(x.end)-Date.parse(x.start))/60000),0);
+ return {rows,paused:Boolean(active),active,completedMinutes:Math.round(completed),
+  currentPauseStart:active?.start||'',pauseStartedAt:active?.start||''};
+}
+function ft_timerPauseAction_(actor,action){
+ const u=actor.role==='STAFF'?actor:ft_user_(actor,actor.id);
+ const timer=ft_get_('ActivityTimers').find(x=>x.companyId===u.companyId&&x.userId===u.id);
+ if(!timer)throw Error('Keine laufende Arbeitszeit. Bitte zuerst Arbeit beginnen.');
+ const company=ft_company_(actor,timer.companyId);ft_need_(actor,company,'TIME');
+ const info=ft_timerPauseData_(timer),now=new Date();
+ const deadline=ft_viennaWallDate_(ft_localDate_(new Date(timer.start))+'T19:00');
+ if(now>=deadline)throw Error('Die Arbeitszeit ist bereits bei 19:00 Uhr angekommen. Bitte den automatischen Abschluss abwarten und die tatsächliche Pause danach nachtragen.');
+ if(action==='start'){
+  if(info.paused)throw Error('Die Pause läuft bereits. Bitte erst Pause beenden.');
+  // Do not create any guessed pause. The recorded start is the actual server timestamp.
+  ft_absenceAdd_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,{id:ft_uuid_(),companyId:timer.companyId,
+   userId:timer.userId,timerId:timer.id,start:now.toISOString(),end:''});
+  ft_audit_(actor,'TIMER_PAUSE_START','ActivityTimers',timer.id,{}, {at:now.toISOString()});
+ }else if(action==='stop'){
+  if(!info.paused)throw Error('Es läuft derzeit keine Pause.');
+  const row=info.active;row.end=now.toISOString();
+  if(Date.parse(row.end)<=Date.parse(row.start))throw Error('Pause kann erst nach ihrem tatsächlichen Beginn beendet werden.');
+  ft_absenceSave_('TimerPauseEvents',FT_TIMER_PAUSE_COLS_,row);
+  ft_audit_(actor,'TIMER_PAUSE_STOP','ActivityTimers',timer.id,{}, {start:row.start,end:row.end});
+ }else throw Error('Unbekannte Pausenaktion.');
+ return ft_timerActive_(timer.companyId,timer.userId);
+}
+function ft_timerPauseClear_(rows){
+ const sh=ft_db_().getSheetByName('TimerPauseEvents');if(!sh)return;
+ rows.slice().sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
+}
+
+function ft_timerActive_(companyId,userId){
+ const db=ft_db_();if(!db.getSheetByName('ActivityTimers'))return null;
+ const r=ft_get_('ActivityTimers').find(x=>x.companyId===companyId&&x.userId===userId);
+ if(!r)return null;
+ const state=ft_timerPauseData_(r);
+ return {id:r.id,start:r.start,type:r.type,activityOptionId:r.activityOptionId||'',
+  object:r.object||'',description:r.description||'',paused:state.paused,
+  pauseStartedAt:state.pauseStartedAt,completedPauseMinutes:state.completedMinutes};
+}
+function ft_timerStatus_(actor,p){
+ const userId=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),u=ft_user_(actor,userId);
+ const c=ft_company_(actor,u.companyId);ft_need_(actor,c,'TIME');
+ return {running:ft_timerActive_(c.id,u.id)};
+}
+function ft_timerStart_(actor,p){
+ const uid=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),user=ft_user_(actor,uid),c=ft_company_(actor,user.companyId);
+ ft_need_(actor,c,'TIME');
+ if(!ft_db_().getSheetByName('ActivityTimers'))throw Error('Einmalig ft_workflowUpgrade ausführen.');
+ if(ft_timerActive_(c.id,uid))throw Error('Du hast bereits eine laufende Arbeitszeit. Bitte zuerst beenden.');
+ const now=new Date(),clock=Number(Utilities.formatDate(now,FT_TZ,'H'));
+ if(clock>=19)throw Error('Nach 19:00 bitte manuell mit Beginn und Ende erfassen. Automatisches Stoppen gilt nur für Starts vor 19:00 Uhr.');
+ const type=String(p.type||'OBJECT');if(!['OBJECT','INCIDENT','OTHER'].includes(type))throw Error('Bitte eine gültige Tätigkeitsart auswählen.');
+ const optionId=String(p.activityOptionId||'');
+ if(optionId&&!ft_activityTypesFor_(c).some(x=>x.id===optionId&&x.type===type&&x.active))throw Error('Die Tätigkeitsauswahl stimmt nicht mit der Tätigkeit überein.');
+ ft_requireMonthOpen_(c.id,uid,ft_localMonth_(now));
+ const row={id:ft_uuid_(),companyId:c.id,userId:uid,type,activityOptionId:optionId,start:now.toISOString(),object:ft_str_(p.object||'',150),description:ft_str_(p.description||'',1000),createdAt:ft_now_(),updatedAt:ft_now_()};
+ ft_add_('ActivityTimers',row);ft_audit_(actor,'TIMER_START','ActivityTimers',row.id,{},row);
+ return {running:ft_timerActive_(c.id,uid)};
+}
+function ft_viennaWallDate_(value){
+ const match=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value||''));
+ if(!match)throw Error('Ungültiges österreichisches Ortsdatum.');
+ const target=Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3]),Number(match[4]),Number(match[5]));
+ let ms=target;
+ // Convert Vienna wall time to a real instant without relying on the script/server's timezone.
+ for(let i=0;i<4;i++){
+  const local=Utilities.formatDate(new Date(ms),FT_TZ,'yyyy-MM-dd HH:mm');
+  const m=/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(local);
+  if(!m)throw Error('Wiener Uhrzeit kann nicht ermittelt werden.');
+  const seen=Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]),Number(m[4]),Number(m[5]));
+  const diff=target-seen;if(!diff)break;ms+=diff;
+ }
+ return new Date(ms);
+}
+function ft_timerClose_(timer,actor,auto,actualPauseMinutes){
+ const beginning=new Date(timer.start),day=ft_localDate_(beginning),endOfDay=ft_viennaWallDate_(day+'T19:00');
+ const pauses=ft_timerPauseData_(timer);
+ let finish=new Date();if(finish>endOfDay)finish=endOfDay;
+ // Pressing End while paused also ends that *real, started* pause at End.
+ // It must not leave an open timer which might auto-close at 19:00.
+ const pendingPauseMinutes=pauses.paused&&pauses.active?
+  Math.max(0,(finish.getTime()-Date.parse(pauses.active.start))/60000):0;
+ const minutes=pauses.rows.length?
+  Math.round(pauses.completedMinutes+pendingPauseMinutes):Number(actualPauseMinutes)||0;
+ if(finish<=beginning)throw Error('Endzeit muss nach dem Arbeitsbeginn liegen.');
+ const out=ft_activitySave_(actor,{userId:timer.userId,companyId:timer.companyId,
+  type:timer.type,activityOptionId:timer.activityOptionId||'',
+  start:Utilities.formatDate(beginning,FT_TZ,"yyyy-MM-dd'T'HH:mm"),end:Utilities.formatDate(finish,FT_TZ,"yyyy-MM-dd'T'HH:mm"),
+  object:timer.object||'',description:(timer.description||'')+
+   (auto?' [Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]':'')+
+   (pauses.paused?' [Laufende Pause mit Arbeitsende abgeschlossen.]':''),
+  // A pressed Stop must really finish the timer. If the legally required pause
+  // is missing, save the real minutes and flag the row for correction instead
+  // of blocking manual Stop and accidentally forcing a 19:00 auto-close.
+  breakMinutes:minutes},true);
+ ft_timerPauseClear_(pauses.rows);
+ ft_sheet_('ActivityTimers').deleteRow(timer.__row);ft_invalidate_('ActivityTimers');
+ ft_audit_(actor,auto?'TIMER_AUTO_CLOSE':'TIMER_STOP','ActivityTimers',timer.id,timer,{activityId:out.id,end:finish.toISOString()});
+ return {activity:out,autoClosed:auto||false,closedAt:finish.toISOString()};
+}
+function ft_timerStop_(actor,p){
+ const uid=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),user=ft_user_(actor,uid),c=ft_company_(actor,user.companyId);
+ ft_need_(actor,c,'TIME');
+ const row=ft_get_('ActivityTimers').find(x=>x.companyId===c.id&&x.userId===uid);
+ if(!row)throw Error('Keine laufende Arbeitszeit. Eventuell wurde diese bereits um 19:00 Uhr beendet.');
+ const pause=ft_number_(p.breakMinutes||0,0,1440,'Pause in Minuten');
+ return ft_timerClose_(row,actor,false,pause);
+}
+/** Nur nach tatsächlich erfolgtem Auto-Abschluss um 19:00 Uhr benachrichtigen.
+ * Manuelles Ende und ein zwischendurch aktiver Timer dürfen nie auslösen.
+ * Eingetragene Pause bzw. Tätigkeitsart bleiben unverändert.
+ */
+function ft_timerConfirmedAutoClose_(activity){
+ if(!activity||!String(activity.description||'').includes(
+  '[Automatisch um 19:00 Uhr beendet; bitte ggf. korrigieren.]'))return false;
+ // Activities are normalized to UTC when saved in Sheets, not wall-clock
+ // YYYY-MM-DDTHH:mm. Compare in Vienna local time, including winter/DST.
+ const end=new Date(activity.end);
+ return Number.isFinite(end.getTime())&&
+  Utilities.formatDate(end,FT_TZ,'HH:mm')==='19:00';
+}
+/** Automatische Schließung: genau eine Benachrichtigung pro Arbeitszeiteintrag.
+ * Status ERROR wird beim nächsten 15-Minuten-Trigger erneut versucht.
+ * Keine E-Mail bei manueller Stopptaste.
+ */
+function ft_timerAutoNotice_(company,user,activity){
+ if(!company||!user||!user.email||!ft_timerConfirmedAutoClose_(activity))return false;
+ const stamp=Utilities.formatDate(new Date(activity.end),FT_TZ,'dd.MM.yyyy HH:mm');
+ const url=ft_clientUrl_(company)||ft_publicGithubUrl_();
+ return ft_notification_(company,user,'TIMER_AUTO_CLOSE',activity.id,
+  'FireTime Pro – Arbeitszeit automatisch um 19:00 Uhr beendet',
+  'Hallo '+user.name+'!\n\nDeine Arbeitszeit vom '+stamp+
+  ' Uhr wurde automatisch mit 19:00 Uhr beendet, weil kein manuelles Arbeitsende erfasst wurde.'+
+  '\n\nBitte öffne FireTime Pro, kontrolliere Anfang und tatsächliches Arbeitsende sowie die tatsächlich genommene Pause und berichtige den Eintrag unter „Arbeitszeiten → Bearbeiten“.'+
+  '\nDie automatische Endzeit ist vorläufig. Bitte auch protokollierte oder nicht abgeschlossene Pausen prüfen; es wird keine Pause erfunden.'+
+  '\n\n'+url+'\n\n'+company.name);
+}
+function ft_timerRetryNotices_(){
+ let retried=0;
+ for(const n of ft_get_('Notifications').filter(x=>x.kind==='TIMER_AUTO_CLOSE'&&x.status==='ERROR').slice(0,25)){
+  const c=ft_one_('Companies',n.companyId),u=ft_one_('Users',n.userId),a=ft_one_('Activities',n.reference);
+  if(c&&u&&a&&a.companyId===c.id&&a.userId===u.id&&
+     ft_timerConfirmedAutoClose_(a)&&ft_timerAutoNotice_(c,u,a))retried++;
+ }
+ return retried;
+}
+function ft_timerSweep_(){
+ const sh=ft_db_().getSheetByName('ActivityTimers');if(!sh)return {closed:0,errors:[]};
+ const timers=ft_get_('ActivityTimers').slice(),now=new Date();
+ const ready=timers.filter(x=>now>=ft_viennaWallDate_(ft_localDate_(new Date(x.start))+'T19:00'));
+ let closed=0;const errors=[];
+ // Rückwärts verarbeiten, weil jede erfolgreiche Buchung eine Tabellenzeile löscht.
+ ready.sort((a,b)=>b.__row-a.__row);
+ for(const t of ready){
+  try{const user=ft_one_('Users',t.userId);if(!user)throw Error('Mitarbeiter fehlt.');
+   const result=ft_timerClose_(t,user,true);
+   if(!result.autoClosed||!ft_timerConfirmedAutoClose_(result.activity))
+    throw Error('Automatischer Abschluss nicht bestätigt; keine Benachrichtigung.');
+   closed++;
+   try{
+    const company=ft_one_('Companies',t.companyId);
+    ft_timerAutoNotice_(company,user,result.activity);
+   }catch(mailError){errors.push('E-Mail '+t.id+': '+String(mailError.message||mailError));}}
+  catch(err){errors.push(t.id+': '+String(err.message||err));}
+ }
+ try{ft_timerRetryNotices_();}catch(retryError){errors.push('E-Mail-Wiederholung: '+String(retryError.message||retryError));}
+ return {closed,errors};
+}
+function ft_timerTick_(){return ft_lock_(()=>ft_timerSweep_());}
 
 // -----------------------------------------------------------------
 // 07_Bereitschaft
@@ -461,14 +1938,128 @@ function ft_planSuggest_(actor,p){const {c,m}=ft_planCheck_(actor,p),users=ft_ge
  for(let d=1;d<=ft_days_(m);d++){const day=m+'-'+String(d).padStart(2,'0'),existing=shifts.find(s=>s.day===day);if(existing&&existing.userId)continue;const avail=users.filter(u=>submitted.has(u.id)&&all.some(a=>a.userId===u.id&&Number(a.day)===d));avail.sort((a,b)=>scores[a.id]-scores[b.id]||a.name.localeCompare(b.name));if(!avail.length){gaps.push(day);continue;}const u=avail[0],range=ft_shiftRange_(day,c),before=existing?ft_publicRow_(existing):{};const row=existing||{id:ft_uuid_(),companyId:c.id,day,status:'DRAFT',eventId:''};row.userId=u.id;row.start=range[0].toISOString();row.end=range[1].toISOString();row.updatedAt=ft_now_();row.status='DRAFT';row.actualStatus='PLANNED';row.confirmedAt='';if(existing)ft_save_('Shifts',row);else ft_add_('Shifts',row);ft_audit_(actor,'SUGGEST','Shifts',row.id,before,row);scores[u.id]=(scores[u.id]||0)+1+(ft_holiday_(day)||[6,7].includes(Number(Utilities.formatDate(new Date(day+'T12:00'),FT_TZ,'u')))?1:0);assigned++;}
  return {assigned,gaps};}
 
-function ft_planAssign_(actor,p){const {c,m}=ft_planCheck_(actor,p),day=ft_str_(p.day,10);if(!day.startsWith(m)||ft_localDate_(ft_date_(day))!==day)throw Error('Tag nicht im Monat');const uid=String(p.userId||''),u=uid?ft_user_(actor,uid):null;if(u&&u.companyId!==c.id)throw Error('Mitarbeiter gehört nicht zur Firma');if(u){const available=ft_get_('Availability').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m&&Number(x.day)===Number(day.slice(-2))&&x.answer==='YES');const submitted=ft_get_('AvailabilitySubmissions').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m);if((!available||!submitted)&&!p.confirmAvailability)throw Error('Keine bestätigte Verfügbarkeit. Ausnahme ausdrücklich bestätigen.');}const prev=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.day===day),old=prev?ft_publicRow_(prev):{};if(prev&&prev.status==='PUBLISHED'&&!p.confirmChange)throw Error('Veröffentlichter Dienst: Änderung ausdrücklich bestätigen.');const bounds=ft_shiftRange_(day,c),r=prev||{id:ft_uuid_(),companyId:c.id,day,eventId:'',status:'DRAFT'};r.userId=uid;r.start=bounds[0].toISOString();r.end=bounds[1].toISOString();r.updatedAt=ft_now_();if(!prev)ft_add_('Shifts',r);else ft_save_('Shifts',r);ft_audit_(actor,'ASSIGN','Shifts',r.id,old,r);if(prev&&prev.status==='PUBLISHED'&&ft_bool_(c.calendarOn)){try{ft_syncShift_(c,r,old);}catch(e){return {row:r,warning:'Kalenderaktualisierung fehlgeschlagen: '+e.message};}}return {row:r};}
+function ft_planAssign_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),day=ft_str_(p.day,10);
+ if(!day.startsWith(m)||ft_localDate_(ft_date_(day))!==day)throw Error('Tag nicht im Monat');
+ const uid=String(p.userId||''),u=uid?ft_user_(actor,uid):null;
+ if(u&&u.companyId!==c.id)throw Error('Mitarbeiter gehört nicht zur Firma');
+ if(u){
+  const available=ft_get_('Availability').some(x=>x.companyId===c.id&&x.userId===uid&&
+   x.month===m&&Number(x.day)===Number(day.slice(-2))&&x.answer==='YES');
+  const submitted=ft_get_('AvailabilitySubmissions').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m);
+  if((!available||!submitted)&&!p.confirmAvailability)throw Error('Keine bestätigte Verfügbarkeit. Ausnahme ausdrücklich bestätigen.');
+ }
+ const prev=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.day===day);
+ const old=prev?ft_publicRow_(prev):{};
+ if(prev&&ft_get_('ShiftSegments').some(x=>x.shiftId===prev.id))
+  throw Error('Geteilten Dienst bitte ueber die Uebergabefunktion bearbeiten.');
+ if(prev&&prev.status==='PUBLISHED'&&!p.confirmChange)
+  throw Error('Veröffentlichter Dienst: Änderung ausdrücklich bestätigen.');
+ const bounds=ft_shiftRange_(day,c),start=bounds[0].toISOString(),end=bounds[1].toISOString();
+ if(uid&&ft_sickOverlap_(c.id,uid,start,end))
+  throw Error('Mitarbeiter ist fuer diesen Bereitschaftszeitraum krank gemeldet.');
+ const changed=!!prev&&(String(prev.userId||'')!==uid||String(prev.start)!==start||String(prev.end)!==end);
+ if(prev&&!changed)return {row:prev,calendarUpdated:false,calendarNeedsShare:false,unchanged:true};
+ // Never silently replace worked/settled shifts. Closed months must remain immutable.
+ if(prev&&prev.status==='PUBLISHED'){
+  if(prev.actualStatus==='DONE'||prev.confirmedAt)
+   throw Error('Geleistete oder bestätigte Bereitschaft kann nicht direkt umgeteilt werden.');
+  for(const personId of new Set([prev.userId,uid].filter(Boolean)))
+   ft_monthEditableRange_(c.id,personId,start,end);
+ }
+ // Capture the previous approval state BEFORE changing the shift. This ensures
+ // a single correction inherits approvals only if the month really was published.
+ const publishedChange=!!prev&&prev.status==='PUBLISHED'&&changed;
+ const beforePlan=publishedChange?ft_planSchedule_(c,m):null;
+ const state=publishedChange?ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m):null;
+ const wasFixed=!!state&&state.fixedHash===beforePlan.signature;
+ const wasPublished=wasFixed&&state.publishedHash===beforePlan.signature;
+ const wasShared=wasPublished&&ft_standbyCalendarMatches_(beforePlan,state);
+ const previouslyInvited=!!old.eventId||wasShared;
+ const r=prev||{id:ft_uuid_(),companyId:c.id,day,eventId:'',status:'DRAFT'};
+ if(prev&&prev.userId!==uid){r.actualStatus='PLANNED';r.confirmedAt='';}
+ r.userId=uid;r.start=start;r.end=end;r.updatedAt=ft_now_();
+ if(!prev)ft_add_('Shifts',r);else ft_save_('Shifts',r);
+ ft_audit_(actor,'ASSIGN','Shifts',r.id,old,r);
+ let calendarUpdated=false,warning='';
+ // Only this one published shift is changed in Google Calendar.
+ // Never send repeat invitations to every other employee in the month.
+ if(publishedChange&&previouslyInvited){
+  if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn)){
+   warning='Dienst gespeichert. Kalender deaktiviert: bestehenden Termin bitte prüfen.';
+  }else{
+   try{
+    ft_syncShift_(c,r,old);
+    calendarUpdated=true;
+   }catch(err){
+    warning='Dienst gespeichert, Google-Kalender noch nicht aktualisiert: '+String(err.message||err);
+   }
+  }
+ }
+ // Keep the existing month approval intact for an authorized replacement.
+ // Unassigning a day creates a gap, so it still requires a new monthly approval.
+ if(publishedChange&&wasPublished&&uid){
+  const after=ft_planSchedule_(c,m);
+  const before=ft_publicRow_(state);
+  state.fixedHash=after.signature;
+  state.publishedHash=after.signature;
+  if(wasShared&&calendarUpdated){
+   state.sharedHash=after.signature;
+   state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(after).current);
+   state.sharedAt=ft_now_();state.sharedBy=actor.id;
+   state.shareStatus='SENT';state.warnings='';
+  }else if(wasShared){
+   state.shareStatus='PARTIAL';
+   state.warnings=(warning||'Kalenderabgleich erforderlich.').slice(0,1000);
+  }
+  state.updatedAt=ft_now_();
+  ft_save_('PlanMonths',state);
+  ft_audit_(actor,'PLAN_SINGLE_SHIFT_CORRECTION','PlanMonths',state.id,before,ft_publicRow_(state));
+ }
+ return {row:r,calendarUpdated,
+  calendarNeedsShare:publishedChange&&(previouslyInvited&&!calendarUpdated),
+  warning};
+}
+
+function ft_planDelete_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p);
+ const s=ft_one_('Shifts',String(p.shiftId||''));
+ if(!s||s.companyId!==c.id||!String(s.day).startsWith(m)||String(p.day||'')!==String(s.day))
+  throw Error('Bereitschaft für diesen Tag nicht gefunden.');
+ const parts=ft_segmentRows_(s);
+ if(s.actualStatus==='DONE'||s.confirmedAt||parts.some(part=>part.actualStatus==='DONE'||part.confirmedAt))
+  throw Error('Bereits bestätigte Bereitschaft kann nicht gelöscht werden. Bitte eine dokumentierte Korrektur vornehmen.');
+ if(ft_get_('ShiftChanges').some(x=>x.shiftId===s.id&&x.status==='PENDING'))
+  throw Error('Zuerst offene Übernahmeanfragen abschließen oder ablehnen.');
+ for(const uid of new Set((parts.length?parts.map(x=>x.userId):[s.userId]).filter(Boolean)))
+  ft_monthEditableRange_(c.id,uid,s.start,s.end);
+ // Never remove the Sheets source if a Google invitation could not be cancelled.
+ // Stored event IDs must be cleaned even if calendarOn was disabled afterwards.
+ const eventIds=[s.eventId,...parts.map(x=>x.calendarEventId)].filter(Boolean);
+ if(eventIds.length){
+  const cal=ft_calendar_(c);
+  for(const id of new Set(eventIds)){
+   const event=cal.getEventById(id);
+   if(event)event.deleteEvent();
+  }
+ }
+ const old=ft_publicRow_(s);
+ parts.sort((a,b)=>b.__row-a.__row).forEach(part=>{
+  const before=ft_publicRow_(part);
+  ft_sheet_('ShiftSegments').deleteRow(part.__row);ft_invalidate_('ShiftSegments');
+  ft_audit_(actor,'DELETE','ShiftSegments',part.id,before,{});
+ });
+ ft_sheet_('Shifts').deleteRow(s.__row);ft_invalidate_('Shifts');
+ ft_audit_(actor,'DELETE','Shifts',s.id,old,{reason:'Admin removed standby assignment'});
+ return {deleted:true,day:s.day,calendarEventsRemoved:eventIds.length};
+}
 
 function ft_planPublish_(actor,p){const {c,m}=ft_planCheck_(actor,p),all=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.day.startsWith(m)),gaps=[];for(let d=1;d<=ft_days_(m);d++){const day=m+'-'+String(d).padStart(2,'0');if(!all.some(x=>x.day===day&&x.userId))gaps.push(day);}if(gaps.length)throw Error('Noch unbesetzte Tage: '+gaps.join(', '));if(ft_bool_(c.calendarOn))ft_calendar_(c);let published=0,warnings=[];
  all.forEach(row=>{if(row.status==='PUBLISHED'&&(!ft_bool_(c.calendarOn)||row.eventId))return;const prev=ft_publicRow_(row);row.status='PUBLISHED';row.updatedAt=ft_now_();ft_save_('Shifts',row);ft_audit_(actor,'PUBLISH','Shifts',row.id,prev,row);published++;if(ft_bool_(c.calendarOn)){try{ft_syncShift_(c,row,prev);}catch(e){warnings.push(row.day+': '+e.message);}}});return {published,warnings,calendarEnabled:ft_bool_(c.calendarOn)};}
 
 /** Bestätigung der tatsächlich geleisteten Bereitschaft durch Mitarbeiter/Administrator. */
 
-function ft_shiftConfirm_(actor,p){const s=ft_one_('Shifts',p.id);if(!s)throw Error('Dienst nicht gefunden');ft_scope_(actor,s.companyId);if(actor.role==='STAFF'&&s.userId!==actor.id)throw Error('Nur den eigenen Dienst bestätigen.');if(s.status!=='PUBLISHED'||!s.userId)throw Error('Nur veröffentlichte, besetzte Dienste sind bestätigbar.');if(new Date(s.end)>new Date())throw Error('Dienst ist noch nicht beendet.');const before=ft_publicRow_(s);s.actualStatus='DONE';s.confirmedAt=ft_now_();ft_save_('Shifts',s);ft_audit_(actor,'CONFIRM','Shifts',s.id,before,s);return {ok:true};}
+function ft_shiftConfirm_(actor,p){const s=ft_one_('Shifts',p.id);if(!s)throw Error('Dienst nicht gefunden');if(ft_get_('ShiftSegments').some(x=>x.shiftId===s.id))throw Error('Dieser Dienst ist geteilt. Bitte eigene Dienstabschnitte bestaetigen.');ft_scope_(actor,s.companyId);if(actor.role==='STAFF'&&s.userId!==actor.id)throw Error('Nur den eigenen Dienst bestätigen.');if(s.status!=='PUBLISHED'||!s.userId)throw Error('Nur veröffentlichte, besetzte Dienste sind bestätigbar.');if(ft_sickOverlap_(s.companyId,s.userId,s.start,s.end))throw Error('Krankenstand ueberschneidet den Dienst; erst klaeren.');if(new Date(s.end)>new Date())throw Error('Dienst ist noch nicht beendet.');const before=ft_publicRow_(s);s.actualStatus='DONE';s.confirmedAt=ft_now_();ft_save_('Shifts',s);ft_audit_(actor,'CONFIRM','Shifts',s.id,before,s);return {ok:true};}
 
 // -----------------------------------------------------------------
 // 08_Kalender
@@ -478,8 +2069,9 @@ function ft_calendarTest_(u,companyId){ft_allowed_(u,['SYSADMIN','ADMIN']);const
 
 function ft_calendar_(c){if(!c.calendarId)throw Error('Kalender-ID fehlt. Unter Firmeneinstellungen eintragen.');const cal=CalendarApp.getCalendarById(c.calendarId);if(!cal)throw Error('Google-Kalender nicht verfügbar. firetime.pro@gmail.com als Bearbeiter freigeben.');return cal;}
 
+function ft_standbyCalendarTitle_(u){return 'Bereitschaft – '+u.name;}
 function ft_syncShift_(c,s,previous){if(!ft_bool_(c.calendarOn))return;const cal=ft_calendar_(c),old=previous||s;let oldEvent=old.eventId?cal.getEventById(old.eventId):null;if(!s.userId){if(oldEvent){oldEvent.deleteEvent();s.eventId='';ft_save_('Shifts',s);}return;}
- const u=ft_one_('Users',s.userId);if(!u)throw Error('Mitarbeiter nicht gefunden');const name=c.name+' – Bereitschaftsdienst ('+u.name+')',details='Bereitschaft von 07:00 bis 07:00 am Folgetag.\nErfasst über FireTime Pro.\nÄnderungen nur über die FireTime-Pro-Dienstplanung.';
+ const u=ft_one_('Users',s.userId);if(!u)throw Error('Mitarbeiter nicht gefunden');const name=ft_standbyCalendarTitle_(u),details='Bereitschaft von 07:00 bis 07:00 am Folgetag.\nErfasst über FireTime Pro.\nÄnderungen nur über die FireTime-Pro-Dienstplanung.';
  if(oldEvent&&old.userId===s.userId){oldEvent.setTitle(name).setTime(new Date(s.start),new Date(s.end)).setDescription(details);oldEvent.removeAllReminders();oldEvent.addPopupReminder(1440);return;}
  if(oldEvent)oldEvent.deleteEvent();const event=cal.createEvent(name,new Date(s.start),new Date(s.end),{description:details,guests:u.email,sendInvites:true});event.removeAllReminders();event.addPopupReminder(1440);s.eventId=event.getId();ft_save_('Shifts',s);}
 
@@ -492,7 +2084,7 @@ function ft_sendMail_(o){if(MailApp.getRemainingDailyQuota()<1)throw Error('Täg
 function ft_notification_(c,u,kind,reference,subject,body){const key=ft_sha_(c.id+'|'+u.id+'|'+kind+'|'+reference);if(ft_get_('Notifications').some(n=>n.id===key&&n.status==='SENT'))return false;
  try{ft_sendMail_({to:u.email,subject,body,name:'Bereitschaftsdienste '+c.name});const old=ft_one_('Notifications',key);if(old){old.sentAt=ft_now_();old.status='SENT';old.error='';ft_save_('Notifications',old);}else ft_add_('Notifications',{id:key,companyId:c.id,userId:u.id,kind,reference,sentAt:ft_now_(),status:'SENT',error:''});return true;}catch(err){const failure=ft_one_('Notifications',key);if(failure){failure.sentAt=ft_now_();failure.error=String(err.message).slice(0,500);ft_save_('Notifications',failure);}else ft_add_('Notifications',{id:key,companyId:c.id,userId:u.id,kind,reference,sentAt:ft_now_(),status:'ERROR',error:String(err.message).slice(0,500)});return false;}}
 
-function ft_tick(){return ft_lock_(()=>{const now=new Date(),day=Number(Utilities.formatDate(now,FT_TZ,'d')),hour=Number(Utilities.formatDate(now,FT_TZ,'H')),month=ft_localMonth_(now),[y,m]=month.split('-').map(Number),next=Utilities.formatDate(new Date(y,m,1,12),FT_TZ,'yyyy-MM'),last=new Date(y,m,0).getDate();const web=ft_publicGithubUrl_();const companies=ft_get_('Companies').filter(c=>ft_bool_(c.active)),users=ft_get_('Users').filter(x=>x.status==='ACTIVE'&&x.role!=='SYSADMIN');let count=0;
+function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Number(Utilities.formatDate(now,FT_TZ,'d')),hour=Number(Utilities.formatDate(now,FT_TZ,'H')),month=ft_localMonth_(now),[y,m]=month.split('-').map(Number),next=Utilities.formatDate(new Date(y,m,1,12),FT_TZ,'yyyy-MM'),last=new Date(y,m,0).getDate();const web=ft_publicGithubUrl_();const companies=ft_get_('Companies').filter(c=>ft_bool_(c.active)),users=ft_get_('Users').filter(x=>x.status==='ACTIVE'&&x.role!=='SYSADMIN');let count=0;
  for(const c of companies){const us=users.filter(u=>u.companyId===c.id);
   if(ft_bool_(c.remindAvailability)&&day===Number(c.availabilityDay||20)&&hour>=9&&hour<=23){const completed=new Set(ft_get_('AvailabilitySubmissions').filter(s=>s.companyId===c.id&&s.month===next).map(s=>s.userId));for(const u of us)if(!completed.has(u.id)){if(ft_notification_(c,u,'AVAILABILITY',next,'Bereitschaft '+next+' noch nicht eingetragen','Hallo '+u.name+'!\n\nBitte gib deine Verfügbarkeit für '+next+' in FireTime Pro bekannt. Auch wenn du nicht verfügbar bist, schließe die Monatsmeldung ab.\n\n'+web+'\n\nBereitschaftsplanung '+c.name))count++;}}
   if(ft_bool_(c.remindHours)&&day===last&&hour>=19){const completed=new Set(ft_get_('Months').filter(r=>r.companyId===c.id&&r.month===month&&['SUBMITTED','APPROVED','FINAL'].includes(r.status)).map(r=>r.userId));for(const u of us)if(!completed.has(u.id)){if(ft_notification_(c,u,'HOURS',month,'FireTime Pro – Stunden '+month+' noch nicht abgeschlossen','Hallo '+u.name+'!\n\nBitte kontrolliere deine Stunden für '+month+' und reiche den Monat in FireTime Pro ein, sobald alle Tätigkeiten vollständig sind.\n\n'+web+'\n\n'+c.name))count++;}}
@@ -500,9 +2092,805 @@ function ft_tick(){return ft_lock_(()=>{const now=new Date(),day=Number(Utilitie
  }
  // Abgelaufene Sitzungen und alte Einladungen gelegentlich bereinigen, rückwärts wegen Zeilenverschiebung.
  if(hour===3){for(const tab of ['Sessions','Invites'])ft_get_(tab).filter(x=>tab==='Sessions'?new Date(x.expiresAt)<now:(x.usedAt||new Date(x.expiresAt)<now)).sort((a,b)=>b.__row-a.__row).forEach(x=>ft_sheet_(tab).deleteRow(x.__row));}
- return {sent:count,checked:ft_now_()};});}
+ return {sent:count,checked:ft_now_()};});
+ // Urlaubsjahresgutschrift separat mit Sperre; niemals im Erinnerungs-Lock.
+ try{if(Number(Utilities.formatDate(new Date(),FT_TZ,'H'))===4)ft_leaveAnnualTick_();}
+ catch(e){console.warn('Urlaubskonto Jahreslauf:',e);}
+ // PDF-Warteschlange NACH dem Erinnerungs-Lock reparieren, niemals darin.
+ try{ft_pdfRecoverApproved_();}catch(e){console.warn('PDF-Wiederaufnahme:',e);}
+ try{ft_pushDueTick_();}catch(e){console.warn('Aufgaben-Push-Erinnerung:',e);}
+ try{ft_pushOperationsTick_();}catch(e){console.warn('Betriebs-Push-Erinnerungen:',e);}
+ return tickResult;
+}
 
 function ft_remindOne_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const u=ft_user_(actor,p.userId),c=ft_company_(actor,u.companyId),m=ft_month_(p.month),kind=String(p.kind);if(u.status!=='ACTIVE')throw Error('Nur aktive Mitarbeiter können erinnert werden.');if(!['AVAILABILITY','HOURS'].includes(kind))throw Error('Ungültige Erinnerung');if(kind==='AVAILABILITY'&&ft_get_('AvailabilitySubmissions').some(s=>s.userId===u.id&&s.month===m))throw Error('Verfügbarkeit wurde bereits abgegeben.');if(kind==='HOURS'&&ft_get_('Months').some(s=>s.userId===u.id&&s.month===m&&['SUBMITTED','APPROVED','FINAL'].includes(s.status)))throw Error('Stunden sind bereits eingereicht.');const body='Hallo '+u.name+'!\n\nBitte vervollständige deine '+(kind==='HOURS'?'Stunden':'Verfügbarkeitsmeldung')+' für '+m+' in FireTime Pro.\n\n'+ft_publicGithubUrl_()+'\n\n'+c.name;return {sent:ft_notification_(c,u,kind+'-MANUAL',m+'-'+Utilities.formatDate(new Date(),FT_TZ,'yyyyMMddHHmm'), 'FireTime Pro – Erinnerung '+m,body)};}
+
+
+
+/** Einmaliger Berechtigungscheck für Web Push; kein Versand, keine Datenänderung.
+ * Kann im Apps Script Editor nach Manifest-Update manuell gestartet werden.
+ */
+function ft_pushBerechtigungPruefen_EINMAL(){
+ const url='https://firetime-pro-api.firetime-pro.workers.dev/api';
+ const prepared=UrlFetchApp.getRequest(url,{method:'get'});
+ Logger.log('Web-Push-Berechtigung erteilt. Kein Netzwerkaufruf ausgeführt.');
+ return {ok:Boolean(prepared&&prepared.url),note:'Keine Nachricht versendet.'};
+}
+
+/** Optionaler Web Push: pro angemeldetem Mitarbeiter & Gerät.
+ * Keine Bearbeitung bestehender Tabellen: PushDevices entsteht erst bei Registrierung.
+ * Push-Schlüssel sind ausschließlich Worker-Secrets, niemals in Sheets oder GitHub.
+ */
+const FT_PUSH_COLS_=['id','companyId','userId','endpoint','p256dh','auth','deviceName','createdAt','updatedAt'];
+const FT_PUSH_HOSTS_=['fcm.googleapis.com','updates.push.services.mozilla.com','push.services.mozilla.com','web.push.apple.com'];
+function ft_pushRows_(){return ft_absenceRows_('PushDevices',FT_PUSH_COLS_,false);}
+function ft_pushEndpoint_(raw){
+ const endpoint=String(raw||'').trim();
+ if(endpoint.length>1800||!/^https:\/\/[a-z0-9.-]+(?:\/|\?)/i.test(endpoint))
+  throw Error('Ungültiger Push-Endpunkt.');
+ const match=/^https:\/\/([^/:?#]+)(?:[/?#]|$)/i.exec(endpoint);
+ if(!match||!FT_PUSH_HOSTS_.includes(match[1].toLowerCase()))
+  throw Error('Dieser Push-Dienst wird derzeit nicht unterstützt.');
+ if(/[?#]$/.test(endpoint))throw Error('Ungültiger Push-Endpunkt.');
+ return endpoint;
+}
+function ft_pushKey_(raw,min,max,label){
+ const value=String(raw||'');
+ if(!/^[A-Za-z0-9_-]+={0,2}$/.test(value)||value.length>max*2)
+  throw Error('Ungültiger Push-Schlüssel: '+label);
+ let bytes;try{bytes=Utilities.base64DecodeWebSafe(value);}catch(e){throw Error('Ungültiger Push-Schlüssel: '+label);}
+ if(bytes.length<min||bytes.length>max)throw Error('Ungültige Schlüssellänge: '+label);
+ return value.replace(/=+$/,'');
+}
+function ft_pushStatus_(actor){
+ const rows=ft_pushRows_().filter(x=>x.userId===actor.id&&x.companyId===actor.companyId);
+ return {enabled:rows.length>0,deviceCount:rows.length,
+  deliveryConfigured:Boolean(ft_pushWorkerUrl_()),
+  devices:rows.map(x=>({id:x.id,name:x.deviceName||'Dieses Gerät',
+   endpointHash:ft_sha_(x.endpoint),updatedAt:x.updatedAt}))};
+}
+function ft_pushRegister_(actor,p){
+ if(actor.role==='SYSADMIN'&&!actor.companyId)throw Error('Bitte zuerst eine Firma öffnen.');
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(c.id!==actor.companyId)throw Error('Bitte mit einem Mitarbeiterkonto der Firma anmelden.');
+ const endpoint=ft_pushEndpoint_(p.subscription?.endpoint);
+ const keys=p.subscription?.keys||{};
+ const p256dh=ft_pushKey_(keys.p256dh,65,65,'p256dh');
+ const auth=ft_pushKey_(keys.auth,16,32,'auth');
+ const name=ft_str_(p.deviceName||'Smartphone',70);
+ const existing=ft_pushRows_();
+ const others=existing.filter(x=>x.companyId===c.id&&x.userId===actor.id&&x.endpoint!==endpoint);
+ if(others.length>=5)throw Error('Maximal fünf Push-Geräte pro Mitarbeiter. Bitte ein altes Gerät deaktivieren.');
+ // Ein Push-Endpunkt darf innerhalb der gesamten Datenbank nur einem aktiven Account gehören.
+ const collision=existing.find(x=>x.endpoint===endpoint&&
+  !(x.companyId===c.id&&x.userId===actor.id));
+ if(collision)throw Error('Dieses Gerät ist bereits für ein anderes Konto registriert. Bitte dort deaktivieren.');
+ const old=existing.find(x=>x.companyId===c.id&&x.userId===actor.id&&x.endpoint===endpoint);
+ const now=ft_now_(),row=old||{id:ft_uuid_(),companyId:c.id,userId:actor.id,createdAt:now};
+ Object.assign(row,{endpoint,p256dh,auth,deviceName:name,updatedAt:now});
+ if(old)ft_absenceSave_('PushDevices',FT_PUSH_COLS_,row);
+ else ft_absenceAdd_('PushDevices',FT_PUSH_COLS_,row);
+ ft_audit_(actor,'PUSH_REGISTER','PushDevices',row.id,{}, {companyId:c.id,userId:actor.id,deviceName:name});
+ return {ok:true,deviceId:row.id,deviceCount:others.length+1};
+}
+function ft_pushUnregister_(actor,p){
+ const rows=ft_pushRows_();
+ const target=rows.find(x=>x.id===String(p.deviceId||'')&&x.userId===actor.id&&x.companyId===actor.companyId);
+ if(!target)return {ok:true,removed:false};
+ const sh=ft_absenceSheet_('PushDevices',FT_PUSH_COLS_,false);
+ sh.deleteRow(target.__row);
+ ft_audit_(actor,'PUSH_UNREGISTER','PushDevices',target.id,{}, {companyId:actor.companyId,userId:actor.id});
+ return {ok:true,removed:true};
+}
+/**
+ * EINMAL im Apps-Script-Editor aufrufen und Googles Zugriff genehmigen.
+ * Keine Einrichtung, keine Datenbankmigration, keine Testnachricht.
+ * Legt ausschließlich die öffentliche Push-Worker-URL an, falls sie fehlt.
+ * Ein HTTP 403 beim anschließenden GET ist NORMAL (private API).
+ */
+function ft_pushBerechtigung_EINMAL(){
+ const props=PropertiesService.getScriptProperties();
+ const defaultWorker='https://firetime-pro-api.firetime-pro.workers.dev';
+ let url=String(props.getProperty('FT_PUSH_WORKER_URL')||'').trim();
+ if(!url){url=defaultWorker;props.setProperty('FT_PUSH_WORKER_URL',url);}
+ if(!/^https:\/\/[a-z0-9.-]+\.workers\.dev$/i.test(url))throw Error('FT_PUSH_WORKER_URL ist keine gültige Worker-URL.');
+ const response=UrlFetchApp.fetch(url+'/api',{method:'get',muteHttpExceptions:true,followRedirects:false});
+ const status=response.getResponseCode();
+ Logger.log('Google UrlFetchApp autorisiert. Cloudflare erreichbar: HTTP '+status+'.');
+ Logger.log('Hinweis: HTTP 403 ist bei diesem GET ohne Origin völlig normal; kein fehlgeschlagener Push-Test.');
+ Logger.log('FT_PUSH_WORKER_URL: '+url+' – keine Skript- oder Datenbankinstallation ausgeführt.');
+ return {ok:true,cloudflareHttpStatus:status,workerUrl:url,
+  hinweis:'Google-Zugriff erteilt; VAPID und Worker-Veröffentlichung separat erforderlich.'};
+}
+
+function ft_pushWorkerUrl_(){
+ const raw=String(ft_prop_('FT_PUSH_WORKER_URL')||'').trim();
+ if(!/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.workers\.dev$/i.test(raw))return '';
+ return raw.replace(/\/+$/,'');
+}
+/** Only user-safe push failure categories, never private keys or endpoints. */
+function ft_pushFailureReason_(results){
+ const failed=(results||[]).find(x=>x&&!x.ok);
+ if(!failed)return 'Keine Bestätigung vom Push-Anbieter.';
+ const status=Number(failed.status)||0;
+ if(failed.invalid||status===404||status===410)
+  return 'Geräte-Registrierung beim Push-Anbieter abgelaufen. Push am Handy deaktivieren und erneut aktivieren.';
+ if(status===401||status===403)
+  return 'Push-Anbieter lehnt die VAPID-Anmeldung ab (HTTP '+status+'). Öffentlichen und privaten Schlüssel in Cloudflare prüfen.';
+ if(status===400||status===413||status===422)
+  return 'Push-Anbieter lehnt die verschlüsselte Nachricht ab (HTTP '+status+'). Cloudflare-Worker und Verschlüsselung prüfen.';
+ if(status===429)return 'Push-Anbieter begrenzt gerade Anfragen (HTTP 429). Später erneut testen.';
+ if(status>=500)return 'Push-Anbieter momentan nicht verfügbar (HTTP '+status+').';
+ if(status)return 'Push-Anbieter hat HTTP '+status+' zurückgegeben.';
+ const error=String(failed.error||'').toLowerCase();
+ if(/jwk|key|ecdh|ecdsa|crypto|encrypt|decrypt|signature/.test(error))
+  return 'Cloudflare-Kryptografiefehler. VAPID-Schlüsselpaar bzw. Web-Push-Verschlüsselung prüfen.';
+ if(/network connection lost|connection reset|connection refused|failed to fetch|fetch failed|dns|tls|ssl|certificate|socket/i.test(error))
+  return 'Cloudflare konnte keine stabile Verbindung zum Push-Anbieter aufbauen (Netzwerk/TLS).';
+ if(/not a function|not supported|unsupported|not implemented/i.test(error))
+  return 'Cloudflare-Laufzeit unterstützt eine benötigte Web-Push-Funktion nicht.';
+ if(/timeout|abort/i.test(error))
+  return 'Cloudflare hat die Verbindung zum Push-Anbieter wegen einer Zeitüberschreitung abgebrochen.';
+ // Redact URL endpoints, email addresses and long identifiers from runtime errors.
+ // Never show any subscription token, JWK secret, endpoint or personal address.
+ const detail=String(failed.error||'')
+  .replace(/https?:\/\/[^\s,;)}]+/gi,'[URL]')
+  .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi,'[E-Mail]')
+  .replace(/[A-Za-z0-9_/-]{24,}/g,'[Wert]')
+  .replace(/[{}[\]<>"'`]/g,'')
+  .replace(/[^A-Za-z0-9äöüÄÖÜß .,:;()_/-]/g,'')
+  .slice(0,110);
+ return detail
+  ? 'Cloudflare-Laufzeitfehler (Status 0): '+detail
+  : 'Cloudflare hat keine Fehlerdetails geliefert (Status 0).';
+}
+
+function ft_pushDispatch_(actor,kind,id,title,body){
+ const server=ft_pushWorkerUrl_(),secret=ft_prop_('FT_GATEWAY_KEY');
+ if(!server||!secret||secret.length<48)return {sent:0,reason:'not_configured'};
+ const records=ft_pushRows_().filter(x=>x.companyId===actor.companyId&&x.userId===actor.id);
+ if(!records.length)return {sent:0,reason:'no_devices'};
+ const devices=records.slice(0,5).map(x=>({id:x.id,
+  subscription:{endpoint:x.endpoint,p256dh:x.p256dh,auth:x.auth}}));
+ // The iOS Home Screen badge must be updated from the trusted server-side
+ // unread-thread count, even when the PWA is closed. Never count notifications
+ // locally or expose messages belonging to another user/company.
+ let unreadCount=null;
+ try{
+  const count=ft_commUnread_(actor,{id:actor.companyId});
+  if(Number.isSafeInteger(count)&&count>=0)unreadCount=Math.min(999,count);
+ }catch(err){console.warn('Push-Badgezaehler nicht verfuegbar:',String(err.message||err).slice(0,100));}
+ const payload=JSON.stringify({devices,notification:{kind,id:String(id||'').slice(0,70),
+  title:String(title||'FireTime Pro').slice(0,90),
+  // Keine vertraulichen Nachrichteninhalte auf dem Sperrbildschirm.
+  body:String(body||'Du hast eine neue Benachrichtigung.').slice(0,150),
+  ...(unreadCount===null?{}:{unreadCount})}});
+ const ts=Math.floor(Date.now()/1000),nonce=ft_uuid_().replace(/-/g,'').toLowerCase();
+ const signed=ts+'.'+nonce+'.'+payload;
+ const signature=ft_hex_(Utilities.computeHmacSha256Signature(signed,secret,Utilities.Charset.UTF_8));
+ const req={ts,nonce,payload,signature};
+ try{
+  const response=UrlFetchApp.fetch(server+'/internal/push',{method:'post',
+   contentType:'application/json',payload:JSON.stringify(req),muteHttpExceptions:true});
+  if(response.getResponseCode()!==200){
+   const code=response.getResponseCode();
+   console.warn('Web Push HTTP '+code+' (E-Mail bleibt aktiv)');
+   const reason=code===401||code===403
+    ?'Cloudflare hat die interne Push-Autorisierung abgewiesen (HTTP '+code+'). FT_GATEWAY_KEY und GAS_SHARED_KEY prüfen.'
+    :code===503?'Cloudflare meldet unvollständige Push- oder VAPID-Konfiguration (HTTP 503).'
+    :'Cloudflare-Push-Gateway antwortet mit HTTP '+code+'.';
+   return {sent:0,reason};
+  }
+  const result=JSON.parse(response.getContentText());
+  if(!result.ok||!Array.isArray(result.results))
+   return {sent:0,reason:'Cloudflare-Push-Gateway lieferte eine ungültige Antwort.'};
+  const expired=result.results.filter(x=>x.gone||x.invalid).map(x=>x.id);
+  if(expired.length){
+   const sh=ft_absenceSheet_('PushDevices',FT_PUSH_COLS_,false);
+   ft_pushRows_().filter(x=>x.companyId===actor.companyId&&x.userId===actor.id&&
+    expired.includes(x.id)).sort((a,b)=>b.__row-a.__row).forEach(x=>sh.deleteRow(x.__row));
+  }
+  const successes=result.results.filter(x=>x.ok).length;
+  const failures=result.results.filter(x=>!x.ok).length;
+  if(failures)console.warn('Web Push: '+failures+' Zustellfehler; HTTP '+result.results.filter(x=>!x.ok).map(x=>Number(x.status)||0).join(','));
+  return {sent:successes,failed:failures,
+   reason:failures?ft_pushFailureReason_(result.results):''};
+ }catch(e){console.warn('Push nicht verschickt:',String(e.message||e).slice(0,150));
+  return {sent:0,reason:'Google Apps Script konnte das Cloudflare-Push-Gateway nicht erreichen.'};}
+}
+
+/** Erinnerung am Vortag offener Aufgaben: einmalig um ca. 09 Uhr (Triggerintervall
+ * 15 Minuten). Bei fehlender Konfiguration wird keine Erinnerung als zugestellt
+ * markiert. Bestehende Notifications-Tabelle dient nur zur Deduplizierung. */
+function ft_pushDueTick_(){
+ const now=new Date(),hour=Number(Utilities.formatDate(now,FT_TZ,'H'));
+ if(hour!==9||!ft_pushWorkerUrl_())return {sent:0};
+ const tomorrow=Utilities.formatDate(new Date(now.getTime()+86400000),FT_TZ,'yyyy-MM-dd');
+ const pending=ft_commThreads_().filter(x=>x.kind==='TASK'&&x.status==='OPEN'&&
+  String(x.dueDate||'')===tomorrow);
+ if(!pending.length)return {sent:0};
+ let sent=0;
+ for(const t of pending.slice(0,100)){
+  const recipient=ft_one_('Users',t.recipientId);
+  if(!recipient||recipient.status!=='ACTIVE'||recipient.companyId!==t.companyId)continue;
+  const reference='due-'+t.id+'-'+t.dueDate;
+  const key=ft_sha_(t.companyId+'|'+recipient.id+'|PUSH_TASK_DUE|'+reference);
+  if(ft_one_('Notifications',key)?.status==='SENT')continue;
+  const result=ft_pushDispatch_(recipient,'TASK_DUE',reference,
+   'FireTime Pro · Aufgabe morgen fällig','Bitte deine offene Aufgabe in FireTime Pro prüfen.');
+  if(result.sent>0){
+   ft_add_('Notifications',{id:key,companyId:t.companyId,userId:recipient.id,
+    kind:'PUSH_TASK_DUE',reference,sentAt:ft_now_(),status:'SENT',error:''});
+   sent+=result.sent;
+  }
+ }
+ return {sent};
+}
+
+
+/**
+ * FireTime Pro – betriebliche Web-Push-Erinnerungen.
+ * Bestehenden ft_tick (alle 15 Minuten) wiederverwenden; keine neuen Trigger,
+ * keine Änderungen an Mitarbeiter-, Dienst- oder Zeitbuchungen.
+ * Die bereits bestehende Notifications-Tabelle dedupliziert Push unabhängig von E-Mails.
+ */
+function ft_pushOperationalOnce_(company,user,kind,reference,title,body){
+ if(!company||!user||user.status!=='ACTIVE'||!ft_pushWorkerUrl_())return false;
+ if(!ft_pushRows_().some(x=>String(x.companyId)===String(company.id)&&String(x.userId)===String(user.id)))return false;
+ const id=ft_sha_(company.id+'|'+user.id+'|'+kind+'|'+reference);
+ const reserved=ft_lock_(()=>{
+  const existing=ft_one_('Notifications',id),nowMs=Date.now();
+  if(existing){
+   const age=nowMs-(new Date(existing.sentAt).getTime()||0);
+   if(existing.status==='SENT'||existing.status==='PENDING'&&age<10*60000||
+      existing.status==='ERROR'&&age<60*60000)return false;
+   existing.status='PENDING';existing.sentAt=ft_now_();existing.error='';
+   ft_save_('Notifications',existing);
+  }else ft_add_('Notifications',{id,companyId:company.id,userId:user.id,
+   kind,reference,sentAt:ft_now_(),status:'PENDING',error:''});
+  return true;
+ });
+ if(!reserved)return false;
+ let outcome={sent:0,reason:'Keine Zustellung bestätigt.'};
+ try{outcome=ft_pushDispatch_(user,kind,reference,title,body);}
+ catch(err){outcome={sent:0,reason:'Worker-Anfrage fehlgeschlagen.'};console.warn('Betriebs-Push:',String(err.message||err));}
+ const successful=Number(outcome.sent||0)>0;
+ ft_lock_(()=>{
+  const record=ft_one_('Notifications',id);
+  if(!record)return;
+  record.status=successful?'SENT':'ERROR';
+  record.sentAt=ft_now_();
+  record.error=successful?'':String(outcome.reason||'Push nicht zugestellt').slice(0,450);
+  ft_save_('Notifications',record);
+ });
+ return successful;
+}
+function ft_pushOperationalEvents_(now,source){
+ const MS_H=3600000,clock=Utilities.formatDate(now,FT_TZ,'HH:mm'),
+  current=Utilities.formatDate(now,FT_TZ,'yyyy-MM'),
+  day=Number(Utilities.formatDate(now,FT_TZ,'d')),
+  yesterdayMonth=Utilities.formatDate(new Date(Date.UTC(
+   Number(current.slice(0,4)),Number(current.slice(5,7))-2,15,12)),FT_TZ,'yyyy-MM'),
+  nextMonth=Utilities.formatDate(new Date(Date.UTC(
+   Number(current.slice(0,4)),Number(current.slice(5,7)),15,12)),FT_TZ,'yyyy-MM'),
+  nowMs=now.getTime();
+ const companies=source.companies.filter(c=>ft_bool_(c.active));
+ const companyIds=new Set(companies.map(c=>String(c.id)));
+ const employees=source.users.filter(u=>u.status==='ACTIVE'&&u.role!=='SYSADMIN'&&companyIds.has(String(u.companyId)));
+ const userById=new Map(employees.map(u=>[String(u.id),u]));
+ const companyById=new Map(companies.map(c=>[String(c.id),c]));
+ const events=[];
+ const add=(c,u,kind,ref,title,body)=>{if(c&&u)events.push({company:c,user:u,kind,reference:ref,title,body});};
+ const hasModule=(c,m)=>Boolean(source.modules?.[c.id]?.includes(m));
+ if(clock>='09:00'){
+  const submitted=new Set(source.submissions.filter(x=>String(x.month)===nextMonth)
+   .map(x=>String(x.companyId)+'|'+String(x.userId)));
+  for(const u of employees){
+   const c=companyById.get(String(u.companyId));
+   if(day!==Number(c.availabilityDay||20)||!ft_bool_(c.remindAvailability)||!hasModule(c,'AVAILABILITY')||
+      submitted.has(c.id+'|'+u.id))continue;
+   add(c,u,'PUSH_AVAILABILITY',nextMonth,
+    'FireTime Pro · Verfügbarkeit fehlt',
+    'Bitte deine Verfügbarkeit für '+nextMonth+' bis heute abgeben.');
+  }
+ }
+ const segmentsByShift=new Map();
+ for(const x of source.segments){
+  const id=String(x.shiftId);
+  if(!segmentsByShift.has(id))segmentsByShift.set(id,[]);
+  segmentsByShift.get(id).push(x);
+ }
+ const sick=source.sickLeaves||[];
+ for(const shift of source.shifts){
+  if(shift.status!=='PUBLISHED')continue;
+  const c=companyById.get(String(shift.companyId));
+  if(!c||!hasModule(c,'STANDBY')||!ft_bool_(c.remindShift))continue;
+  const segments=segmentsByShift.get(String(shift.id));
+  const assignments=segments?.length?segments:[shift];
+  for(const item of assignments){
+   const u=userById.get(String(item.userId));
+   if(!u||String(u.companyId)!==String(c.id))continue;
+   const start=Date.parse(item.start),end=Date.parse(item.end);
+   if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)continue;
+   const ref=String(item.id)+'|'+String(item.start);
+   const beginsIn=start-nowMs;
+   if(beginsIn>0&&beginsIn<=24*MS_H)
+    add(c,u,'PUSH_SHIFT_REMINDER',ref,
+     'FireTime Pro · Bereitschaft in 24 Stunden',
+     'Dein Bereitschaftsdienst beginnt am '+Utilities.formatDate(new Date(start),FT_TZ,'dd.MM. HH:mm')+' Uhr.');
+   const endedAgo=nowMs-end;
+   const absence=sick.some(x=>x.companyId===c.id&&x.userId===u.id&&x.status!=='REJECTED'&&
+    Date.parse(x.from)<end&&Date.parse(x.to)>start);
+   if(item.actualStatus!=='DONE'&&endedAgo>=4*MS_H&&endedAgo<=7*24*MS_H&&!absence)
+    add(c,u,'PUSH_SHIFT_CONFIRM',String(item.id)+'|'+String(item.end),
+     'FireTime Pro · Bereitschaft bestätigen',
+     'Dein Bereitschaftsdienst ist seit über 4 Stunden beendet und noch nicht bestätigt.');
+  }
+ }
+ // Keine Vorwarnung vor 19 Uhr: wer manuell beendet, bekommt keine
+ // 'Stempeluhr läuft' Benachrichtigung. Nur echte Auto-Abschlüsse melden.
+ if(hasModule){
+  for(const activity of source.activities){
+   const c=companyById.get(String(activity.companyId)),u=userById.get(String(activity.userId));
+   if(!c||!u||!hasModule(c,'TIME')||
+      !ft_timerConfirmedAutoClose_(activity))continue;
+   const created=Date.parse(activity.createdAt);
+   if(!Number.isFinite(created)||nowMs-created<0||nowMs-created>48*MS_H)continue;
+   add(c,u,'PUSH_TIMER_AUTO',String(activity.id),
+    'FireTime Pro · Stempeluhr automatisch beendet',
+    'Deine Stempeluhr wurde um 19:00 Uhr automatisch beendet. Bitte Arbeitszeit und Pause kontrollieren.');
+  }
+ }
+ if(day===1&&clock>='09:00'){
+  const done=new Set(source.months.filter(m=>String(m.month)===yesterdayMonth&&
+   ['SUBMITTED','APPROVED','FINAL'].includes(m.status))
+   .map(m=>String(m.companyId)+'|'+String(m.userId)));
+  for(const u of employees){
+   const c=companyById.get(String(u.companyId));
+   if(!ft_bool_(c.remindHours)||!hasModule(c,'REPORTS')||
+      String(u.startDate||'').slice(0,7)>yesterdayMonth||
+      done.has(c.id+'|'+u.id))continue;
+   add(c,u,'PUSH_MONTH_OPEN',yesterdayMonth,
+    'FireTime Pro · Monatsbericht offen',
+    'Bitte deinen Monatsbericht für '+yesterdayMonth+' abschließen und einreichen.');
+  }
+ }
+ return events;
+}
+function ft_pushOperationsTick_(){
+ if(!ft_pushWorkerUrl_())return {sent:0,checked:0};
+ const now=new Date();
+ const companies=ft_get_('Companies').filter(c=>ft_bool_(c.active));
+ const modules={};for(const c of companies)modules[c.id]=ft_license_(c);
+ const source={
+  companies,modules,users:ft_get_('Users'),
+  submissions:ft_get_('AvailabilitySubmissions'),months:ft_get_('Months'),
+  shifts:ft_get_('Shifts'),segments:ft_get_('ShiftSegments'),
+  sickLeaves:ft_get_('SickLeaves'),
+  // Only completed auto-close activities can generate timer reminders.
+  // Do not read/notify running timers in the reminder sweep.
+  activities:ft_get_('Activities')
+ };
+ const events=ft_pushOperationalEvents_(now,source);
+ let sent=0,processed=0;
+ for(const e of events.slice(0,80)){
+  try{if(ft_pushOperationalOnce_(e.company,e.user,e.kind,e.reference,e.title,e.body))sent++;}
+  catch(err){console.warn('Betriebs-Push '+e.kind+':',String(err.message||err));}
+  processed++;
+ }
+ return {sent,checked:events.length,processed};
+}
+
+
+/**
+ * Push for status changes. Only after successful ft_lock_ transaction:
+ * a push exception must never alter or rollback a leave, handover or approval.
+ * Recipients are resolved by company and user ID, not supplied by clients.
+ * Existing email notifications remain unchanged.
+ */
+function ft_pushEventSpecs_(actor,action,result,p,details){
+ const specs=[], data=result?.row||result?.request||result||{},info=details||{};
+ const add=(cid,uid,kind,reference,title,body,notifySelf)=>{
+  if(!cid||!uid||(!notifySelf&&String(actor.id)===String(uid)))return;
+  specs.push({companyId:String(cid),userId:String(uid),kind,reference:String(reference||''),
+   title:String(title),body:String(body)});
+ };
+ const affectedManagers=(companyId,kind,reference,title,body)=>{
+  ft_get_('Users').filter(x=>String(x.companyId)===String(companyId)&&
+   x.status==='ACTIVE'&&x.role==='ADMIN'&&x.id!==actor.id).slice(0,20)
+   .forEach(x=>add(companyId,x.id,kind,reference,title,body));
+ };
+ const cId=String(data.companyId||actor.companyId||'');
+ const date=v=>{
+  const d=new Date(v);
+  return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'dd.MM. HH:mm')+' Uhr':'';
+ };
+ const range=(from,to)=>[date(from),date(to)].filter(Boolean).join(' – ');
+ if(action==='handoverRequest'){
+  add(cId,data.toUserId,'PUSH_HANDOVER_REQUEST',data.id,
+   'FireTime Pro · Anfrage zur Dienstübergabe',
+   'Ein Kollege möchte dir Bereitschaft übertragen ('+range(data.start,data.end)+'). Bitte annehmen oder ablehnen.');
+ }else if(action==='handoverRespond'){
+  add(cId,data.fromUserId,'PUSH_HANDOVER_ANSWER',data.id+'|'+data.status,
+   'FireTime Pro · Dienstübergabe '+(data.status==='ACCEPTED'?'angenommen':'abgelehnt'),
+   data.status==='ACCEPTED'
+    ?'Dein Diensttausch wurde angenommen. Der Bereitschaftsplan wurde entsprechend geändert.'
+    :'Deine Anfrage zur Dienstübernahme wurde abgelehnt.');
+ }else if(action==='planAssign'&&info.previous&&
+   info.previous.status==='PUBLISHED'&&String(info.previous.userId||'')!==String(data.userId||'')){
+  // Explicit reassignment of a published duty; both former and new holder are affected.
+  add(cId,info.previous.userId,'PUSH_PLAN_REASSIGN',data.id+'|'+data.userId+'|old',
+   'FireTime Pro · Bereitschaft geändert',
+   'Deine bisherige Bereitschaft am '+String(data.day)+' wurde neu zugeteilt.');
+  add(cId,data.userId,'PUSH_PLAN_REASSIGN',data.id+'|'+data.userId+'|new',
+   'FireTime Pro · Bereitschaft zugeteilt',
+   'Du wurdest für die Bereitschaft am '+String(data.day)+' eingeteilt.');
+ }else if(action==='leaveRequest'){
+  affectedManagers(cId,'PUSH_LEAVE_REQUEST',data.id,
+   'FireTime Pro · Neuer Urlaubsantrag',
+   'Ein Mitarbeiter hat Urlaub beantragt ('+String(data.from)+' bis '+String(data.to)+').');
+ }else if(action==='leaveUpdate'){
+  affectedManagers(cId,'PUSH_LEAVE_UPDATE',data.id+'|'+String(data.from)+'|'+String(data.to),
+   'FireTime Pro · Urlaubsantrag geändert',
+   'Ein offener Urlaubsantrag wurde angepasst ('+String(data.from)+' bis '+String(data.to)+').');
+ }else if(action==='leaveWithdraw'){
+  affectedManagers(cId,'PUSH_LEAVE_WITHDRAW',data.id+'|'+data.status,
+   'FireTime Pro · Urlaubsantrag zurückgezogen',
+   data.status==='CANCEL_PENDING'
+    ?'Ein Mitarbeiter beantragt die Stornierung eines genehmigten Urlaubs. Bitte prüfen.'
+    :'Ein offener Urlaubsantrag wurde zurückgezogen.');
+ }else if(action==='leaveReview'){
+  let title='',body='';
+  if(data.status==='CANCELLED'){
+   title='FireTime Pro · Urlaub storniert';
+   body='Deine Urlaubsstornierung wurde bestätigt ('+String(data.from)+' bis '+String(data.to)+').';
+  }else if(info.previousStatus==='CANCEL_PENDING'){
+   title='FireTime Pro · Urlaubsstornierung abgelehnt';
+   body='Dein Antrag zur Urlaubsstornierung wurde abgelehnt. Der Urlaub bleibt genehmigt.';
+  }else if(data.status==='APPROVED'){
+   title='FireTime Pro · Urlaub genehmigt';
+   body='Dein Urlaubsantrag wurde genehmigt ('+String(data.from)+' bis '+String(data.to)+').';
+  }else if(data.status==='REJECTED'){
+   title='FireTime Pro · Urlaubsantrag abgelehnt';
+   body='Dein Urlaubsantrag wurde abgelehnt ('+String(data.from)+' bis '+String(data.to)+').';
+  }
+  if(title)add(cId,data.userId,'PUSH_LEAVE_REVIEW',data.id+'|'+info.previousStatus+'|'+data.status,title,body,true);
+ }else if(action==='sickReport'){
+  affectedManagers(cId,'PUSH_SICK_REPORT',data.id,
+   'FireTime Pro · Krankenstand gemeldet',
+   'Ein Mitarbeiter hat einen Krankenstand gemeldet. Bitte prüfen und nötige Dienste umplanen.');
+ }else if(action==='sickReview'){
+  add(cId,data.userId,'PUSH_SICK_REVIEW',data.id+'|'+data.status,
+   'FireTime Pro · Krankenstand '+(data.status==='APPROVED'?'bestätigt':'abgelehnt'),
+   'Deine Krankenstandsmeldung wurde '+(data.status==='APPROVED'?'bestätigt.':'abgelehnt.'),true);
+ }else if(action==='monthSubmit'){
+  affectedManagers(cId,'PUSH_MONTH_SUBMITTED',data.id,
+   'FireTime Pro · Monatsbericht eingereicht',
+   'Ein Monatsbericht für '+data.month+' wurde zur Freigabe eingereicht.');
+ }else if(action==='monthReview'){
+  add(cId,data.userId,'PUSH_MONTH_REVIEW',data.id+'|'+data.status,
+   'FireTime Pro · Monatsbericht '+(data.status==='APPROVED'?'freigegeben':'zurückgegeben'),
+   'Dein Monatsbericht '+data.month+' wurde '+(data.status==='APPROVED'?'freigegeben.':'zur Korrektur zurückgegeben.'),true);
+ }else if(action==='shiftConfirm'||action==='segmentConfirm'){
+  if(actor.role!=='STAFF'&&!data.unchanged){
+   const shift=ft_one_(action==='shiftConfirm'?'Shifts':'ShiftSegments',p.id);
+   if(shift) add(shift.companyId,shift.userId,'PUSH_SHIFT_CONFIRMED',shift.id,
+    'FireTime Pro · Bereitschaft bestätigt',
+    'Dein Bereitschaftsdienst wurde vom Administrator bestätigt.');
+  }
+ }else if(action==='planPublish'||action==='workPublish'){
+  // Exactly one push per affected employee, not one per every day of the month.
+  const grouped=new Map();
+  for(const shift of data.shifts||[]){
+   if(!shift.userId)continue;
+   const key=String(shift.companyId)+'|'+String(shift.userId);
+   if(!grouped.has(key))grouped.set(key,[]);
+   grouped.get(key).push(shift);
+  }
+  for(const shifts of grouped.values()){
+   const shift=shifts[0],ids=shifts.map(x=>x.id+'|'+x.start).sort();
+   add(shift.companyId,shift.userId,'PUSH_DUTY_PUBLISHED',
+    String(p.month||'')+'|'+ft_sha_(ids.join('|')),
+    'FireTime Pro · Dienstplan veröffentlicht',
+    shifts.length===1?'Ein neuer Dienst am '+String(shift.day||date(shift.start))+' wurde veröffentlicht.':
+    'Für dich wurden '+shifts.length+' neue Dienste veröffentlicht. Bitte den Dienstplan prüfen.');
+  }
+ }
+ return specs;
+}
+function ft_pushAfterActionSafe_(actor,action,result,p,details){
+ try{
+  const specs=ft_pushEventSpecs_(actor,action,result,p,details);
+  for(const e of specs.slice(0,25)){
+   const c=ft_one_('Companies',e.companyId),u=ft_one_('Users',e.userId);
+   if(!c||!u||String(u.companyId)!==String(c.id)||u.status!=='ACTIVE')continue;
+   try{ft_pushOperationalOnce_(c,u,e.kind,e.reference,e.title,e.body);}
+   catch(err){console.warn('Ereignis-Push '+action+':',String(err.message||err).slice(0,150));}
+  }
+ }catch(err){console.warn('Ereignis-Push fehlgeschlagen '+action+':',String(err.message||err).slice(0,150));}
+}
+
+function ft_pushTest_(actor,p){
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(c.id!==actor.companyId)throw Error('Bitte zuerst eine Firma wählen.');
+ const result=ft_pushDispatch_(actor,'TEST',ft_uuid_(),'FireTime Pro – Test',
+  'Push funktioniert auf diesem Gerät.');
+ return {ok:true,push:result};
+}
+function ft_pushNotice_(c,recipient,sender,thread,eventId,activity){
+ const isTask=thread.kind==='TASK',type=activity==='STATUS'?'Aufgabe aktualisiert':
+  activity==='REPLY'?'Neue Antwort':isTask?'Neue Aufgabe':'Neue Nachricht';
+ return ft_pushDispatch_(recipient,'COMM',eventId,'FireTime Pro · '+type,
+  type+' von '+sender.name);
+}
+
+/** Nachrichten und Aufgaben: mandantengetrennt, privat; bei erster Verwendung
+ * drei zusätzliche Tabellen und bei Bedarf ein privater Drive-Ordner.
+ * Keine Veränderung an den vorhandenen Arbeits- oder Urlaubsdaten.
+ */
+const FT_COMM_THREAD_COLS_=['id','companyId','kind','titleEncoded','bodyEncoded','createdBy','recipientId','dueDate','status','createdAt','updatedAt','attachmentId'];
+const FT_COMM_REPLY_COLS_=['id','companyId','threadId','authorId','bodyEncoded','createdAt','attachmentId'];
+const FT_COMM_READ_COLS_=['id','companyId','threadId','userId','seenAt'];
+function ft_commThreads_(){return ft_absenceRows_('CommThreads',FT_COMM_THREAD_COLS_,false);}
+function ft_commReplies_(){return ft_absenceRows_('CommReplies',FT_COMM_REPLY_COLS_,false);}
+function ft_commReads_(){return ft_absenceRows_('CommReads',FT_COMM_READ_COLS_,false);}
+function ft_commEncode_(s){return Utilities.base64EncodeWebSafe(String(s||''),Utilities.Charset.UTF_8);}
+function ft_commDecode_(s){return Utilities.newBlob(Utilities.base64DecodeWebSafe(String(s||''))).getDataAsString('UTF-8');}
+function ft_commCompany_(actor,p){
+ const c=ft_company_(actor,p.companyId||actor.companyId);
+ if(actor.role==='STAFF'&&c.id!==actor.companyId)throw Error('Keine Berechtigung für diese Firma.');
+ return c;
+}
+/** Direkte Unterhaltungen sind immer privat: nur Absender und Empfänger,
+ * auch Firmenadministratoren sind bei Kollegengesprächen keine Mitleser. */
+function ft_commAccessible_(actor,thread){
+ if(!thread||!actor)return false;
+ if(actor.role!=='SYSADMIN'&&String(thread.companyId)!==String(actor.companyId))return false;
+ return String(thread.createdBy)===String(actor.id)||String(thread.recipientId)===String(actor.id);
+}
+function ft_commThread_(actor,id){
+ const row=ft_commThreads_().find(x=>String(x.id)===String(id));
+ if(!row||!ft_commAccessible_(actor,row))throw Error('Nachricht nicht gefunden oder keine Berechtigung.');
+ ft_scope_(actor,row.companyId);
+ return row;
+}
+function ft_commPublic_(x){
+ return {id:x.id,companyId:x.companyId,kind:x.kind,title:ft_commDecode_(x.titleEncoded),
+ body:ft_commDecode_(x.bodyEncoded),createdBy:x.createdBy,recipientId:x.recipientId,
+ dueDate:x.dueDate||'',status:x.status,createdAt:x.createdAt,updatedAt:x.updatedAt,
+ hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''};
+}
+/** Mitarbeiter können mit Firmenadmins UND Kollegen ihrer eigenen Firma schreiben.
+ * Kein Versand an eigene, inaktive oder firmenfremde Konten. */
+function ft_commRecipients_(actor,c){
+ return ft_get_('Users').filter(x=>String(x.companyId)===String(c.id)&&
+  x.status==='ACTIVE'&&String(x.id)!==String(actor.id)&&
+  (actor.role==='STAFF'?['STAFF','ADMIN'].includes(x.role):x.role==='STAFF'))
+  .map(x=>({id:x.id,name:x.name,role:x.role}));
+}
+function ft_commVisible_(actor,c){
+ return ft_commThreads_().filter(x=>x.companyId===c.id&&ft_commAccessible_(actor,x));
+}
+function ft_commUnread_(actor,c){
+ const reads=ft_commReads_(),rows=ft_commVisible_(actor,c);
+ return rows.filter(t=>{
+  const read=reads.find(r=>r.companyId===c.id&&r.threadId===t.id&&r.userId===actor.id);
+  return !read||Date.parse(read.seenAt)<Date.parse(t.updatedAt);
+ }).length;
+}
+function ft_commRead_(actor,t){
+ const rows=ft_commReads_(),existing=rows.find(x=>x.companyId===t.companyId&&x.threadId===t.id&&x.userId===actor.id);
+ const row=existing||{id:ft_uuid_(),companyId:t.companyId,threadId:t.id,userId:actor.id};
+ // Wer gerade geantwortet hat, hat seinen eigenen neuesten Stand gelesen.
+ row.seenAt=new Date(Math.max(Date.now(),Date.parse(t.updatedAt)||0)).toISOString();
+ if(existing)ft_absenceSave_('CommReads',FT_COMM_READ_COLS_,row);
+ else ft_absenceAdd_('CommReads',FT_COMM_READ_COLS_,row);
+ return true;
+}
+function ft_commPhotoSave_(actor,c,picture){
+ if(!picture)return '';
+ const data=String(picture.data||''),mime=String(picture.mime||'');
+ const isPdf=mime==='application/pdf',isImage=['image/jpeg','image/png'].includes(mime);
+ if(!isPdf&&!isImage)throw Error('Nur JPG, PNG oder PDF als Anhang erlaubt.');
+ // PDFs in private messages are allowed up to 10 MiB. The signed Worker/GAS
+ // envelope is enlarged only for conversation attachment actions; photos remain
+ // compressed to the original limit.
+ const maxBytes=isPdf?10*1024*1024:700000;
+ if(data.length>Math.ceil(maxBytes*4/3)+8||data.length<20||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
+  throw Error(isPdf?'PDF zu groß (maximal 10 MB).':'Foto zu groß (maximal etwa 650 KB).');
+ const bytes=Utilities.base64Decode(data);
+ if(bytes.length>maxBytes||bytes.length<8)throw Error('Datei ist zu groß oder leer.');
+ const sig=bytes.slice(0,12).map(x=>x&255);
+ const png=sig[0]===137&&sig[1]===80&&sig[2]===78&&sig[3]===71;
+ const jpeg=sig[0]===255&&sig[1]===216&&sig[2]===255;
+ const pdf=sig[0]===37&&sig[1]===80&&sig[2]===68&&sig[3]===70&&sig[4]===45; // %PDF-
+ if((mime==='image/png'&&!png)||(mime==='image/jpeg'&&!jpeg)||(isPdf&&!pdf))
+  throw Error('Der tatsächliche Dateityp stimmt nicht mit dem angegebenen Format überein.');
+ const root=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
+ const iter=root.getFoldersByName('FireTime Pro – Nachrichtenbilder (privat)');
+ const folder=iter.hasNext()?iter.next():root.createFolder('FireTime Pro – Nachrichtenbilder (privat)');
+ const original=String(picture.name||'').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90);
+ const name=original&&original.toLowerCase().endsWith(isPdf?'.pdf':mime==='image/png'?'.png':'.jpg')
+  ?original:ft_uuid_()+(isPdf?'.pdf':mime==='image/png'?'.png':'.jpg');
+ const blob=Utilities.newBlob(bytes,mime,name);
+ // Google Drive stays private; the stored ID can only be fetched by
+ // authenticated conversation participants through commPhoto.
+ return folder.createFile(blob).getId();
+}
+
+function ft_commPhoto_(actor,p){
+ const t=ft_commThread_(actor,p.threadId),attachmentId=String(p.attachmentId||'').trim();
+ const allowed=[t.attachmentId,...ft_commReplies_().filter(r=>
+  r.threadId===t.id&&r.companyId===t.companyId).map(r=>r.attachmentId)];
+ if(!attachmentId||!allowed.includes(attachmentId))throw Error('Anhang gehört nicht zu dieser Nachricht.');
+ let file,blob;
+ try{file=DriveApp.getFileById(attachmentId);blob=file.getBlob();}
+ catch(err){throw Error('Der Anhang konnte in Google Drive nicht gelesen werden. Bitte Drive-Zugriff der Web-App kontrollieren.');}
+ const bytes=blob.getBytes(),size=bytes.length;
+ if(size<8||size>10*1024*1024)throw Error('Gespeicherter Anhang ist leer oder zu groß (maximal 10 MB).');
+ const u8=bytes.slice(0,12).map(x=>x&255);
+ const jpeg=u8[0]===255&&u8[1]===216&&u8[2]===255;
+ const png=u8[0]===137&&u8[1]===80&&u8[2]===78&&u8[3]===71&&u8[4]===13&&u8[5]===10;
+ const webp=u8[0]===82&&u8[1]===73&&u8[2]===70&&u8[3]===70&&
+  u8[8]===87&&u8[9]===69&&u8[10]===66&&u8[11]===80;
+ const pdf=u8[0]===37&&u8[1]===80&&u8[2]===68&&u8[3]===70&&u8[4]===45;
+ const mime=jpeg?'image/jpeg':png?'image/png':webp?'image/webp':pdf?'application/pdf':'';
+ if(!mime)throw Error('Der Anhang hat kein unterstütztes Bild- oder PDF-Format.');
+ if(!pdf&&size>2000000)throw Error('Bildanhang ist zu groß.');
+ return {mime,data:Utilities.base64Encode(bytes),size,
+  name:String((typeof file.getName==='function'?file.getName():'Anhang')||'Anhang').replace(/[^\p{L}\p{N} _().-]/gu,'_').slice(0,90)};
+}
+
+function ft_commList_(actor,p){
+ const c=ft_commCompany_(actor,p);
+ const threads=ft_commVisible_(actor,c).slice().sort((a,b)=>Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0,100);
+ const ids=new Set(threads.map(x=>x.id)),read=ft_commReads_(),replies=ft_commReplies_().filter(x=>x.companyId===c.id&&ids.has(x.threadId));
+ const users=ft_get_('Users').filter(x=>x.companyId===c.id).map(x=>({id:x.id,name:x.name,role:x.role}));
+ return {threads:threads.map(x=>({...ft_commPublic_(x),
+  unread:!(read.some(z=>z.threadId===x.id&&z.userId===actor.id&&Date.parse(z.seenAt)>=Date.parse(x.updatedAt)))})),
+  replies:replies.map(x=>({id:x.id,threadId:x.threadId,authorId:x.authorId,body:ft_commDecode_(x.bodyEncoded),
+  createdAt:x.createdAt,hasPhoto:Boolean(x.attachmentId),attachmentId:x.attachmentId||''})),
+  // Only authored TASK records, never private colleague-to-colleague messages.
+  // Admin dashboard does not gain access to otherwise-private conversations.
+  taskOverview:actor.role==='STAFF'?[]:threads.filter(x=>x.kind==='TASK'&&x.createdBy===actor.id)
+   .map(x=>({id:x.id,recipientId:x.recipientId,status:x.status,dueDate:x.dueDate||'',
+     title:ft_commDecode_(x.titleEncoded),updatedAt:x.updatedAt,
+     evidence:replies.some(r=>r.threadId===x.id&&r.authorId===x.recipientId&&Boolean(r.attachmentId))})),
+  recipients:ft_commRecipients_(actor,c),users,unread:ft_commUnread_(actor,c)};
+}
+// Lightweight inbox heartbeat: no photos, reply bodies or staff directory.
+// Detects status changes while the inbox is open; otherwise just update badge.
+function ft_commPulse_(actor,p){
+ const c=ft_commCompany_(actor,p);
+ const threads=ft_commVisible_(actor,c),reads=ft_commReads_();
+ let unread=0,modified=0;
+ for(const t of threads){
+  modified=Math.max(modified,Date.parse(t.updatedAt)||0);
+  const seen=reads.find(r=>r.companyId===c.id&&r.threadId===t.id&&r.userId===actor.id);
+  if(!seen||Date.parse(seen.seenAt)<Date.parse(t.updatedAt))unread++;
+ }
+ return {unread,modified,total:threads.length};
+}
+function ft_commMail_(c,recipient,sender,thread,eventId,activity){
+ const url=ft_clientUrl_(c);
+ // Mail und Web-Push sind unabhängig. Ein Fehler blockiert keine Nachrichten.
+ let mailSent=false;
+ try{mailSent=ft_notification_(c,recipient,'COMM_'+activity,eventId,'FireTime Pro – '+(thread.kind==='TASK'?'Aufgabe: ':'Nachricht: ')+
+  ft_commDecode_(thread.titleEncoded),
+  'Hallo '+recipient.name+'!\n\n'+sender.name+' hat dir in FireTime Pro '+
+  (activity==='REPLY'?'geantwortet.':activity==='STATUS'?'den Aufgabenstatus geändert.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
+  '\n\n'+ft_commDecode_(thread.titleEncoded)+
+  (thread.dueDate?'\nFrist: '+thread.dueDate.slice(8,10)+'.'+thread.dueDate.slice(5,7)+'.'+thread.dueDate.slice(0,4):'')+
+  '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);}
+ catch(err){console.warn('Mailstatus fehlgeschlagen:',String(err.message||err).slice(0,130));}
+ try{ft_pushNotice_(c,recipient,sender,thread,eventId,activity);}
+ catch(err){console.warn('Pushbenachrichtigung fehlgeschlagen:',String(err.message||err).slice(0,130));}
+ return mailSent;
+}
+function ft_commCreate_(actor,p){
+ const c=ft_commCompany_(actor,p),kind=String(p.kind||'MESSAGE');
+ if(!['MESSAGE','TASK'].includes(kind))throw Error('Unbekannte Nachrichtenart.');
+ if(kind==='TASK'&&actor.role==='STAFF')throw Error('Aufgaben werden vom Firmenadministrator vergeben.');
+ const recipient=ft_user_(actor,String(p.recipientId||''));
+ if(String(recipient.companyId)!==String(c.id)||String(recipient.id)===String(actor.id)||
+   recipient.status!=='ACTIVE'||!(actor.role==='STAFF'?
+    ['STAFF','ADMIN'].includes(recipient.role):recipient.role==='STAFF'))
+  throw Error('Der Empfänger ist für diese Firma nicht erlaubt.');
+ const title=ft_str_(p.title||'',120).trim(),body=ft_str_(p.body||'',3000).trim();
+ if(title.length<3||body.length<1)throw Error('Bitte Betreff und Nachrichtentext eingeben.');
+ const dueDate=kind==='TASK'?String(p.dueDate||''):'';
+ if(dueDate)ft_date_(dueDate);
+ // Fristen als reinen Text speichern, niemals von Google Sheets als Datum verschieben lassen.
+ ft_absenceSheet_('CommThreads',FT_COMM_THREAD_COLS_,true).getRange('H:H').setNumberFormat('@');
+ const now=ft_now_(),row={id:ft_uuid_(),companyId:c.id,kind,titleEncoded:ft_commEncode_(title),
+  bodyEncoded:ft_commEncode_(body),createdBy:actor.id,recipientId:recipient.id,dueDate,
+  status:kind==='TASK'?'OPEN':'MESSAGE',createdAt:now,updatedAt:now,
+  attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
+ ft_absenceAdd_('CommThreads',FT_COMM_THREAD_COLS_,row);
+ ft_commRead_(actor,row);
+ ft_audit_(actor,'COMM_CREATE','CommThreads',row.id,{}, {companyId:c.id,kind,recipientId:recipient.id,dueDate});
+ return {thread:ft_commPublic_(row),mailSent:ft_commMail_(c,recipient,actor,row,row.id,'NEW')};
+}
+/** Strictly monotonic thread timestamps: on very fast replies/changes a new
+ * event must be newer than the last read receipt, even within one millisecond.
+ */
+function ft_commNextUpdateTime_(thread){
+ const reads=ft_commReads_().filter(x=>x.threadId===thread.id&&x.companyId===thread.companyId);
+ const lastRead=reads.reduce((max,x)=>Math.max(max,Date.parse(x.seenAt)||0),0);
+ const previous=Date.parse(thread.updatedAt)||0;
+ return new Date(Math.max(Date.now(),previous,lastRead)+1).toISOString();
+}
+
+function ft_commReply_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId),c=ft_commCompany_(actor,{companyId:thread.companyId});
+ const body=ft_str_(p.body||'',3000).trim();
+ if(!body)throw Error('Bitte eine Antwort eingeben.');
+ const reply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
+  bodyEncoded:ft_commEncode_(body),createdAt:ft_commNextUpdateTime_(thread),attachmentId:ft_commPhotoSave_(actor,c,p.photo)};
+ ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,reply);
+ thread.updatedAt=reply.createdAt;ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);
+ ft_commRead_(actor,thread);
+ const recipientId=thread.createdBy===actor.id?thread.recipientId:thread.createdBy;
+ const recipient=ft_one_('Users',recipientId);
+ const sent=recipient&&recipient.status==='ACTIVE'?ft_commMail_(c,recipient,actor,thread,reply.id,'REPLY'):false;
+ ft_audit_(actor,'COMM_REPLY','CommReplies',reply.id,{}, {companyId:c.id,threadId:thread.id});
+ return {ok:true,mailSent:sent,reply:{
+  id:reply.id,threadId:reply.threadId,authorId:reply.authorId,body,
+  createdAt:reply.createdAt,hasPhoto:Boolean(reply.attachmentId),attachmentId:reply.attachmentId||''
+ }};
+}
+function ft_commMark_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId);
+ ft_commRead_(actor,thread);return {ok:true};
+}
+function ft_commTaskStatus_(actor,p){
+ const thread=ft_commThread_(actor,p.threadId);
+ if(thread.kind!=='TASK')throw Error('Das ist keine Aufgabe.');
+ const next=String(p.status||'');
+ if(!['OPEN','ACCEPTED','DONE'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
+ const owner=String(thread.recipientId)===String(actor.id);
+ const creator=String(thread.createdBy)===String(actor.id);
+ // Employees can accept and complete ONLY their personal assigned tasks.
+ if(next==='ACCEPTED'&&(!owner||thread.status!=='OPEN'))
+  throw Error('Nur die zugewiesene Person kann eine offene Aufgabe annehmen.');
+ if(next==='DONE'&&(!owner||thread.status!=='ACCEPTED'))
+  throw Error('Bitte die eigene Aufgabe zuerst annehmen, bevor du sie abschließt.');
+ if(next==='OPEN'&&(!creator||actor.role==='STAFF'))
+  throw Error('Nur der Auftraggeber kann die Aufgabe wieder öffnen.');
+ if(thread.status===next)return {ok:true,status:next};
+ const c=ft_company_(actor,thread.companyId);
+ let evidenceId='',evidenceReply=null;
+ if(next==='DONE'){
+  if(!p.photo)throw Error('Zum Abschließen der Aufgabe ist ein Foto als Dokumentation erforderlich.');
+  // Store a real image, protected by the same company-scoped private Drive
+  // retrieval as existing photos. Never accept an arbitrary external image URL.
+  evidenceId=ft_commPhotoSave_(actor,c,p.photo);
+  evidenceReply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
+   bodyEncoded:ft_commEncode_(ft_str_(p.note||'Aufgabe durchgeführt – Fotodokumentation',1000)),
+   createdAt:ft_commNextUpdateTime_(thread),attachmentId:evidenceId};
+  ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,evidenceReply);
+ }
+ const before=thread.status;thread.status=next;
+ thread.updatedAt=evidenceReply?.createdAt||ft_commNextUpdateTime_(thread);
+ ft_absenceSave_('CommThreads',FT_COMM_THREAD_COLS_,thread);
+ ft_commRead_(actor,thread);
+ const other=ft_one_('Users',creator?thread.recipientId:thread.createdBy);
+ // A push/email failure never rolls back a successfully saved task status.
+ let mailSent=false;
+ if(other&&other.status==='ACTIVE'){
+  try{mailSent=ft_commMail_(c,other,actor,thread,thread.id+'-'+next+'-'+thread.updatedAt,'STATUS');}
+  catch(err){console.warn('Aufgabenstatus wurde gespeichert, Benachrichtigung fehlgeschlagen.');}
+ }
+ ft_audit_(actor,'COMM_TASK_STATUS','CommThreads',thread.id,
+  {status:before},{status:next,attachment:Boolean(evidenceId)});
+ return {ok:true,status:next,mailSent,hasEvidence:Boolean(evidenceId),
+  updatedAt:thread.updatedAt,
+  evidenceReply:evidenceReply?{
+   id:evidenceReply.id,threadId:evidenceReply.threadId,authorId:evidenceReply.authorId,
+   body:ft_commDecode_(evidenceReply.bodyEncoded),createdAt:evidenceReply.createdAt,
+   hasPhoto:true,attachmentId:evidenceReply.attachmentId}:null};
+}
 
 // -----------------------------------------------------------------
 // 10_API
@@ -513,6 +2901,8 @@ function ft_api(token,action,p){
  ft_requireAction_(u,action,p);
  switch(action){
   case 'home':return ft_home_(u,p);
+  case 'adminOverview':return ft_adminOverview_(u,p);
+  case 'adminOverview':return ft_adminOverview_(u,p);
   case 'onboard':return ft_lock_(()=>ft_customerOnboard_(u,p));
   case 'companyCreate':return ft_lock_(()=>ft_companyCreate_(u,p));
   case 'companyUpdate':return ft_lock_(()=>{
@@ -538,61 +2928,315 @@ function ft_api(token,action,p){
   case 'userInvite':
    ft_allowed_(u,['SYSADMIN','ADMIN']);
    return ft_lock_(()=>ft_invite_(u,ft_user_(u,p.id)));
+  case 'userPasswordReset':return ft_passwordResetForUser_(u,p);
+  case 'myPasswordReset':{
+   const sent=ft_passwordResetLink_(u,u);
+   return sent?'Ein Passwort-Zurücksetzen-Link wurde an deine hinterlegte E-Mail-Adresse gesendet.':
+    'Du hast kürzlich bereits einen Passwort-Link angefordert. Bitte E-Mail prüfen.';
+  }
+  case 'activityTypesGet':return ft_activityTypesGet_(u,p);
+  case 'activityTypesSave':return ft_lock_(()=>ft_activityTypesSave_(u,p));
+  case 'timerStart':return ft_lock_(()=>ft_timerStart_(u,p));
+  case 'timerStop':return ft_lock_(()=>ft_timerStop_(u,p));
+  case 'timerStatus':return ft_timerStatus_(u,p);
+  case 'timerPauseStart':return ft_lock_(()=>ft_timerPauseAction_(u,'start'));
+  case 'timerPauseStop':return ft_lock_(()=>ft_timerPauseAction_(u,'stop'));
+  case 'commList':return ft_commList_(u,p);
+  case 'commPulse':return ft_commPulse_(u,p);
+  case 'commCreate':return ft_lock_(()=>ft_commCreate_(u,p));
+  case 'commReply':return ft_lock_(()=>ft_commReply_(u,p));
+  case 'commRead':return ft_lock_(()=>ft_commMark_(u,p));
+  case 'commTaskStatus':return ft_lock_(()=>ft_commTaskStatus_(u,p));
+  case 'commPhoto':return ft_commPhoto_(u,p);
+  case 'pushStatus':return ft_pushStatus_(u);
+  case 'pushRegister':return ft_lock_(()=>ft_pushRegister_(u,p));
+  case 'pushUnregister':return ft_lock_(()=>ft_pushUnregister_(u,p));
+  case 'pushTest':return ft_pushTest_(u,p);
   case 'activitySave':return ft_lock_(()=>ft_activitySave_(u,p));
   case 'activityDelete':return ft_lock_(()=>ft_activityDelete_(u,p));
   case 'availabilitySave':return ft_lock_(()=>ft_availabilitySave_(u,p));
   case 'availabilitySubmit':return ft_lock_(()=>ft_availabilitySubmit_(u,p));
+  case 'planWorkflow':return ft_planWorkflow_(u,p);
+  case 'planFinalize':return ft_lock_(()=>ft_planFinalize_(u,p));
+  case 'planCalendarShare':return ft_lock_(()=>ft_planCalendarShare_(u,p));
   case 'planSuggest':return ft_lock_(()=>ft_planSuggest_(u,p));
-  case 'planAssign':return ft_lock_(()=>ft_planAssign_(u,p));
-  case 'planPublish':return ft_lock_(()=>ft_publishStandby_(u,p));
-  case 'shiftConfirm':return ft_lock_(()=>ft_shiftConfirm_(u,p));
+  case 'planDelete':return ft_lock_(()=>ft_planDelete_(u,p));
+  case 'planAssign':{
+   const old=ft_get_('Shifts').find(s=>s.companyId===String(p.companyId||u.companyId)&&s.day===p.day);
+   const previous=old?{userId:old.userId,status:old.status}:null;
+   const changed=ft_lock_(()=>ft_planAssign_(u,p));
+   ft_pushAfterActionSafe_(u,'planAssign',changed,p,{previous});
+   return changed;
+  }
+  case 'planPublish':{
+   const cid=String(p.companyId||u.companyId),month=String(p.month||'');
+   const before=new Set(ft_get_('Shifts').filter(x=>x.companyId===cid&&
+    x.status==='PUBLISHED'&&String(x.day).slice(0,7)===month).map(x=>x.id));
+   const result=ft_lock_(()=>ft_planPublishOnly_(u,p));
+   const published=ft_get_('Shifts').filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+    String(x.day).slice(0,7)===month&&!before.has(x.id));
+   ft_pushAfterActionSafe_(u,'planPublish',{companyId:cid,shifts:published},p);
+   return result;
+  }
+  case 'shiftConfirm':{
+   const result=ft_lock_(()=>ft_shiftConfirm_(u,p));
+   ft_pushAfterActionSafe_(u,'shiftConfirm',result,p);
+   return result;
+  }
   case 'workSave':return ft_lock_(()=>ft_workSave_(u,p));
   case 'workDelete':return ft_lock_(()=>ft_workDelete_(u,p));
-  case 'workPublish':return ft_lock_(()=>ft_workPublish_(u,p));
-  case 'leaveRequest':return ft_lock_(()=>ft_leaveRequest_(u,p));
-  case 'leaveReview':return ft_lock_(()=>ft_leaveReview_(u,p));
-  case 'monthSubmit':return ft_lock_(()=>ft_monthSubmit_(u,p));
-  case 'monthReview':return ft_lock_(()=>ft_monthReview_(u,p));
+  case 'workPublish':{
+   const cid=String(p.companyId||u.companyId),m=String(p.month||'');
+   const before=new Set(ft_workRows_().filter(x=>x.companyId===cid&&
+    x.status==='PUBLISHED'&&String(x.start).slice(0,7)===m).map(x=>x.id));
+   const result=ft_lock_(()=>ft_workPublish_(u,p));
+   const published=ft_workRows_().filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+    String(x.start).slice(0,7)===m&&!before.has(x.id));
+   ft_pushAfterActionSafe_(u,'workPublish',{companyId:cid,shifts:published},p);
+   return result;
+  }
+  case 'leaveRequest':{
+   const result=ft_lock_(()=>ft_leaveRequest_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveRequest',result,p);
+   return result;
+  }
+  case 'leaveUpdate':{
+   const result=ft_lock_(()=>ft_leaveUpdate_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveUpdate',result,p);
+   return result;
+  }
+  case 'leaveWithdraw':{
+   const result=ft_lock_(()=>ft_leaveWithdraw_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveWithdraw',result,p);
+   return result;
+  }
+  case 'leaveReview':{
+   const previousStatus=ft_one_('Leaves',p.id)?.status||'';
+   const reviewed=ft_lock_(()=>ft_leaveReview_(u,p));
+   ft_pushAfterActionSafe_(u,'leaveReview',reviewed,p,{previousStatus});
+   return reviewed;
+  }
+  case 'leaveAccount':return ft_absenceHistory_(u,p);
+  case 'leavePolicyGet':return ft_leavePolicyGet_(u,p);
+  case 'leavePolicySave':return ft_lock_(()=>ft_leavePolicySave_(u,p));
+  case 'absenceHistory':return ft_absenceHistory_(u,p);
+  case 'absencePdfCreate':return ft_absencePdfCreate_(u,p);
+  case 'absencePdfArchive':return ft_absencePdfArchive_(u,p);
+  case 'absencePdfChunk':return ft_absencePdfChunk_(u,p);
+  case 'monthSubmit':{
+   const result=ft_lock_(()=>ft_monthSubmit_(u,p));
+   ft_pushAfterActionSafe_(u,'monthSubmit',result,p);
+   return result;
+  }
+  case 'monthReview':{
+   const reviewed=ft_lock_(()=>ft_monthReview_(u,p));
+   ft_pushAfterActionSafe_(u,'monthReview',reviewed,p);
+   if(String(reviewed.status)==='APPROVED'){
+    // Approval is permanent even when a Google trigger is temporarily unavailable.
+    try{reviewed.pdfArchive=ft_pdfAutoQueueApproved_(u,reviewed);}
+    catch(e){console.error('PDF-Automatik nach Freigabe:',e);
+      reviewed.pdfArchive={status:'ERROR',error:String(e.message||e)};}
+   }
+   return reviewed;
+  }
   case 'report':return ft_reportApi_(u,p);
   case 'pdf':return ft_reportPdf_(u,p);
+  case 'pdfStore':return ft_pdfStore_(u,p);
+  case 'pdfPrepare':return ft_pdfPrepare_(u,p);
+  case 'pdfJobStatus':return ft_pdfJobStatus_(u,p);
+  case 'pdfArchive':return ft_pdfArchive_(u,p);
+  case 'pdfChunk':return ft_pdfChunk_(u,p);
+  case 'pdfBatchStore':return ft_pdfBatchStore_(u,p);
+  case 'pdfBatchArchive':return ft_pdfBatchArchive_(u,p);
+  case 'pdfBatchChunk':return ft_pdfBatchChunk_(u,p);
   case 'rulesGet':return ft_rulesApi_(u,p);
   case 'rulesSave':return ft_lock_(()=>ft_rulesSave_(u,p));
   case 'calendarTest':return ft_calendarTest_(u,p.companyId||u.companyId);
   case 'audit':return ft_auditApi_(u,p);
   case 'remindOne':return ft_lock_(()=>ft_remindOne_(u,p));
+  case 'handoverRequest':{
+   const result=ft_lock_(()=>ft_handoverRequest_(u,p));
+   ft_pushAfterActionSafe_(u,'handoverRequest',result,p);
+   return result;
+  }
+  case 'handoverRespond':{
+   const result=ft_lock_(()=>ft_handoverRespond_(u,p));
+   ft_pushAfterActionSafe_(u,'handoverRespond',result,p);
+   return result;
+  }
+  case 'segmentConfirm':{
+   const result=ft_lock_(()=>ft_segmentConfirm_(u,p));
+   ft_pushAfterActionSafe_(u,'segmentConfirm',result,p);
+   return result;
+  }
+  case 'sickReport':{
+   const result=ft_lock_(()=>ft_sickReport_(u,p));
+   ft_pushAfterActionSafe_(u,'sickReport',result,p);
+   return result;
+  }
+  case 'sickReview':{
+   const result=ft_lock_(()=>ft_sickReview_(u,p));
+   ft_pushAfterActionSafe_(u,'sickReview',result,p);
+   return result;
+  }
+  case 'shiftPeriodSummary':return ft_shiftPeriodSummary_(u,p);
+  case 'calendarResync':return ft_lock_(()=>ft_calendarResync_(u,p));
   default:throw Error('Unbekannte Funktion: '+action);
  }
+}
+/**
+ * Compact company dashboard only for the company's authorized administrators.
+ * Runs separately from the fast shell request, so totals never hold up navigation.
+ * Reuse a single dataset and the existing payroll/report calculations, rather
+ * than reading each employee's Sheets separately or guessing the hour balance.
+ */
+function ft_adminOverview_(actor,p){
+ ft_allowed_(actor,['ADMIN','SYSADMIN']);
+ const cid=actor.role==='SYSADMIN'?String(p.companyId||''):String(actor.companyId);
+ if(!cid)throw Error('Bitte zuerst eine Kundenfirma auswählen.');
+ const company=ft_company_(actor,cid),month=ft_month_(p.month||ft_localMonth_(new Date()));
+ const modules=ft_license_(company);
+ const allowed=m=>modules.includes(m),now=new Date(),nowMs=now.getTime();
+ const todayKey=Utilities.formatDate(now,FT_TZ,'yyyy-MM-dd');
+ const [yy,mm,dd]=todayKey.split('-').map(Number);
+ const tomorrowKey=Utilities.formatDate(new Date(Date.UTC(yy,mm-1,dd+1,12)),'UTC','yyyy-MM-dd');
+ const users=ft_get_('Users').filter(x=>x.companyId===cid&&x.role==='STAFF'&&x.status==='ACTIVE');
+ const source={
+  Activities:allowed('REPORTS')?ft_get_('Activities'):[],
+  Shifts:allowed('STANDBY')||allowed('REPORTS')?ft_get_('Shifts'):[],
+  ShiftSegments:allowed('STANDBY')||allowed('REPORTS')?ft_get_('ShiftSegments'):[],
+  SickLeaves:allowed('REPORTS')?ft_get_('SickLeaves'):[],
+  Leaves:allowed('REPORTS')?ft_get_('Leaves'):[],
+  Months:allowed('REPORTS')?ft_get_('Months'):[]
+ };
+ const publishedShiftIds=new Set(source.Shifts.filter(x=>x.companyId===cid&&
+  x.status==='PUBLISHED').map(x=>String(x.id)));
+ const candidate=(allowed('STANDBY')?ft_accountableShifts_(source):[])
+  .filter(x=>x.companyId===cid&&x.status==='PUBLISHED'&&
+   (!x.shiftId||publishedShiftIds.has(String(x.shiftId)))&&
+   Number.isFinite(Date.parse(x.start))&&Number.isFinite(Date.parse(x.end)));
+ const work=allowed('WORKPLAN')?ft_workRows_().filter(x=>x.companyId===cid&&x.status==='PUBLISHED'):[];
+ const rowFor=x=>({
+  id:x.id||x.shiftId||'',userId:x.userId,kind:x.kind||'STANDBY',
+  start:x.start,end:x.end,
+  employeeName:users.find(y=>y.id===x.userId)?.name||'Mitarbeiter'
+ });
+ const ongoing=candidate.filter(x=>Date.parse(x.start)<=nowMs&&Date.parse(x.end)>nowMs)
+  .map(rowFor);
+ const nextDay=candidate.filter(x=>Utilities.formatDate(new Date(x.start),FT_TZ,'yyyy-MM-dd')===tomorrowKey)
+  .map(rowFor);
+ // Show active WORKPLAN duties too; never call their hours "standby".
+ for(const x of work){
+  const start=Date.parse(x.start),end=Date.parse(x.end);
+  if(!Number.isFinite(start)||!Number.isFinite(end))continue;
+  if(start<=nowMs&&end>nowMs)ongoing.push({...rowFor(x),kind:'WORK'});
+  if(Utilities.formatDate(new Date(start),FT_TZ,'yyyy-MM-dd')===tomorrowKey)
+   nextDay.push({...rowFor(x),kind:'WORK'});
+ }
+ const monthStart=month+'-';
+ const staff=users.map(user=>{
+  let rep=null;
+  if(allowed('REPORTS'))rep=ft_report_(company,user,month,true,source);
+  const countShifts=candidate.filter(x=>x.userId===user.id&&
+   Utilities.formatDate(new Date(x.start),FT_TZ,'yyyy-MM').startsWith(month)).length;
+  const countWork=work.filter(x=>x.userId===user.id&&String(x.start).slice(0,7)===month).length;
+  return {
+   id:user.id,name:user.name,
+   worked:rep?Number(rep.worked)||0:null,
+   target:rep?Number(rep.target)||0:null,
+   saldo:rep?Number(rep.saldo)||0:null,
+   runningBalance:null, // expensive historical cumulative is shown only in detailed monthly report
+   standby:rep?Number(rep.standby)||0:null,
+   leaveBalance:allowed('LEAVE')?Number(user.leaveBalance)||0:null,
+   standbyDuties:countShifts,workDuties:countWork
+  };
+ });
+ ongoing.sort((a,b)=>Date.parse(a.end)-Date.parse(b.end));
+ nextDay.sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+ return {month,today:todayKey,tomorrow:tomorrowKey,employees:staff,
+  ongoing:ongoing.slice(0,25),tomorrowDuties:nextDay.slice(0,25),
+  updatedAt:ft_now_()};
+}
+/**
+ * Administrative team overview – separate from the critical home/shell request.
+ * Shared source sheets are fetched only once. No payroll rates are returned.
+ * Uses the same month accounting as the authoritative monthly report; standby
+ * totals are confirmed (not merely scheduled) shifts.
+ */
+function ft_workflowReady_(){
+ // Read-only schema flag, identical for every tenant. Cache only a true result;
+ // missing tables are checked again next time after an upgrade.
+ const cache=CacheService.getScriptCache(),key='ft_workflow_schema_v1';
+ if(cache.get(key)==='1')return true;
+ const db=ft_db_();
+ const ready=Boolean(db.getSheetByName('ActivityTimers')&&
+  db.getSheetByName('ActivityTypes')&&db.getSheetByName('PlanMonths'));
+ if(ready)cache.put(key,'1',300);
+ return ready;
 }
 function ft_home_(u,p){
  const cid=u.role==='SYSADMIN'?String(p.companyId||''):u.companyId;
  const month=ft_month_(p.month||ft_localMonth_(new Date()));
- const companies=u.role==='SYSADMIN'?ft_get_('Companies').map(ft_companyData_):[];
+ const requested=String(p.view||'all');
+ // Compact responses omit unchanged presentation metadata only. Authentication,
+ // company scope, licensing, and requested live records are always checked.
+ const compact=p.compact===true&&['time','leave','work','standby','sick','availability'].includes(requested);
+ const companies=u.role==='SYSADMIN'&&!compact?ft_get_('Companies').map(ft_companyData_):[];
  const c=cid?ft_company_(u,cid):null;
  if(u.role!=='SYSADMIN'&&!c)throw Error('Firma nicht zugeordnet.');
  const mods=c?ft_license_(c):[],isAdmin=u.role!=='STAFF';
  const access=(m)=>mods.includes(m);
- const directory=c?ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE').map(x=>({id:x.id,name:x.name})):[];
- const users=c?ft_get_('Users').filter(x=>x.companyId===c.id&&(isAdmin||x.id===u.id)).map(ft_safe_):[];
+ // Keep old API clients compatible: without view, provide every section.
+ const need=(...names)=>requested==='all'||names.includes(requested);
+ const directory=c&&!compact?ft_get_('Users').filter(x=>x.companyId===c.id&&x.status==='ACTIVE').map(x=>({id:x.id,name:x.name})):[];
+ const users=c&&!compact?ft_get_('Users').filter(x=>x.companyId===c.id&&(isAdmin||x.id===u.id)).map(ft_safe_):[];
  const within=x=>x.companyId===c.id&&(isAdmin||x.userId===u.id);
- const activities=c&&access('TIME')?ft_get_('Activities').filter(within).map(ft_publicRow_):[];
- const availability=c&&access('AVAILABILITY')?ft_get_('Availability').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
- const availSubmissions=c&&access('AVAILABILITY')?ft_get_('AvailabilitySubmissions').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
- const shifts=c&&access('STANDBY')?ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.day.startsWith(month)&&(isAdmin||x.status==='PUBLISHED')).map(ft_publicRow_):[];
- const workShifts=c&&access('WORKPLAN')?ft_workRows_().filter(x=>within(x)&&
+ const activities=c&&access('TIME')&&need('time')?ft_get_('Activities').filter(x=>within(x)&&(String(x.start||'').slice(0,7)===month||String(x.end||'').slice(0,7)===month)).map(ft_publicRow_):[];
+ const availability=c&&access('AVAILABILITY')&&need('availability','standby')?ft_get_('Availability').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
+ const availSubmissions=c&&access('AVAILABILITY')&&need('availability','standby')?ft_get_('AvailabilitySubmissions').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
+ const shifts=c&&access('STANDBY')&&need('dashboard','standby')?ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.day.startsWith(month)&&(isAdmin||x.status==='PUBLISHED')).map(ft_publicRow_):[];
+ // Standby-Abschnitte/Übergaben werden nur im Bereitschaftsplan gebraucht.
+ // Krankenstand nur in der Krankenstands- und Bereitschaftsansicht.
+ const loadStandby=c&&need('standby')&&access('STANDBY');
+ const loadSick=c&&access('SICK')&&need('standby','sick');
+ const extra={
+   segments:loadStandby?ft_get_('ShiftSegments').filter(x=>x.companyId===c.id&&ft_localMonth_(new Date(x.start))===month).map(ft_publicRow_):[],
+   changes:loadStandby?ft_get_('ShiftChanges').filter(x=>x.companyId===c.id&&(x.status==='PENDING'||ft_localMonth_(new Date(x.start))===month)&&(isAdmin||x.fromUserId===u.id||x.toUserId===u.id)).map(ft_publicRow_):[],
+   sick:loadSick?ft_get_('SickLeaves').filter(x=>x.companyId===c.id&&(x.status==='PENDING'||ft_localMonth_(new Date(x.from))===month||ft_localMonth_(new Date(x.to))===month)&&(isAdmin||x.userId===u.id)).map(ft_publicRow_):[]
+ };
+ const workShifts=c&&access('WORKPLAN')&&need('dashboard','work')?ft_workRows_().filter(x=>within(x)&&
   (x.start.slice(0,7)===month||x.end.slice(0,7)===month)&&
   (isAdmin||x.status==='PUBLISHED')).map(ft_publicRow_):[];
- const leaves=c&&access('LEAVE')?ft_get_('Leaves').filter(within).map(ft_publicRow_):[];
- const months=c&&access('REPORTS')?ft_get_('Months').filter(within).map(ft_publicRow_):[];
+ const leaves=c&&access('LEAVE')&&need('leave')?ft_get_('Leaves').filter(within).map(ft_publicRow_):[];
+ const months=c&&access('REPORTS')&&need('reports')?ft_get_('Months').filter(x=>within(x)&&x.month===month).map(ft_publicRow_):[];
  const reports={};
- if(c&&access('REPORTS')){
-  const source={Activities:ft_get_('Activities'),Shifts:ft_get_('Shifts'),
+ // Teure Monatsberechnungen nur auf Uebersicht oder Monatsbericht ausfuehren.
+ // Ohne reportsMode bleibt die alte API rueckwaertskompatibel (alle Berichte).
+ const reportsMode=['none','self','all','selected'].includes(String(p.reportsMode||''))?String(p.reportsMode):'all';
+ if(c&&access('REPORTS')&&reportsMode!=='none'){
+  const source={Activities:ft_get_('Activities'),Shifts:ft_get_('Shifts'),ShiftSegments:ft_get_('ShiftSegments'),SickLeaves:ft_get_('SickLeaves'),
    Leaves:ft_get_('Leaves'),Months:ft_get_('Months')};
-  users.forEach(x=>reports[x.id]=ft_report_(c,x,month,false,source));
+  const reportUsers=reportsMode==='self'?users.filter(x=>x.id===u.id):reportsMode==='selected'?users.filter(x=>x.id===String(p.userId||users[0]?.id||u.id)):users;
+  reportUsers.forEach(x=>reports[x.id]=ft_publicReport_(c,ft_report_(c,x,month,false,source)));
  }
- return {me:ft_safe_(u),month,company:c?ft_companyData_(c):null,
-  logo:c?ft_logoData_(c):'',companies,modules:mods,profile:c?ft_profileFor_(c):null,
+ return {me:ft_safe_(u),month,company:c?ft_companyData_(c):null,compact,
+  logo:c&&need('dashboard','settings')&&p.skipLogo!==true?ft_logoData_(c):'',
+  companies,modules:mods,profile:c&&!compact?ft_profileFor_(c):null,
   loginUrl:c?ft_clientUrl_(c):'',directory,users,activities,availability,
-  availSubmissions,shifts,workShifts,leaves,months,reports};
+  availSubmissions,shifts,workShifts,leaves,months,reports,...extra,
+  standbyWorkflow:c&&need('standby')&&access('STANDBY')&&isAdmin?ft_planWorkflow_(u,{companyId:c.id,month}):null,
+  workflowReady:Boolean(c&&ft_workflowReady_()),
+  balanceCutoverSupported:true,
+  activityDefaultsSupported:true,
+  standbyDeleteSupported:true,
+  commSupported:true,
+  backgroundPushSupported:true,
+  pauseClockSupported:true,
+  // Messages have their own 30-second foreground poll and push wakeup.
+  // Avoid scanning CommThreads and CommReads when opening unrelated menus.
+  commUnread:c&&need('messages')?ft_commUnread_(u,c):null,
+  activityTypes:c&&need('time','settings')&&access('TIME')?ft_activityTypesFor_(c):[],
+  runningTimer:c&&need('time')&&access('TIME')?ft_timerActive_(c.id,u.id):null};
 }
 function ft_auditApi_(u,p){
  ft_allowed_(u,['SYSADMIN','ADMIN']);
@@ -639,7 +3283,7 @@ function ft_upgradeCheck(){
 // 12_Lizenzen
 // -----------------------------------------------------------------
 /** FireTime Pro V1.4 | Lizenzmodule – nur SYSADMIN darf Pakete freischalten */
-const FT_MODULES_=['TIME','REPORTS','LEAVE','WORKPLAN','STANDBY','AVAILABILITY','CALENDAR'];
+const FT_MODULES_=['TIME','REPORTS','LEAVE','WORKPLAN','STANDBY','AVAILABILITY','CALENDAR','PAY_PREVIEW','SICK'];
 const FT_LICENSE_COLS_=['id','companyId','modules','updatedBy','updatedAt'];
 function ft_licSheet_(create){
  const db=ft_db_();let sh=db.getSheetByName('CompanyLicenses');
@@ -655,7 +3299,7 @@ function ft_licRows_(){
 function ft_license_(c){
  const r=ft_licRows_().find(x=>String(x.companyId)===String(c.id));
  // Bestehender Erstkunde bleibt ohne Migration funktionstüchtig.
- if(!r)return c.slug==='bsb3100'?FT_MODULES_.slice():['TIME','REPORTS','LEAVE'];
+ if(!r)return c.slug==='bsb3100'?FT_MODULES_.filter(m=>!['PAY_PREVIEW','SICK'].includes(m)):['TIME','REPORTS','LEAVE'];
  try{const arr=JSON.parse(String(r.modules||'[]'));return FT_MODULES_.filter(x=>arr.includes(x));}
  catch(e){throw Error('Modulfreigabe beschädigt: '+c.name);}
 }
@@ -690,14 +3334,17 @@ function ft_licApi_(actor,p){
 }
 function ft_requireAction_(actor,action,p){
  const dict={
-  activitySave:'TIME',activityDelete:'TIME',
-  monthSubmit:'REPORTS',monthReview:'REPORTS',report:'REPORTS',pdf:'REPORTS',
-  leaveRequest:'LEAVE',leaveReview:'LEAVE',
+  activitySave:'TIME',activityDelete:'TIME',activityTypesGet:'TIME',activityTypesSave:'TIME',timerStart:'TIME',timerStop:'TIME',timerStatus:'TIME',timerPauseStart:'TIME',timerPauseStop:'TIME',
+  monthSubmit:'REPORTS',monthReview:'REPORTS',report:'REPORTS',pdf:'REPORTS',pdfPrepare:'REPORTS',pdfJobStatus:'REPORTS',pdfArchive:'REPORTS',pdfChunk:'REPORTS',pdfStore:'REPORTS',pdfBatchStore:'REPORTS',pdfBatchArchive:'REPORTS',pdfBatchChunk:'REPORTS',
+  leaveRequest:'LEAVE',leaveUpdate:'LEAVE',leaveWithdraw:'LEAVE',leaveReview:'LEAVE',
+  leaveAccount:'LEAVE',leavePolicyGet:'LEAVE',leavePolicySave:'LEAVE',
+  absenceHistory:'LEAVE',absencePdfCreate:'LEAVE',absencePdfArchive:'LEAVE',absencePdfChunk:'LEAVE',
   availabilitySave:'AVAILABILITY',availabilitySubmit:'AVAILABILITY',
-  planSuggest:'STANDBY',planAssign:'STANDBY',planPublish:'STANDBY',shiftConfirm:'STANDBY',
+  planSuggest:'STANDBY',planAssign:'STANDBY',planPublish:'STANDBY',planFinalize:'STANDBY',planWorkflow:'STANDBY',planCalendarShare:'STANDBY',shiftConfirm:'STANDBY',
+  handoverRequest:'STANDBY',handoverRespond:'STANDBY',segmentConfirm:'STANDBY',shiftPeriodSummary:'STANDBY',
   workSave:'WORKPLAN',workPublish:'WORKPLAN',workDelete:'WORKPLAN',
   rulesGet:'REPORTS',rulesSave:'REPORTS',
-  calendarTest:'CALENDAR'
+  calendarTest:'CALENDAR',calendarResync:'CALENDAR'
  };
  const mod=dict[action];if(!mod)return;
  let companyId=actor.companyId;
@@ -729,10 +3376,23 @@ function ft_profileSheet_(create){
  return s;
 }
 function ft_profileRows_(){
- const sh=ft_profileSheet_(false);if(!sh||sh.getLastRow()<2)return [];
- return sh.getRange(2,1,sh.getLastRow()-1,FT_PROFILE_COLS_.length).getValues().map((v,i)=>{
+ if(FT_REQUEST_CACHE?.profiles)return FT_REQUEST_CACHE.profiles;
+ const sh=ft_profileSheet_(false);
+ if(!sh||sh.getLastRow()<2)return [];
+ const rows=sh.getRange(2,1,sh.getLastRow()-1,FT_PROFILE_COLS_.length).getValues().map((v,i)=>{
   const o={__row:i+2};FT_PROFILE_COLS_.forEach((k,j)=>o[k]=v[j]);return o;
  });
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.profiles=rows;
+ return rows;
+}
+function ft_profileTime_(value, fallback){
+  if(value instanceof Date&&Number.isFinite(value.getTime())){
+    const zone=ft_db_().getSpreadsheetTimeZone()||FT_TZ;
+    return Utilities.formatDate(value,zone,'HH:mm');
+  }
+  const text=String(value||'').trim();
+  if(/^([01]\d|2[0-3]):[0-5]\d$/.test(text))return text;
+  return fallback;
 }
 function ft_profileFor_(c){
  const r=ft_profileRows_().find(x=>String(x.companyId)===String(c.id));
@@ -740,8 +3400,8 @@ function ft_profileFor_(c){
   workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',
   standbyStart:'07:00',standbyHours:24,secondaryColor:'#19354d',welcomeText:''};
  return Object.assign(def,r?{
-  id:r.id,workModel:r.workModel,workStart:r.workStart,workHours:Number(r.workHours)||8,
-  workdays:r.workdays,standbyStart:r.standbyStart,standbyHours:Number(r.standbyHours)||24,
+  id:r.id,workModel:r.workModel,workStart:ft_profileTime_(r.workStart,'08:00'),workHours:Number(r.workHours)||8,
+  workdays:r.workdays,standbyStart:ft_profileTime_(r.standbyStart,'07:00'),standbyHours:Number(r.standbyHours)||24,
   secondaryColor:r.secondaryColor,welcomeText:r.welcomeText
  }:{});
 }
@@ -768,13 +3428,16 @@ function ft_profileSave_(actor,p){
  const sh=ft_profileSheet_(true);
  if(old)sh.getRange(old.__row,1,1,FT_PROFILE_COLS_.length).setValues([FT_PROFILE_COLS_.map(k=>row[k]||'')]);
  else sh.appendRow(FT_PROFILE_COLS_.map(k=>row[k]||''));
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.profiles=null;
  ft_audit_(actor,'PROFILE','CompanyProfiles',row.id,old||{},row);
  return ft_profileFor_(c);
 }
 function ft_publicGithubUrl_(){
  const url=String(PropertiesService.getScriptProperties()
-  .getProperty('FT_PUBLIC_GITHUB_URL')||'').replace(/\/+$/,'');
- if(!/^https:\/\/[^/]+\/[^?#]+$/.test(url))throw Error('FT_PUBLIC_GITHUB_URL in Skripteigenschaften eintragen.');
+  .getProperty('FT_PUBLIC_GITHUB_URL')||'').trim().replace(/\/+$/,'');
+ // Erlaubt die Cloudflare-Stammadresse ebenso wie eine GitHub-Pages-Unteradresse.
+ if(!/^https:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/.test(url))
+  throw Error('FT_PUBLIC_GITHUB_URL in Skripteigenschaften eintragen.');
  return url+'/';
 }
 function ft_clientUrl_(c){
@@ -842,10 +3505,13 @@ function ft_ruleSheet_(create) {
   return s;
 }
 function ft_ruleRows_() {
-  const s = ft_ruleSheet_(false);
-  if (!s || s.getLastRow() < 2) return [];
-  return s.getRange(2,1,s.getLastRow()-1,FT_RULE_HEADERS_.length).getValues()
-    .map((row,i)=>Object.fromEntries([['__row',i+2],...FT_RULE_HEADERS_.map((k,j)=>[k,row[j] instanceof Date?row[j].toISOString():row[j]])]));
+  if(FT_REQUEST_CACHE?.rules)return FT_REQUEST_CACHE.rules;
+  const s=ft_ruleSheet_(false);
+  if(!s||s.getLastRow()<2)return [];
+  const rows=s.getRange(2,1,s.getLastRow()-1,FT_RULE_HEADERS_.length).getValues()
+    .map((row,i)=>Object.fromEntries([['__row',i+2],...FT_RULE_HEADERS_.map((k,j)=>[k,(k==='effectiveMonth'&&row[j] instanceof Date)?Utilities.formatDate(row[j],FT_TZ,'yyyy-MM'):(row[j] instanceof Date?row[j].toISOString():row[j])])]));
+  if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.rules=rows;
+  return rows;
 }
 function ft_ruleTypeArray_(val,def) {
   if (val===undefined || val===null || val==='') return def.slice();
@@ -854,6 +3520,16 @@ function ft_ruleTypeArray_(val,def) {
   if(a.some(x=>!FT_RULE_TYPES_.includes(x))) throw Error('Unbekannte Tätigkeitsart in der Zuschlagsregel.');
   return a;
 }
+/** BSB3100: Bereitschaft hat immer denselben Stundensatz, auch nachts, sonn- und feiertags.
+ * Alte CompanyRules-Datensätze bleiben unangetastet; ihre STANDBY-Auswahl ist für
+ * die Berechnung ab diesem Code-Stand jedoch nicht mehr zuschlagsberechtigt.
+ * Andere Mandanten behalten ihre frei konfigurierbaren Zuschlagsarten.
+ */
+function ft_rulePremiumTypes_(c,types){
+ const items=Array.isArray(types)?types:[];
+ return String(c?.slug||'').toLowerCase()==='bsb3100'
+  ?items.filter(x=>x!=='STANDBY'):items;
+}
 function ft_ruleDefault_(c) {
   // BSB3100: freiwillige Objektkontrolle erhält keinen freiwilligen Sonn-/Feiertagszuschlag.
   // Gesetzliche/KV-Zahlungen werden dadurch NICHT aufgehoben.
@@ -861,14 +3537,14 @@ function ft_ruleDefault_(c) {
   return {
     companyId:c.id,effectiveMonth:'2026-01',
     nightTypes:['OBJECT','INCIDENT','OTHER'],
-    sundayTypes:bsb?['STANDBY']:['STANDBY','OBJECT','INCIDENT','OTHER'],
-    holidayTypes:bsb?['STANDBY']:['STANDBY','OBJECT','INCIDENT','OTHER'],
+    sundayTypes:bsb?['INCIDENT','OTHER']:['STANDBY','OBJECT','INCIDENT','OTHER'],
+    holidayTypes:bsb?['INCIDENT','OTHER']:['STANDBY','OBJECT','INCIDENT','OTHER'],
     nightPct:Number(c.nightPct)||0,
     sundayPct:Number(c.sundayPct)||0,
     holidayPct:Number(c.holidayPct)||0,
     standbyRate:Number(c.standbyRate)||0,
     holidayCalendar:'AT',extraHolidays:[],
-    note:bsb?'BSB3100: firmeneigene Sonn-/Feiertagszuschläge nur für Bereitschaft. Gesetzliche Feiertagsarbeit gesondert prüfen.':'Firmenregel bitte mit Vertrag und Kollektivvertrag abgleichen.',
+    note:bsb?'BSB3100: Bereitschaft ohne Nacht-, Sonn- oder Feiertagszuschlag. Firmeneigene Zuschläge nur für ausgewählte aktive Arbeitszeiten; gesetzliche/KV-Ansprüche separat prüfen.':'Firmenregel bitte mit Vertrag und Kollektivvertrag abgleichen.',
     source:'STANDARD'
   };
 }
@@ -882,9 +3558,9 @@ function ft_rulesFor_(c,month) {
   try {extra=JSON.parse(String(r.extraHolidays||'[]'));} catch(e){extra=[];}
   return {
     companyId:c.id,effectiveMonth:String(r.effectiveMonth),
-    nightTypes:ft_ruleTypeArray_(r.nightTypes,[]),
-    sundayTypes:ft_ruleTypeArray_(r.sundayTypes,[]),
-    holidayTypes:ft_ruleTypeArray_(r.holidayTypes,[]),
+    nightTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.nightTypes,[])),
+    sundayTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.sundayTypes,[])),
+    holidayTypes:ft_rulePremiumTypes_(c,ft_ruleTypeArray_(r.holidayTypes,[])),
     nightPct:Number(r.nightPct)||0,sundayPct:Number(r.sundayPct)||0,
     holidayPct:Number(r.holidayPct)||0,standbyRate:Number(r.standbyRate)||0,
     holidayCalendar:String(r.holidayCalendar||'AT'),
@@ -898,11 +3574,16 @@ function ft_ruleValidate_(c,p,u){
   extra.forEach(x=>ft_date_(x));
   const holidayCalendar=String(p.holidayCalendar||'AT').toUpperCase();
   if(!['AT','NONE'].includes(holidayCalendar))throw Error('Derzeit sind AT und NONE unterstützt.');
+  const selected={night:ft_ruleTypeArray_(p.nightTypes,[]),
+    sunday:ft_ruleTypeArray_(p.sundayTypes,[]),holiday:ft_ruleTypeArray_(p.holidayTypes,[])};
+  if(String(c.slug||'').toLowerCase()==='bsb3100'&&
+     Object.values(selected).some(types=>types.includes('STANDBY')))
+   throw Error('BSB3100: Bereitschaft wird ohne Nacht-, Sonn- und Feiertagszuschlag bezahlt. Bitte nur aktive Arbeit auswählen.');
   return {
     id:ft_uuid_(),companyId:c.id,effectiveMonth,
-    nightTypes:ft_ruleTypeArray_(p.nightTypes,[]).join(','),
-    sundayTypes:ft_ruleTypeArray_(p.sundayTypes,[]).join(','),
-    holidayTypes:ft_ruleTypeArray_(p.holidayTypes,[]).join(','),
+    nightTypes:selected.night.join(','),
+    sundayTypes:selected.sunday.join(','),
+    holidayTypes:selected.holiday.join(','),
     nightPct:ft_number_(p.nightPct,0,1000,'Nachtzuschlag'),
     sundayPct:ft_number_(p.sundayPct,0,1000,'Sonntagszuschlag'),
     holidayPct:ft_number_(p.holidayPct,0,1000,'Feiertagszuschlag'),
@@ -918,6 +3599,7 @@ function ft_rulesSave_(u,p){
   // Keine bereits freigegebenen Berichte rückwirkend verändern.
   const s=ft_ruleSheet_(true);
   s.appendRow(FT_RULE_HEADERS_.map(k=>r[k]));
+  if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.rules=null;
   ft_audit_(u,'CREATE_VERSION','CompanyRules',r.id,{},r);
   return ft_rulesFor_(c,r.effectiveMonth);
 }
@@ -1075,13 +3757,296 @@ function ft_publishStandby_(actor,p){
  * Install in THE EXISTING FireTime Apps Script project. Do not run ft_setup().
  * Configure script property FT_GATEWAY_KEY (same 48+ char secret as Worker).
  */
+
+// -----------------------------------------------------------------
+// 17_Dienstuebergabe und Krankenstand | additive Datenbankerweiterung
+// -----------------------------------------------------------------
+/** Einmalig NACH dem Code-Update in Apps Script ausfuehren.
+ *  Schreibt KEINE bestehenden Daten um und fuehrt ft_setup nicht aus.
+ */
+function ft_featureInstall(){
+ const db=ft_db_();let created=[];
+ for(const name of ['ShiftSegments','ShiftChanges','SickLeaves']){
+  let sh=db.getSheetByName(name);
+  if(!sh){sh=db.insertSheet(name);sh.getRange(1,1,1,FT_HEADERS[name].length)
+    .setValues([FT_HEADERS[name]]);sh.setFrozenRows(1);created.push(name);}
+  else {const actual=sh.getRange(1,1,1,FT_HEADERS[name].length).getValues()[0];
+   if(actual.join('|')!==FT_HEADERS[name].join('|'))throw Error('Tabellenspalten passen nicht: '+name);}
+ }
+ return {ok:true,newTables:created};
+}
+function ft_featureReady_(){
+ for(const name of ['ShiftSegments','ShiftChanges','SickLeaves'])
+  if(!ft_db_().getSheetByName(name))throw Error('Neue Funktionen noch nicht eingerichtet: ft_featureInstall einmal ausfuehren.');
+}
+function ft_isoInput_(value){
+ const str=String(value||'');
+ if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(str))throw Error('Datum und Uhrzeit fehlen.');
+ // Apps Script timezone should be Europe/Vienna, configured in appsscript.json.
+ return ft_datetime_(str).toISOString();
+}
+function ft_segmentRows_(s){
+ return ft_get_('ShiftSegments').filter(x=>x.shiftId===s.id).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+}
+function ft_segmentEnsure_(s){
+ let rows=ft_segmentRows_(s);
+ if(!rows.length){
+  const r={id:ft_uuid_(),companyId:s.companyId,shiftId:s.id,userId:s.userId,
+   start:s.start,end:s.end,actualStatus:s.actualStatus==='DONE'?'DONE':'PLANNED',
+   confirmedAt:s.confirmedAt||'',calendarEventId:'',updatedAt:ft_now_()};
+  ft_add_('ShiftSegments',r);rows=[ft_one_('ShiftSegments',r.id)];
+  if(!rows[0]||!rows[0].__row)throw Error('Dienstabschnitt wurde nicht korrekt gespeichert.');
+ }
+ return rows;
+}
+function ft_monthIsFinal_(cid,uid,date){
+ return ft_get_('Months').some(x=>x.companyId===cid&&x.userId===uid&&
+   x.month===ft_localMonth_(new Date(date))&&['APPROVED','FINAL'].includes(x.status));
+}
+function ft_monthEditableRange_(cid,uid,start,end){
+ const endD=new Date(new Date(end).getTime()-1);
+ for(const month of new Set([ft_localMonth_(new Date(start)),ft_localMonth_(endD)]))
+  ft_requireMonthOpen_(cid,uid,month);
+}
+function ft_sickOverlap_(cid,uid,start,end){
+ return ft_get_('SickLeaves').some(x=>x.companyId===cid&&x.userId===uid&&x.status!=='REJECTED'&&
+   ft_overlap_(start,end,x.from,x.to)>0);
+}
+function ft_handoverRequest_(actor,p){
+ ft_featureReady_();
+ const s=ft_one_('Shifts',p.shiftId);
+ if(!s||s.status!=='PUBLISHED')throw Error('Nur veroeffentlichte Bereitschaften koennen uebergeben werden.');
+ const c=ft_company_(actor,s.companyId);ft_need_(actor,c,'STANDBY');
+ const to=ft_user_(actor,p.toUserId);
+ if(to.companyId!==c.id||to.status!=='ACTIVE'||to.id===actor.id&&actor.role==='STAFF')
+  throw Error('Aktiven anderen Mitarbeiter aus derselben Firma waehlen.');
+ const fromId=actor.role==='STAFF'?actor.id:String(p.fromUserId||actor.id);
+ const from=ft_user_(actor,fromId);
+ if(from.companyId!==c.id||from.id===to.id)throw Error('Uebergabe an dieselbe Person ist nicht moeglich.');
+ const start=ft_isoInput_(p.start),end=ft_isoInput_(p.end);
+ if(new Date(end)<=new Date(start)||+new Date(end)-new Date(start)>48*3600000)throw Error('Ungueltiger Uebergabezeitraum.');
+ if(new Date(start)<new Date(s.start)||new Date(end)>new Date(s.end))throw Error('Uebergabe muss innerhalb des geplanten Dienstes liegen.');
+ // Unbestaetigte, noch nicht abgeschlossene Dienste sind tauschbar; rueckwirkend erlaubt fuer Monatskorrekturen.
+ ft_monthEditableRange_(c.id,from.id,start,end);ft_monthEditableRange_(c.id,to.id,start,end);
+ if(ft_sickOverlap_(c.id,to.id,start,end))throw Error('Uebernehmende Person ist in diesem Zeitraum krank gemeldet.');
+ const segments=ft_segmentRows_(s);
+ const own=segments.length?segments: [{userId:s.userId,start:s.start,end:s.end,actualStatus:s.actualStatus||'PLANNED'}];
+ if(!own.some(x=>x.userId===from.id&&new Date(start)>=new Date(x.start)&&new Date(end)<=new Date(x.end)&&x.actualStatus!=='DONE'))
+  throw Error('Du kannst nur einen eigenen, noch nicht bestaetigten Dienstabschnitt uebergeben.');
+ if(ft_get_('ShiftChanges').some(x=>x.shiftId===s.id&&x.status==='PENDING'&&ft_overlap_(x.start,x.end,start,end)>0))
+  throw Error('Fuer diesen Zeitraum gibt es bereits eine offene Uebergabe.');
+ const row={id:ft_uuid_(),companyId:c.id,shiftId:s.id,fromUserId:from.id,toUserId:to.id,
+  start,end,reason:ft_str_(p.reason,200),status:'PENDING',createdAt:ft_now_(),
+  respondedAt:'',reviewedAt:'',reviewerId:''};
+ ft_add_('ShiftChanges',row);ft_audit_(actor,'REQUEST','ShiftChanges',row.id,{},row);
+ try{ft_notification_(c,to,'HANDOVER_REQUEST',row.id,'FireTime Pro – Anfrage zur Bereitschaftsuebernahme',
+  'Du hast eine Bereitschaftsanfrage erhalten. Bitte in FireTime Pro zustimmen oder ablehnen. '+ft_publicGithubUrl_());}
+ catch(e){Logger.log('Uebergabe gespeichert, E-Mail ausstehend: '+e.message);}
+ return ft_publicRow_(row);
+}
+function ft_handoverRespond_(actor,p){
+ ft_featureReady_();
+ const req=ft_one_('ShiftChanges',p.id);
+ if(!req||req.status!=='PENDING')throw Error('Anfrage nicht gefunden oder bereits bearbeitet.');
+ const c=ft_company_(actor,req.companyId);ft_need_(actor,c,'STANDBY');
+ if(actor.id!==req.toUserId)throw Error('Nur der angefragte Kollege kann zustimmen oder ablehnen.');
+ const accept=String(p.status)==='ACCEPTED';
+ if(!accept&&String(p.status)!=='DECLINED')throw Error('Bitte zustimmen oder ablehnen.');
+ const s=ft_one_('Shifts',req.shiftId);
+ if(!s||s.status!=='PUBLISHED')throw Error('Der Dienst ist nicht mehr gueltig.');
+ let warning='',calendarWasShared=false;
+ if(accept){
+  if(ft_sickOverlap_(c.id,req.toUserId,req.start,req.end))throw Error('Uebernahme waehrend Krankenstand nicht moeglich.');
+  ft_monthEditableRange_(c.id,req.fromUserId,req.start,req.end);
+  ft_monthEditableRange_(c.id,req.toUserId,req.start,req.end);
+  const segs=ft_segmentEnsure_(s);
+  const old=segs.find(x=>x.userId===req.fromUserId&&x.actualStatus!=='DONE'&&
+   new Date(req.start)>=new Date(x.start)&&new Date(req.end)<=new Date(x.end));
+  if(!old)throw Error('Der Dienst wurde mittlerweile veraendert. Neue Anfrage erforderlich.');
+  // Save original segment as left side or switch to right side, then add remaining segments.
+  const before=ft_publicRow_(old),a=+new Date(old.start),b=+new Date(old.end),lo=+new Date(req.start),hi=+new Date(req.end);
+  const parts=[];
+  if(a<lo)parts.push({userId:old.userId,start:old.start,end:req.start});
+  parts.push({userId:req.toUserId,start:req.start,end:req.end});
+  if(hi<b)parts.push({userId:old.userId,start:req.end,end:old.end});
+  // Preserve old segment event ID so calendar sync can delete/update correctly.
+  if(old.userId!==parts[0].userId&&old.calendarEventId&&ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)){
+  try{const cal=ft_calendar_(c),ev=cal.getEventById(old.calendarEventId);if(ev)ev.deleteEvent();old.calendarEventId='';}
+  catch(ex){throw Error('Alter Kalendereintrag konnte nicht entfernt werden: '+ex.message);}
+ }
+ old.userId=parts[0].userId;old.start=parts[0].start;old.end=parts[0].end;
+  old.actualStatus='PLANNED';old.confirmedAt='';old.updatedAt=ft_now_();ft_save_('ShiftSegments',old);
+  for(const part of parts.slice(1))ft_add_('ShiftSegments',{id:ft_uuid_(),companyId:c.id,shiftId:s.id,
+    ...part,actualStatus:'PLANNED',confirmedAt:'',calendarEventId:'',updatedAt:ft_now_()});
+  // Legacy Shifts is still the plan parent but must no longer be counted for reports.
+  s.actualStatus='PLANNED';s.confirmedAt='';s.updatedAt=ft_now_();ft_save_('Shifts',s);
+  ft_audit_(actor,'HANDOVER_SPLIT','ShiftSegments',old.id,before,{parts});
+ }
+ const prev=ft_publicRow_(req);req.status=accept?'ACCEPTED':'DECLINED';req.respondedAt=ft_now_();ft_save_('ShiftChanges',req);
+ ft_audit_(actor,accept?'ACCEPT':'DECLINE','ShiftChanges',req.id,prev,req);
+ if(accept&&ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)){
+  const splitNow=ft_segmentRows_(s);
+  calendarWasShared=Boolean(s.eventId||splitNow.some(x=>x.calendarEventId));
+  if(calendarWasShared){
+   try{
+    ft_syncShiftParts_(c,s);
+    // Keep plan and calendar approval states in sync after an accepted handover.
+    const m=String(s.day).slice(0,7),state=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m);
+    if(state&&state.sharedHash===ft_planSchedule_(c,m).signature){
+     state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(ft_planSchedule_(c,m)).current);
+     state.sharedAt=ft_now_();state.shareStatus='SENT';state.warnings='';state.updatedAt=ft_now_();
+     ft_save_('PlanMonths',state);
+    }
+   }catch(err){
+    warning='Übernahme gespeichert, Google-Kalender nicht vollständig aktualisiert: '+String(err.message||err);
+    const state=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7));
+    if(state){state.shareStatus='PARTIAL';state.warnings=warning.slice(0,1000);state.updatedAt=ft_now_();ft_save_('PlanMonths',state);}
+   }
+  }
+ }
+
+ if(accept&&!warning&&calendarWasShared&&ft_bool_(c.calendarOn)&&!ft_standbyCalendarMatches_(
+    ft_planSchedule_(c,String(s.day).slice(0,7)),
+    ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7))))
+   warning='Übernahme gespeichert. Falls der Kalender bereits veröffentlicht wurde, bitte Kalenderabgleich ausführen.';
+ try{const source=ft_one_('Users',req.fromUserId);if(source)ft_notification_(c,source,'HANDOVER_ANSWER',req.id+'-'+req.status,
+   'FireTime Pro – Bereitschaftsuebergabe '+(accept?'angenommen':'abgelehnt'),
+   'Deine Anfrage wurde '+(accept?'angenommen':'abgelehnt')+'. '+ft_publicGithubUrl_());}
+ catch(e){Logger.log('Benachrichtigung ausstehend: '+e.message);}
+ return {ok:true,warning,request:ft_publicRow_(req)};
+}
+function ft_segmentConfirm_(actor,p){
+ ft_featureReady_();
+ const s=ft_one_('ShiftSegments',p.id);if(!s)throw Error('Dienstabschnitt nicht gefunden.');
+ const c=ft_company_(actor,s.companyId);ft_need_(actor,c,'STANDBY');
+ if(actor.role==='STAFF'&&s.userId!==actor.id)throw Error('Nur eigenen Abschnitt bestaetigen.');
+ if(s.actualStatus==='DONE')return {ok:true,unchanged:true};
+ if(+new Date(s.end)>Date.now())throw Error('Dienstabschnitt ist noch nicht beendet.');
+ if(ft_sickOverlap_(c.id,s.userId,s.start,s.end))throw Error('Krankenstand ueberschneidet diesen Dienst. Bitte erst klaeren.');
+ ft_monthEditableRange_(c.id,s.userId,s.start,s.end);
+ const before=ft_publicRow_(s);s.actualStatus='DONE';s.confirmedAt=ft_now_();ft_save_('ShiftSegments',s);
+ ft_audit_(actor,'CONFIRM','ShiftSegments',s.id,before,s);return {ok:true};
+}
+function ft_sickReport_(actor,p){
+ ft_featureReady_();
+ const id=actor.role==='STAFF'?actor.id:String(p.userId||actor.id);
+ const u=ft_user_(actor,id),c=ft_company_(actor,u.companyId);
+ ft_need_(actor,c,'SICK');
+ if(!ft_enabled_(c,'TIME')&&!ft_enabled_(c,'STANDBY'))throw Error('Kein Zeit- oder Bereitschaftsmodul freigeschaltet.');
+ const from=ft_isoInput_(p.from),to=ft_isoInput_(p.to);
+ if(new Date(to)<=new Date(from)||+new Date(to)-new Date(from)>31*86400000)
+  throw Error('Ungueltiger Krankenstandszeitraum (maximal 31 Tage je Meldung).');
+ ft_monthEditableRange_(c.id,u.id,from,to);
+ if(ft_get_('SickLeaves').some(x=>x.companyId===c.id&&x.userId===u.id&&x.status!=='REJECTED'&&ft_overlap_(from,to,x.from,x.to)>0))
+  throw Error('Ueberlappender Krankenstand vorhanden.');
+ const row={id:ft_uuid_(),companyId:c.id,userId:u.id,from,to,note:ft_str_(p.note,250),
+  status:'PENDING',reportedBy:actor.id,createdAt:ft_now_(),reviewerId:'',reviewedAt:'',
+  creditMode:'NONE',creditHours:0,standbyCreditHours:0,reviewNote:''};
+ ft_add_('SickLeaves',row);ft_audit_(actor,'SICK_REPORT','SickLeaves',row.id,{},row);
+ let warning='';if(ft_bool_(c.calendarOn))warning='Krankenstand aktualisiert: Kalenderhinweise über den separaten Kalender-Button aktualisieren.';
+ return {row:ft_publicRow_(row),message:'Krankenstand gemeldet; betroffene Bereitschaftsdienste bitte neu besetzen.',warning};
+}
+function ft_sickReview_(actor,p){
+ ft_featureReady_();ft_allowed_(actor,['SYSADMIN','ADMIN']);
+ const row=ft_one_('SickLeaves',p.id);if(!row)throw Error('Krankenstand nicht gefunden.');
+ const c=ft_company_(actor,row.companyId);
+ ft_need_(actor,c,'SICK');
+ const status=String(p.status||'APPROVED');if(!['APPROVED','REJECTED'].includes(status))throw Error('Ungueltiger Status.');
+ if(row.status!=='PENDING')throw Error('Bereits bearbeitet. Korrekturen ueber Monatsfreigabe mit Protokoll.');
+ const mode=status==='REJECTED'?'NONE':String(p.creditMode||'NONE');
+ if(!['NONE','WORK','STANDBY','BOTH'].includes(mode))throw Error('Anrechnungsart ungueltig.');
+ const credit=mode==='WORK'||mode==='BOTH'?ft_number_(p.creditHours,0,300,'Arbeitszeitgutschrift'):0;
+ const standby=mode==='STANDBY'||mode==='BOTH'?ft_number_(p.standbyCreditHours,0,744,'Bereitschaftsgutschrift'):0;
+ const duration=ft_hours_(row.from,row.to);
+ if(credit>duration+0.01||standby>duration+0.01)throw Error('Mehr Stunden als der gemeldete Zeitraum.');
+ for(const uid of [row.userId])ft_monthEditableRange_(c.id,uid,row.from,row.to);
+ const prev=ft_publicRow_(row);Object.assign(row,{status,creditMode:mode,creditHours:credit,
+  standbyCreditHours:standby,reviewerId:actor.id,reviewedAt:ft_now_(),reviewNote:ft_str_(p.reviewNote,500)});
+ ft_save_('SickLeaves',row);ft_audit_(actor,'SICK_REVIEW','SickLeaves',row.id,prev,row);
+ // Kalender wird nur auf ausdrückliche Freigabe des Administrators aktualisiert.
+ return ft_publicRow_(row);
+}
+function ft_shiftPeriodSummary_(actor,p){
+ ft_featureReady_();const c=ft_company_(actor,p.companyId||actor.companyId);
+ const month=ft_month_(p.month||ft_localMonth_(new Date()));
+ const admin=actor.role!=='STAFF';
+ const shifts=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.status==='PUBLISHED'&&x.day.slice(0,7)===month);
+ const ids=new Set(shifts.map(x=>x.id));
+ const segments=ft_get_('ShiftSegments').filter(x=>ids.has(x.shiftId)&&(admin||x.userId===actor.id)).map(ft_publicRow_);
+ const changes=ft_get_('ShiftChanges').filter(x=>x.companyId===c.id&&(
+    (String(x.start).slice(0,7)===month)||(String(x.end).slice(0,7)===month)||
+    x.status==='PENDING')&&(admin||x.fromUserId===actor.id||x.toUserId===actor.id)).map(ft_publicRow_);
+ const sick=ft_get_('SickLeaves').filter(x=>x.companyId===c.id&&(
+    ft_localMonth_(new Date(x.from))===month||ft_localMonth_(new Date(x.to))===month||x.status==='PENDING')&&
+    (admin||x.userId===actor.id)).map(ft_publicRow_);
+ return {segments,changes,sick};
+}
+/** Legacy Shifts remain for untouched days. Modified days are counted ONLY via confirmed segments. */
+function ft_accountableShifts_(source){
+ const parts=source.ShiftSegments||ft_get_('ShiftSegments');
+ const modified=new Set(parts.map(x=>x.shiftId));
+ return source.Shifts.filter(s=>!modified.has(s.id)).concat(parts.map(x=>({
+  companyId:x.companyId,userId:x.userId,start:x.start,end:x.end,
+  status:'PUBLISHED',actualStatus:x.actualStatus,shiftId:x.shiftId
+ })));
+}
+function ft_calendarUpdateSick_(c,row){
+ if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn))return;
+ const cal=ft_calendar_(c),shifts=ft_get_('Shifts').filter(s=>s.companyId===c.id&&s.status==='PUBLISHED'&&ft_overlap_(s.start,s.end,row.from,row.to)>0);
+ for(const s of shifts){
+  const parts=ft_segmentRows_(s);
+  if(parts.length){ft_syncShiftParts_(c,s);continue;}
+  if(s.userId!==row.userId||!s.eventId)continue;
+  const event=cal.getEventById(s.eventId);if(!event)continue;
+  const u=ft_one_('Users',s.userId);if(!u)continue;
+  event.setTitle(ft_standbyCalendarTitle_(u));
+ }
+}
+function ft_calendarResync_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId);
+ ft_need_(actor,c,'CALENDAR');const month=ft_month_(p.month);if(!ft_bool_(c.calendarOn))throw Error('Firmenkalender ist nicht aktiviert.');
+ const list=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.status==='PUBLISHED'&&x.day.startsWith(month));
+ let count=0,warnings=[];
+ for(const s of list){
+  try{
+   const parts=ft_segmentRows_(s);
+   if(parts.length){ft_syncShiftParts_(c,s);count+=parts.length;}
+   else if(s.userId){ft_syncShift_(c,s,{...ft_publicRow_(s),userId:s.userId});count++;}
+  }catch(e){warnings.push(s.day+': '+e.message);}
+ }
+ return {count,warnings};
+}
+function ft_calendarSyncParts_(c,s){
+ // Intentionally separate event ID per segment; original event is obsolete.
+ return ft_syncShiftParts_(c,s);
+}
+function ft_syncShiftParts_(c,s){
+ if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn))return;
+ const cal=ft_calendar_(c),parts=ft_segmentRows_(s);
+ if(s.eventId){const old=cal.getEventById(s.eventId);if(old)old.deleteEvent();s.eventId='';ft_save_('Shifts',s);}
+ for(const part of parts){
+  let ev=part.calendarEventId?cal.getEventById(part.calendarEventId):null;
+  const u=ft_one_('Users',part.userId);if(!u)continue;
+  const title=ft_standbyCalendarTitle_(u);
+  const details='Bereitschaft – Dienstabschnitt über FireTime Pro. '+Utilities.formatDate(new Date(part.start),FT_TZ,'dd.MM.yyyy HH:mm')+' – '+Utilities.formatDate(new Date(part.end),FT_TZ,'dd.MM.yyyy HH:mm')+
+   (ft_sickOverlap_(c.id,part.userId,part.start,part.end)?'\\nAchtung: Vertretungsbedarf wegen Krankenstand.':'');
+  if(ev){ev.setTitle(title);ev.setTime(new Date(part.start),new Date(part.end));ev.setDescription(details);}
+  else {ev=cal.createEvent(title,new Date(part.start),new Date(part.end),{description:details,guests:u.email,sendInvites:true});
+   ev.addPopupReminder(1440);part.calendarEventId=ev.getId();ft_save_('ShiftSegments',part);}
+ }
+}
+
 function doPost(e) {
+  const ftPerfStart=Date.now();
+  let ftPerfAction='request';
+  // Bei jeder signierten Anfrage einen frischen, mandantenunabhaengigen Lesecache beginnen.
+  FT_REQUEST_CACHE={db:null,sheets:Object.create(null),tables:Object.create(null),profiles:null,rules:null};
   try {
     if (!e || !e.postData || !e.postData.contents) {
       throw new Error('Leere Anfrage.');
     }
     const body = e.postData.contents;
-    if (body.length > 3900000) throw new Error('Anfrage zu groß.');
+    if (body.length > 16000000) throw new Error('Anfrage zu groß.');
     const envelope = JSON.parse(body);
     if (!envelope || typeof envelope !== 'object') {
       throw new Error('Anfrage ungültig.');
@@ -1093,7 +4058,7 @@ function doPost(e) {
     if (!Number.isSafeInteger(ts) || Math.abs(Math.floor(Date.now()/1000)-ts)>300 ||
         !/^[a-f0-9]{32}$/.test(nonce) ||
         !/^[a-f0-9]{64}$/.test(signature) ||
-        payload.length > 3650000) {
+        payload.length > 15300000) {
       throw new Error('Signatur oder Zeitstempel ungültig.');
     }
     const secret = PropertiesService.getScriptProperties().getProperty('FT_GATEWAY_KEY') || '';
@@ -1117,13 +4082,25 @@ function doPost(e) {
     if (!req || typeof req !== 'object' || Array.isArray(req)) {
       throw new Error('Anfrage ungültig.');
     }
+    // Only private communication attachments may use the larger request size.
+    if(body.length>3900000 && !(req.type==='api' &&
+       ['commCreate','commReply','commTaskStatus'].includes(String(req.action||''))))
+      throw new Error('Anfrage für diesen Vorgang zu groß.');
     let result;
+    const perfName=String(req.type==='api'?req.action:req.type||'request');
+    if(/^[A-Za-z][A-Za-z0-9]{0,34}$/.test(perfName))ftPerfAction=perfName;
     switch(String(req.type||'')) {
       case 'login':
-        result=ft_login(req.email,req.password);
+        result=ft_login(req.email,req.password,req.remember===true);
         break;
       case 'activate':
         result=ft_activate(req.invite,req.password);
+        break;
+      case 'resetRequest':
+        result=ft_passwordResetRequest_(req.email);
+        break;
+      case 'resetConfirm':
+        result=ft_passwordResetConfirm_(req.resetToken,req.password);
         break;
       case 'logout':
         result=ft_logout(req.token);
@@ -1148,9 +4125,442 @@ function doPost(e) {
     const status=/Sitzung|anmelden|Passwort|E-Mail-Adresse oder Passwort|Zugang/.test(msg)
       ? 401 : /Berechtigung|Kein Zugriff|freigeschaltet/.test(msg) ? 403 : 400;
     return ft_gatewayResponse_({ok:false,error:msg,status:status});
+  } finally {
+    // Logs operation and duration only: no password, token, person or company.
+    const elapsed=Date.now()-ftPerfStart;
+    if(elapsed>=1500)console.info('FireTime Tempo '+ftPerfAction+': '+elapsed+' ms');
   }
 }
 function ft_gatewayResponse_(value) {
   return ContentService.createTextOutput(JSON.stringify(value))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+
+// -----------------------------------------------------------------
+// 18_URLaubskonto_und_Abwesenheitsarchiv
+// -----------------------------------------------------------------
+/** FireTime Pro | Urlaubsjahre, revisionsfeste Buchungen, Abwesenheitsauszuege.
+ *  Altbestände werden nie neu gutgeschrieben. Vor Aktivierung gespeicherte
+ *  Urlaubstage bleiben im bisherigen Gesamtsaldo und heißen LEGACY.
+ *  Keine automatische Verjährung, keine unbelegte Rückrechnung alter Jahre.
+ */
+const FT_LEAVE_LEDGER_COLS_=['id','companyId','userId','kind','days','effectiveDate','periodStart','referenceId','carryoverBefore','note','actorId','createdAt'];
+const FT_LEAVE_POLICY_COLS_=['id','companyId','yearMode','autoGrant','activationDate','updatedBy','updatedAt'];
+// Per-employee agreement. Dedicated table avoids changing historical Users columns.
+const FT_LEAVE_STAFF_RULE_COLS_=['id','companyId','userId','yearMode','ruleType','legalBasis','note','updatedBy','updatedAt'];
+const FT_LEAVE_FLEX_COLS_=['id','companyId','userId','mode','referenceDays','basis','balanceReviewed','updatedBy','updatedAt'];
+const FT_LEAVE_FLEX_APPROVAL_COLS_=['id','companyId','userId','leaveId','days','creditHours','referenceDays','basis','reviewerId','reviewedAt'];
+const FT_ABSENCE_PDF_COLS_=['id','companyId','userId','fromYear','toYear','fileId','name','createdAt','version','requestId'];
+function ft_absenceSheet_(name,cols,create){
+ const db=ft_db_();let sheet=db.getSheetByName(name);
+ if(!sheet&&create){sheet=db.insertSheet(name);sheet.getRange(1,1,1,cols.length).setValues([cols]);sheet.setFrozenRows(1);}
+ if(sheet){const actual=sheet.getRange(1,1,1,cols.length).getValues()[0];
+  if(actual.join('|')!==cols.join('|'))throw Error('Spalten von '+name+' stimmen nicht; bitte nicht automatisch überschreiben.');}
+ return sheet;
+}
+function ft_absenceRows_(name,cols,create){
+ const sh=ft_absenceSheet_(name,cols,create);
+ if(!sh||sh.getLastRow()<2)return [];
+ const vals=sh.getRange(2,1,sh.getLastRow()-1,cols.length).getValues();
+ return vals.map((cells,i)=>{const out={__row:i+2};cols.forEach((k,j)=>{
+  let v=cells[j];if(v instanceof Date)v=k==='effectiveDate'||k==='periodStart'||k==='activationDate'?Utilities.formatDate(v,FT_TZ,'yyyy-MM-dd'):v.toISOString();
+  out[k]=v;});return out;
+ }).filter(r=>r.id!=='');
+}
+function ft_absenceAdd_(name,cols,row){
+ ft_absenceSheet_(name,cols,true).appendRow(cols.map(k=>row[k]===undefined?'':row[k]));
+ if(FT_REQUEST_CACHE){delete FT_REQUEST_CACHE.tables.FT_LEAVE_POLICY_CACHE;delete FT_REQUEST_CACHE.tables.FT_LEAVE_STAFF_RULES;}
+ return row;
+}
+function ft_absenceSave_(name,cols,row){
+ if(!row.__row)throw Error('Archivzeile fehlt.');
+ ft_absenceSheet_(name,cols,true).getRange(row.__row,1,1,cols.length).setValues([cols.map(k=>row[k]===undefined?'':row[k])]);
+ if(FT_REQUEST_CACHE){delete FT_REQUEST_CACHE.tables.FT_LEAVE_POLICY_CACHE;delete FT_REQUEST_CACHE.tables.FT_LEAVE_STAFF_RULES;}
+ return row;
+}
+
+function ft_leaveStaffRules_(create){
+ const key='FT_LEAVE_STAFF_RULES';
+ if(FT_REQUEST_CACHE&&FT_REQUEST_CACHE.tables[key])return FT_REQUEST_CACHE.tables[key];
+ const rows=ft_absenceRows_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,create);
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[key]=rows;
+ return rows;
+}
+function ft_leaveFlexRules_(create){
+ const key='FT_LEAVE_FLEX_RULES';
+ if(FT_REQUEST_CACHE&&FT_REQUEST_CACHE.tables[key])return FT_REQUEST_CACHE.tables[key];
+ const rows=ft_absenceRows_('LeaveFlexRules',FT_LEAVE_FLEX_COLS_,create);
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[key]=rows;
+ return rows;
+}
+function ft_leaveFlexFor_(user){
+ const rule=ft_leaveFlexRules_(false).find(r=>r.companyId===user.companyId&&r.userId===user.id);
+ const days=Number(rule?.referenceDays)||0;
+ return {leaveWorkModel:rule?.mode==='FLEX'?'FLEX':'FIXED',leaveFlexReferenceDays:days,
+  leaveFlexBasis:String(rule?.basis||''),leaveFlexBalanceReviewed:ft_bool_(rule?.balanceReviewed),leaveFlexConfigured:rule?.mode==='FLEX'&&days>0&&String(rule.basis||'').length>=12&&ft_bool_(rule?.balanceReviewed)};
+}
+function ft_leaveFlexValidate_(p,user,existing){
+ const prior=existing?ft_leaveFlexFor_(user):{leaveWorkModel:'FIXED',leaveFlexReferenceDays:0,leaveFlexBasis:'',leaveFlexBalanceReviewed:false};
+ const mode=p.leaveWorkModel===undefined?prior.leaveWorkModel:String(p.leaveWorkModel);
+ if(!['FLEX','FIXED'].includes(mode))throw Error('Ungültiges Urlaubs-Arbeitszeitmodell.');
+ const reference=p.leaveFlexReferenceDays===undefined?Number(prior.leaveFlexReferenceDays||0):Number(p.leaveFlexReferenceDays);
+ if(!Number.isInteger(reference)||reference<0||reference>6)throw Error('Rechnerische Urlaubstage/Woche müssen ganzzahlig zwischen 0 und 6 liegen.');
+ const basis=ft_str_(p.leaveFlexBasis===undefined?prior.leaveFlexBasis:p.leaveFlexBasis,300);
+ const reviewed=p.leaveFlexBalanceReviewed===undefined?Boolean(prior.leaveFlexBalanceReviewed):p.leaveFlexBalanceReviewed===true||p.leaveFlexBalanceReviewed==='YES';
+ if(mode==='FLEX'&&reference>0&&basis.length<12)throw Error('Bitte dokumentierte Bewertungsgrundlage für flexible Urlaubstage angeben (mindestens 12 Zeichen).');
+ if(mode==='FLEX'&&reviewed&&reference===0)throw Error('Vor einer Saldenbestätigung müssen die rechnerischen Urlaubstage/Woche vereinbart sein.');
+ if(existing){
+  const changes=mode!==prior.leaveWorkModel||(mode==='FLEX'&&reference!==prior.leaveFlexReferenceDays);
+  if(changes&&(ft_get_('Leaves').some(l=>l.companyId===user.companyId&&l.userId===user.id&&['APPROVED','CANCEL_PENDING'].includes(l.status))||
+    ft_leaveLedgerRows_(false).some(l=>l.companyId===user.companyId&&l.userId===user.id&&l.kind==='GRANT')))
+   throw Error('Urlaubsmodell nach bestehenden Freigaben/Gutschriften nicht automatisch ändern. Bitte kontrollierte Umstellung durchführen.');
+ }
+ return {mode,referenceDays:mode==='FLEX'?reference:0,basis:mode==='FLEX'?basis:'',balanceReviewed:mode==='FLEX'&&reviewed};
+}
+function ft_leaveFlexSave_(actor,user,config){
+ const all=ft_leaveFlexRules_(true),old=all.find(r=>r.companyId===user.companyId&&r.userId===user.id);
+ const row={id:old?.id||'flex_'+ft_sha_(user.companyId+'|'+user.id),companyId:user.companyId,userId:user.id,
+  ...config,updatedBy:actor.id,updatedAt:ft_now_()};
+ if(old){Object.assign(old,row);ft_absenceSave_('LeaveFlexRules',FT_LEAVE_FLEX_COLS_,old);}
+ else ft_absenceAdd_('LeaveFlexRules',FT_LEAVE_FLEX_COLS_,row);
+ if(FT_REQUEST_CACHE)delete FT_REQUEST_CACHE.tables.FT_LEAVE_FLEX_RULES;
+ ft_audit_(actor,'LEAVE_WORKMODEL','Users',user.id,old||{},row);
+ return row;
+}
+function ft_flexibleLeaveUpgrade(){
+ if(!ft_prop_('FT_DB_ID'))throw Error('FireTime-Pro-Datenbank nicht gefunden.');
+ const names=['LeaveFlexRules','LeaveFlexApprovals'],db=ft_db_();
+ const existing=names.filter(x=>!!db.getSheetByName(x));
+ ft_absenceSheet_('LeaveFlexRules',FT_LEAVE_FLEX_COLS_,true);
+ ft_absenceSheet_('LeaveFlexApprovals',FT_LEAVE_FLEX_APPROVAL_COLS_,true);
+ return {ok:true,version:FT_VERSION,created:names.filter(x=>!existing.includes(x)),
+  message:'Flex-Urlaubsmodell bereit. Bestehende Salden und Urlaube unverändert; automatische Bewertung zunächst gesperrt.'};
+}
+function ft_flexLeaveDaysForMonth_(leave,from,to){
+ // Credit-hour allocation only: proportion by calendar days when a leave crosses a month.
+ // Vacation-day debit is NEVER derived from these calendar days.
+ const all=Math.round((ft_date_(leave.to)-ft_date_(leave.from))/86400000)+1;
+ const span=Math.round((ft_date_(to)-ft_date_(from))/86400000)+1;
+ return all>0?span/all:0;
+}
+function ft_leaveWeekdays_(workdays){
+ const days=String(workdays||'1,2,3,4,5').split(',').map(Number);
+ if(!days.length||days.some(d=>!Number.isInteger(d)||d<1||d>7)||new Set(days).size!==days.length)
+  throw Error('Arbeitstage von 1 bis 7 ohne Wiederholung eingeben (z. B. 1,2,3,4,5).');
+ return days.length;
+}
+function ft_leaveStaffPublic_(user){
+ const rule=ft_leaveStaffRules_(false).find(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ const company=ft_leavePolicyFor_(user.companyId);
+ const defaultMode=['CALENDAR','ANNIVERSARY'].includes(company.yearMode)?company.yearMode:'ANNIVERSARY';
+ const entitlement=Number(user.leaveEntitlement)||0;
+ const standard=ft_leaveWeekdays_(user.workdays||'1,2,3,4,5')*5;
+ return {...ft_leaveFlexFor_(user),leaveYearMode:rule?.yearMode||defaultMode,
+  leaveRuleType:rule?.ruleType||'LEGACY',
+  leaveRuleLegalBasis:rule?.legalBasis||'',
+  leaveRuleNote:rule?.note||'',
+  leaveRulePersonal:Boolean(rule),
+  leaveLegalMinimumDays:ft_leaveFlexFor_(user).leaveWorkModel==='FLEX'?null:standard};
+}
+function ft_leaveStaffCheck_(payload,user,existing){
+ const desired=String(payload.leaveYearMode||'ANNIVERSARY');
+ if(!['ANNIVERSARY','CALENDAR'].includes(desired))throw Error('Urlaubsjahr: Eintrittsdatum oder 1. Jänner auswählen.');
+ const type=String(payload.leaveRuleType||'STANDARD_5');
+ if(!['STANDARD_5','STANDARD_6','SPECIAL','LEGACY'].includes(type))throw Error('Ungültige Urlaubsregelung.');
+ if(!existing&&type==='LEGACY')throw Error('Bei neuen Mitarbeitern bitte die Urlaubsregel festlegen.');
+ const flex=ft_leaveFlexValidate_(payload,user,existing);
+ const min=flex.mode==='FLEX'?flex.referenceDays*5:ft_leaveWeekdays_(user.workdays)*5;
+ const expected=flex.mode==='FLEX'&&!flex.referenceDays?null:type==='STANDARD_5'?min:type==='STANDARD_6'?min/5*6:null;
+ if(expected!==null&&Math.abs(Number(user.leaveEntitlement)-expected)>.01)
+  throw Error('Urlaubsanspruch stimmt nicht mit '+(type==='STANDARD_5'?'fünf':'sechs')+' Wochen bei '+ft_leaveWeekdays_(user.workdays)+' Arbeitstagen überein.');
+ if(type==='SPECIAL'&&min>0&&Number(user.leaveEntitlement)<min)
+  throw Error('Sonderanspruch unterschreitet den gesetzlichen Mindesturlaub von fünf Wochen.');
+ const note=ft_str_(payload.leaveRuleNote||'',250);
+ if(type==='SPECIAL'&&note.length<5)throw Error('Bitte den Sonderanspruch und seine Grundlage beschreiben.');
+ const basis=String(payload.leaveRuleLegalBasis||'');
+ if(desired==='CALENDAR'&&!['KV','BETRIEBSVEREINBARUNG','SCHRIFTLICHE_EINZELVEREINBARUNG'].includes(basis))
+  throw Error('Für das Kalenderjahr bitte die Grundlage (KV, Betriebsvereinbarung oder schriftliche Einzelvereinbarung) angeben.');
+ if(existing&&ft_leaveLedgerRows_(false).some(x=>x.companyId===user.companyId&&x.userId===user.id&&x.kind==='GRANT')){
+  const old=ft_leaveStaffPublic_(user);
+  if(old.leaveYearMode!==desired)throw Error('Für diesen Mitarbeiter wurden bereits Jahresgutschriften verbucht. Wechsel des Urlaubsjahres nur mit geprüfter Umstellung.');
+ }
+ return {yearMode:desired,ruleType:type,legalBasis:desired==='CALENDAR'?basis:'GESETZ',note};
+}
+function ft_leaveStaffSave_(actor,user,rule){
+ const existing=ft_leaveStaffRules_(true).find(x=>x.companyId===user.companyId&&x.userId===user.id);
+ const before=existing?{yearMode:existing.yearMode,ruleType:existing.ruleType,legalBasis:existing.legalBasis,note:existing.note}:{};
+ const now={id:existing?.id||'staff_leave_'+ft_sha_(user.companyId+'|'+user.id),
+   companyId:user.companyId,userId:user.id,...rule,updatedBy:actor.id,updatedAt:ft_now_()};
+ if(existing){Object.assign(existing,now);ft_absenceSave_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,existing);}
+ else ft_absenceAdd_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,now);
+ if(FT_REQUEST_CACHE)delete FT_REQUEST_CACHE.tables.FT_LEAVE_STAFF_RULES;
+ ft_audit_(actor,'LEAVE_STAFF_RULE','Users',user.id,before,now);
+ return now;
+}
+function ft_employeeLeaveRulesUpgrade(){
+ if(!ft_prop_('FT_DB_ID'))throw Error('Bestehende FireTime-Pro-Datenbank fehlt.');
+ const existed=Boolean(ft_db_().getSheetByName('LeaveStaffRules'));
+ ft_absenceSheet_('LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_,true);
+ return {ok:true,version:FT_VERSION,existing:existed,
+  message:'Mitarbeiter-Urlaubsregeln sind bereit. Bestehende Salden, Ansprüche und Gutschriften wurden nicht verändert.'};
+}
+function ft_leaveLedgerRows_(create){return ft_absenceRows_('LeaveLedger',FT_LEAVE_LEDGER_COLS_,create);}
+function ft_leavePolicyRows_(create){
+ const key='FT_LEAVE_POLICY_CACHE';
+ if(FT_REQUEST_CACHE&&FT_REQUEST_CACHE.tables[key])return FT_REQUEST_CACHE.tables[key];
+ const rows=ft_absenceRows_('LeavePolicies',FT_LEAVE_POLICY_COLS_,create);
+ if(FT_REQUEST_CACHE)FT_REQUEST_CACHE.tables[key]=rows;
+ return rows;
+}
+function ft_leavePolicyFor_(cid){const row=ft_leavePolicyRows_(false).find(r=>String(r.companyId)===String(cid));
+ return row?{yearMode:String(row.yearMode),autoGrant:ft_bool_(row.autoGrant),activationDate:String(row.activationDate||''),updatedAt:String(row.updatedAt||'')}:
+  {yearMode:'NOT_CONFIGURED',autoGrant:false,activationDate:'',updatedAt:''};}
+function ft_leaveYearDate_(year,month,day){
+ const m=Number(month),y=Number(year),d=Number(day),last=new Date(Date.UTC(y,m,0)).getUTCDate();
+ return String(y)+'-'+String(m).padStart(2,'0')+'-'+String(Math.min(d,last)).padStart(2,'0');
+}
+function ft_leavePeriod_(user,mode,year){
+ if(mode==='CALENDAR')return ft_leaveYearDate_(year,1,1);
+ if(mode!=='ANNIVERSARY'||!/^\d{4}-\d\d-\d\d$/.test(String(user.startDate||'')))return '';
+ return ft_leaveYearDate_(year,Number(user.startDate.slice(5,7)),Number(user.startDate.slice(8,10)));
+}
+function ft_leaveEnsureOpening_(user,actor){
+ const all=ft_leaveLedgerRows_(true);
+ if(all.some(r=>String(r.companyId)===String(user.companyId)&&String(r.userId)===String(user.id)))return false;
+ ft_absenceAdd_('LeaveLedger',FT_LEAVE_LEDGER_COLS_,{id:'opening_'+ft_sha_(user.companyId+'|'+user.id),
+  companyId:user.companyId,userId:user.id,kind:'OPENING',days:ft_2_(user.leaveBalance),
+  effectiveDate:ft_localDate_(new Date()),periodStart:'LEGACY',referenceId:'OPENING',
+  carryoverBefore:'',note:'Übernommener Gesamtrest aus altem System; Anspruchsjahr nicht feststellbar',
+  actorId:actor?.id||'SYSTEM',createdAt:ft_now_()});
+ return true;
+}
+function ft_leaveLedgerRecord_(actor,user,kind,days,referenceId,note){
+ // Calls must be inside the same script lock as the existing leave approval.
+ ft_leaveEnsureOpening_(user,actor);
+ const id='ledger_'+ft_sha_(user.companyId+'|'+user.id+'|'+kind+'|'+referenceId);
+ if(ft_leaveLedgerRows_(false).some(row=>String(row.id)===id))return false;
+ ft_absenceAdd_('LeaveLedger',FT_LEAVE_LEDGER_COLS_,{id,companyId:user.companyId,userId:user.id,
+  kind,days:ft_2_(days),effectiveDate:ft_localDate_(new Date()),periodStart:'',
+  referenceId:String(referenceId),carryoverBefore:'',note:ft_str_(note,200),
+  actorId:actor?.id||'SYSTEM',createdAt:ft_now_()});return true;
+}
+function ft_leavePolicySave_(actor,p){
+ ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId);
+ const mode=String(p.yearMode||'');if(!['CALENDAR','ANNIVERSARY'].includes(mode))throw Error('Urlaubsjahr: CALENDAR oder ANNIVERSARY auswählen.');
+ if(p.confirmExistingBalance!==true)throw Error('Bitte ausdrücklich bestätigen, dass der bisherige Resturlaub nicht neu gutgeschrieben werden darf.');
+ const enabled=ft_bool_(p.autoGrant);const old=ft_leavePolicyRows_(true).find(x=>String(x.companyId)===String(c.id));
+ if(old&&mode!==String(old.yearMode)&&ft_leaveLedgerRows_(false).some(x=>x.companyId===c.id&&x.kind==='GRANT'))
+  throw Error('Aktives Urlaubsjahr-Modell darf nicht stillschweigend geändert werden. Bitte eine kontrollierte Umstellung veranlassen.');
+ if(enabled&&mode==='ANNIVERSARY'&&ft_get_('Users').some(u=>u.companyId===c.id&&u.status==='ACTIVE'&&!/^\d{4}-\d\d-\d\d$/.test(String(u.startDate||''))))
+  throw Error('Bei Eintrittsdatum-Urlaubsjahr müssen bei allen aktiven Mitarbeitern Eintrittsdaten erfasst sein.');
+ const today=ft_localDate_(new Date()),date=old?.activationDate||today;
+ const beforePolicy=old?{yearMode:old.yearMode,autoGrant:ft_bool_(old.autoGrant)}:{};
+ const row={id:old?.id||'policy_'+c.id,companyId:c.id,yearMode:mode,autoGrant:enabled,
+  activationDate:date,updatedBy:actor.id,updatedAt:ft_now_()};
+ // Bootstrap each existing balance BEFORE any future grant; never backfill a current-year entitlement.
+ for(const u of ft_get_('Users').filter(u=>u.companyId===c.id&&u.role!=='SYSADMIN'))ft_leaveEnsureOpening_(u,actor);
+ if(old){Object.assign(old,row);ft_absenceSave_('LeavePolicies',FT_LEAVE_POLICY_COLS_,old);}
+ else ft_absenceAdd_('LeavePolicies',FT_LEAVE_POLICY_COLS_,row);
+ ft_audit_(actor,'LEAVE_POLICY','Companies',c.id,beforePolicy,row);
+ return {...ft_leavePolicyFor_(c.id),message:enabled?
+  'Aktiv. Frühestens ab dem nächsten Kalenderjahr werden neue Ansprüche einmalig gebucht. Der Altbestand bleibt erhalten.':
+  'Urlaubsjahr gewählt, automatische Gutschrift vorerst deaktiviert.'};
+}
+function ft_leaveAnnualTick_(){
+ // Called after the regular ft_tick lock. Idempotent per company/user/period.
+ return ft_lock_(()=>{
+  const today=ft_localDate_(new Date()),year=Number(today.slice(0,4));let granted=0;
+  const policies=ft_leavePolicyRows_(false).filter(x=>ft_bool_(x.autoGrant));
+  if(!policies.length)return {granted,checked:today};
+  const users=ft_get_('Users').filter(x=>x.status==='ACTIVE'&&x.role!=='SYSADMIN');
+  const ledger=ft_leaveLedgerRows_(true),done=new Set(ledger.filter(x=>x.kind==='GRANT').map(x=>String(x.id)));
+  for(const policy of policies){
+   const companyMode=String(policy.yearMode),activation=String(policy.activationDate||today),firstYear=Number(activation.slice(0,4))+1;
+   if(!['CALENDAR','ANNIVERSARY'].includes(companyMode))continue;
+   for(const u of users.filter(x=>x.companyId===policy.companyId)){
+    const personal=ft_leaveStaffPublic_(u);
+    if(personal.leaveWorkModel==='FLEX'&&!personal.leaveFlexConfigured)continue;
+    const mode=personal.leaveYearMode;
+    const entitlement=Number(u.leaveEntitlement)||0;
+    if(entitlement<=0)continue;
+    ft_leaveEnsureOpening_(u,{id:'SYSTEM'});
+    // Do not silently grant if a partial failed write has left the account discrepant.
+    const accountRows=ft_leaveLedgerRows_(false).filter(r=>r.companyId===u.companyId&&r.userId===u.id);
+    const recorded=ft_2_(accountRows.reduce((sum,r)=>sum+(Number(r.days)||0),0));
+    if(Math.abs(recorded-(Number(u.leaveBalance)||0))>.01){
+      console.warn('Urlaubskonto prüfen; keine automatische Gutschrift für '+u.id);continue;
+    }
+    // Intentional: never grant the year in which the existing balance was adopted.
+    for(let y=Math.max(firstYear,year-8,(/^[0-9]{4}-/.test(String(u.startDate||''))?Number(String(u.startDate).slice(0,4))+1:firstYear));y<=year;y++){
+     const period=ft_leavePeriod_(u,mode,y);
+     if(!period||period>today)continue;
+     const id='grant_'+ft_sha_(u.companyId+'|'+u.id+'|'+period);
+     if(done.has(id)||ft_leaveLedgerRows_(false).some(x=>x.id===id))continue;
+     // Entry first. If the execution aborts before Users was updated, flag the
+     // discrepancy in leaveAccount instead of ever double-granting the leave.
+     const old=Number(u.leaveBalance)||0;
+     ft_absenceAdd_('LeaveLedger',FT_LEAVE_LEDGER_COLS_,{id,companyId:u.companyId,userId:u.id,
+      kind:'GRANT',days:ft_2_(entitlement),effectiveDate:period,periodStart:period,
+      referenceId:'YEAR_'+period,carryoverBefore:ft_2_(old),
+      note:'Jahresanspruch; automatische Gutschrift nach freigegebenem Urlaubsjahr-Modell',
+      actorId:'SYSTEM',createdAt:ft_now_()});done.add(id);
+     const before={leaveBalance:old};u.leaveBalance=ft_2_(old+entitlement);ft_save_('Users',u);
+     ft_audit_(null,'LEAVE_ANNUAL_GRANT','Users',u.id,before,{leaveBalance:u.leaveBalance,period,entitlement});
+     granted++;
+    }
+   }
+  }
+  return {granted,checked:today};
+ });
+}
+function ft_leaveAccount_(user){
+ const all=ft_leaveLedgerRows_(false).filter(x=>String(x.companyId)===String(user.companyId)&&String(x.userId)===String(user.id));
+ const grants=all.filter(x=>x.kind==='GRANT').sort((a,b)=>String(a.periodStart).localeCompare(String(b.periodStart)));
+ const total=ft_2_(user.leaveBalance),recorded=ft_2_(all.reduce((sum,row)=>sum+(Number(row.days)||0),0));
+ const policy=ft_leavePolicyFor_(user.companyId);
+ const personalRule=ft_leaveStaffPublic_(user);
+ const currentYear=Number(ft_localDate_(new Date()).slice(0,4));
+ const currentGrant=grants.filter(x=>String(x.periodStart).slice(0,4)===String(currentYear));
+ return {totalBalance:total,annualEntitlement:ft_2_(user.leaveEntitlement),
+  policy,personalRule,legacyOpening:all.some(x=>x.kind==='OPENING')?Number(all.find(x=>x.kind==='OPENING').days)||0:null,
+  provenanceNote:'Altbestände vor Aktivierung lassen sich nicht nach Anspruchsjahren aufteilen.',
+  currentYearGrant:ft_2_(currentGrant.reduce((sum,r)=>sum+(Number(r.days)||0),0)),
+  grants:grants.map(x=>({year:String(x.periodStart||'').slice(0,4),periodStart:x.periodStart,
+   days:ft_2_(x.days),carryoverBefore:ft_2_(x.carryoverBefore)})),
+  ledgerStatus:all.length===0?'NOT_INITIALIZED':Math.abs(total-recorded)>.01?'RECONCILIATION_REQUIRED':'OK',
+  difference:ft_2_(total-recorded)};
+}
+function ft_leavePolicyGet_(actor,p){ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId);
+ return ft_leavePolicyFor_(c.id);}
+function ft_absenceYears_(p){
+ const current=Number(ft_localDate_(new Date()).slice(0,4));
+ if(p.year==='all'&&p.fromYear===undefined)throw Error('Für alle Jahre bitte ein Startjahr und Endjahr auswählen.');
+ const from=p.fromYear!==undefined?Number(p.fromYear):p.year&&p.year!=='all'?Number(p.year):current;
+ const to=p.toYear!==undefined?Number(p.toYear):from;
+ if(!Number.isInteger(from)||!Number.isInteger(to)||from<2000||to>2100||from>to||to-from>15)
+  throw Error('Bitte gültigen Zeitraum von maximal 16 Jahren auswählen.');
+ return {from,to};
+}
+function ft_absenceHistory_(actor,p){
+ const id=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),user=ft_user_(actor,id);
+ const company=ft_company_(actor,user.companyId),period=ft_absenceYears_(p);
+ const from=String(period.from)+'-01-01',end=String(period.to)+'-12-31';
+ const leaves=ft_enabled_(company,'LEAVE')?ft_get_('Leaves').filter(r=>String(r.userId)===String(id)&&String(r.companyId)===String(company.id)&&
+  String(r.to||'')>=from&&String(r.from||'')<=end).map(r=>({id:r.id,from:r.from,to:r.to,days:Number(r.days)||0,
+   status:r.status,reason:actor.role==='STAFF'||actor.id===id?String(r.reason||''):'',
+   reviewedAt:r.reviewedAt||'',createdAt:r.createdAt||''})).sort((a,b)=>String(b.from).localeCompare(String(a.from))):[];
+ const sick=ft_enabled_(company,'SICK')?ft_get_('SickLeaves').filter(r=>String(r.userId)===String(id)&&String(r.companyId)===String(company.id)&&
+  String(r.to||'').slice(0,10)>=from&&String(r.from||'').slice(0,10)<=end)
+  .map(r=>({id:r.id,from:r.from,to:r.to,status:r.status,
+    creditMode:r.creditMode||'NONE',creditHours:Number(r.creditHours)||0,
+    standbyCreditHours:Number(r.standbyCreditHours)||0,reviewedAt:r.reviewedAt||'',createdAt:r.createdAt||''}))
+  .sort((a,b)=>String(b.from).localeCompare(String(a.from))):[];
+ const today=ft_localDate_(new Date());
+ const account=ft_leaveAccount_(user);
+ const years=[];
+ for(let year=period.from;year<=period.to;year++){
+  const s=String(year)+'-01-01',e=String(year)+'-12-31';
+  let approvedDays=0,takenDays=0,plannedDays=0,pendingDays=0,partialEstimates=0;
+  for(const leave of leaves){
+   if(leave.to<s||leave.from>e)continue;
+   const a=leave.from>s?leave.from:s,b=leave.to<e?leave.to:e;
+   const credited=leave.status==='APPROVED'||leave.status==='CANCEL_PENDING';
+   // If a leave spans years, only allocate the matching dates to each year.
+   // It is a historical estimate using the current workday setup.
+   const divided=a!==leave.from||b!==leave.to;
+   const days=divided?(account.personalRule.leaveWorkModel==='FLEX'?ft_2_((Number(leave.days)||0)*ft_flexLeaveDaysForMonth_(leave,a,b)):ft_leaveDays_(user,a,b)):Number(leave.days)||0;
+   if(divided)partialEstimates++;
+   if(credited){approvedDays+=days;
+    if(b<today)takenDays+=days;
+    else if(a>today)plannedDays+=days;
+   }else if(leave.status==='PENDING')pendingDays+=days;
+  }
+  const grant=account.grants.filter(g=>g.year===String(year));
+  years.push({year,approvedDays:ft_2_(approvedDays),takenDays:ft_2_(takenDays),
+   plannedDays:ft_2_(plannedDays),pendingDays:ft_2_(pendingDays),
+   sickReports:sick.filter(r=>String(r.to).slice(0,10)>=s&&String(r.from).slice(0,10)<=e).length,
+   granted:ft_2_(grant.reduce((total,g)=>total+Number(g.days||0),0)),
+   carryoverBefore:grant.length?Number(grant[0].carryoverBefore):null,
+   crossYearEstimated:partialEstimates>0});
+ }
+ return {user:{id:user.id,name:user.name,companyId:user.companyId},company:{id:company.id,name:company.name},period,
+  generatedAt:ft_now_(),account,years,leaves,sick,
+  note:'Zeitspannen nach den gespeicherten Meldungen; Altbestände ohne belegtes Anspruchsjahr. Keine medizinischen Diagnosen im Export.'};
+}
+function ft_absencePdfRows_(){return ft_absenceRows_('AbsencePdfArchive',FT_ABSENCE_PDF_COLS_,false);}
+function ft_absencePdfCreate_(actor,p){
+ const data=ft_absenceHistory_(actor,p),u=data.user,c=data.company,period=data.period;
+ const key=String(p.requestId||'');if(!/^[A-Za-z0-9_-]{12,100}$/.test(key))throw Error('Eindeutige PDF-Anfragekennung erforderlich.');
+ const id='absence_'+ft_sha_(c.id+'|'+u.id+'|'+period.from+'|'+period.to+'|'+key);
+ const existing=ft_absencePdfRows_().find(x=>String(x.id)===id&&String(x.companyId)===c.id);
+ if(existing)return {id:existing.id,name:existing.name,createdAt:existing.createdAt,version:Number(existing.version)||1};
+ if(data.leaves.length>250||data.sick.length>250)throw Error('Zu viele Datensätze; bitte kleinere Jahresauswahl treffen.');
+ let doc=null,file=null;
+ try{
+  doc=DocumentApp.create('FireTime Pro Abwesenheitsauszug '+u.name+' '+period.from+'-'+period.to);
+  const body=doc.getBody();
+  body.appendParagraph('FIRETIME PRO – ABWESENHEITSAUSZUG').setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph(c.name+' · '+u.name);
+  body.appendParagraph('Zeitraum: '+period.from+' bis '+period.to+' · Erstellt: '+Utilities.formatDate(new Date(),FT_TZ,'dd.MM.yyyy HH:mm')+' Uhr (Österreich)');
+  const balance=data.account;
+  body.appendParagraph('Aktueller Resturlaub: '+balance.totalBalance+' Tage; jährlicher Anspruch laut Stammdaten: '+balance.annualEntitlement+' Tage.');
+  body.appendParagraph('Arbeitszeitmodell Urlaub: '+(balance.personalRule.leaveWorkModel==='FLEX'?'Flexible Monatseinteilung, manuell bestätigte Urlaubstage':'Feste Arbeitstage')+'.');
+  body.appendParagraph('Urlaubsjahr (Mitarbeiter): '+(balance.personalRule.leaveYearMode==='ANNIVERSARY'?'Eintrittsdatum':'Kalenderjahr')+'; automatische Jahresgutschrift: '+(balance.policy.autoGrant?'aktiv':'nicht aktiv'));
+  body.appendParagraph('Historischer Altbestand: Nach Anspruchsjahren nicht vollständig rekonstruierbar.').setItalic(true);
+  body.appendParagraph('URLAUB').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  const table1=[['Von','Bis','Tage gesamt','Status']].concat(data.leaves.map(r=>[r.from,r.to,String(r.days),String(r.status)]));
+  body.appendTable(table1.length>1?table1:[['Von','Bis','Tage gesamt','Status'],['Keine Einträge','','','']]);
+  body.appendParagraph('KRANKENSTÄNDE').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  const formatStamp=stamp=>{const x=String(stamp||'');const d=new Date(x);
+   return Number.isFinite(d.getTime())?Utilities.formatDate(d,FT_TZ,'dd.MM.yyyy HH:mm'):x;};
+  const table2=[['Von','Bis','Status','Sollgutschrift','Bereitschaftsgutschrift']].concat(data.sick.map(r=>[
+   formatStamp(r.from),formatStamp(r.to),String(r.status),String(r.creditHours)+' h',String(r.standbyCreditHours)+' h']));
+  body.appendTable(table2.length>1?table2:[['Von','Bis','Status','Sollgutschrift','Bereitschaftsgutschrift'],['Keine Einträge','','','','']]);
+  body.appendParagraph('Keine Diagnosen oder vertraulichen Krankheitsgründe enthalten. Keine Lohnabrechnung.');
+  doc.saveAndClose();
+  const pdf=DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF);
+  const name='FireTimePro_'+String(c.name).replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,35)+'_'+
+   String(u.name).replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,35)+'_Abwesenheiten_'+period.from+'-'+period.to+'.pdf';
+  pdf.setName(name);
+  const root=DriveApp.getFolderById(ft_prop_('FT_ROOT_ID'));
+  file=root.createFile(pdf);
+  const version=1+Math.max(0,...ft_absencePdfRows_().filter(x=>String(x.companyId)===c.id&&String(x.userId)===u.id&&
+   Number(x.fromYear)===period.from&&Number(x.toYear)===period.to).map(x=>Number(x.version)||0));
+  const row={id,companyId:c.id,userId:u.id,fromYear:period.from,toYear:period.to,fileId:file.getId(),name,createdAt:ft_now_(),version,requestId:key};
+  ft_absenceAdd_('AbsencePdfArchive',FT_ABSENCE_PDF_COLS_,row);
+  return {id,name,createdAt:row.createdAt,version};
+ }catch(err){if(file)try{file.setTrashed(true);}catch(_){ }throw err;}
+ finally{if(doc)try{DriveApp.getFileById(doc.getId()).setTrashed(true);}catch(_){ }}
+}
+function ft_absencePdfArchive_(actor,p){
+ const id=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),u=ft_user_(actor,id),period=ft_absenceYears_(p);
+ return ft_absencePdfRows_().filter(r=>String(r.companyId)===String(u.companyId)&&String(r.userId)===String(id)&&
+   Number(r.fromYear)>=period.from&&Number(r.toYear)<=period.to)
+  .sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)))
+  .map(r=>({id:r.id,name:r.name,createdAt:r.createdAt,version:Number(r.version)||1,
+   fromYear:Number(r.fromYear),toYear:Number(r.toYear)}));
+}
+function ft_absencePdfChunk_(actor,p){
+ const id=actor.role==='STAFF'?actor.id:String(p.userId||actor.id),u=ft_user_(actor,id);
+ const row=ft_absencePdfRows_().find(r=>String(r.id)===String(p.id)&&String(r.companyId)===String(u.companyId)&&String(r.userId)===String(id));
+ if(!row)throw Error('Abwesenheits-PDF nicht gefunden oder kein Zugriff.');
+ const file=DriveApp.getFileById(String(row.fileId));
+ if(file.isTrashed()||file.getMimeType()!==MimeType.PDF)throw Error('PDF-Datei ist nicht verfügbar.');
+ const bytes=file.getBlob().getBytes(),index=Number(p.index),size=65536,total=Math.ceil(bytes.length/size);
+ if(!Number.isSafeInteger(index)||index<0||index>=total)throw Error('Ungültiger PDF-Abschnitt.');
+ return {id:String(row.id),index,total,size:bytes.length,name:String(row.name),
+  base64:Utilities.base64Encode(bytes.slice(index*size,(index+1)*size))};
+}
+/** Sichere einmalige Ergänzung bestehender Google Sheets – niemals ft_setup()! */
+function ft_absenceUpgrade(){
+ if(!ft_prop_('FT_DB_ID'))throw Error('Bestehende Datenbank nicht gefunden.');
+ const data=[['LeaveLedger',FT_LEAVE_LEDGER_COLS_],['LeavePolicies',FT_LEAVE_POLICY_COLS_],['AbsencePdfArchive',FT_ABSENCE_PDF_COLS_],['LeaveStaffRules',FT_LEAVE_STAFF_RULE_COLS_]];
+ const existing=data.filter(x=>ft_db_().getSheetByName(x[0])).map(x=>x[0]);
+ data.forEach(x=>ft_absenceSheet_(x[0],x[1],true));
+ return {ok:true,version:FT_VERSION,existing,newTables:data.map(x=>x[0]).filter(x=>!existing.includes(x)),
+  policy:'Automatische Jahresgutschrift bleibt deaktiviert, bis die Firma das Urlaubsjahr explizit freigibt.',
+  note:'Keine bestehenden Urlaubssalden oder Anträge wurden verändert.'};
+}
+
+
