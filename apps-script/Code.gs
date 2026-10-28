@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.24-single-calendar-duty-20261028';
+const FT_VERSION='1.8.25-shift-confirm-push-20261028';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2097,9 +2097,10 @@ function ft_tick(){const tickResult=ft_lock_(()=>{const now=new Date(),day=Numbe
  try{if(Number(Utilities.formatDate(new Date(),FT_TZ,'H'))===4)ft_leaveAnnualTick_();}
  catch(e){console.warn('Urlaubskonto Jahreslauf:',e);}
  // PDF-Warteschlange NACH dem Erinnerungs-Lock reparieren, niemals darin.
- try{ft_pdfRecoverApproved_();}catch(e){console.warn('PDF-Wiederaufnahme:',e);}
- try{ft_pushDueTick_();}catch(e){console.warn('Aufgaben-Push-Erinnerung:',e);}
+ // Zeitkritische Push-Erinnerungen vor zeitaufwendiger PDF-Wiederaufnahme ausführen.
  try{ft_pushOperationsTick_();}catch(e){console.warn('Betriebs-Push-Erinnerungen:',e);}
+ try{ft_pushDueTick_();}catch(e){console.warn('Aufgaben-Push-Erinnerung:',e);}
+ try{ft_pdfRecoverApproved_();}catch(e){console.warn('PDF-Wiederaufnahme:',e);}
  return tickResult;
 }
 
@@ -2404,7 +2405,7 @@ function ft_pushOperationalEvents_(now,source){
  for(const shift of source.shifts){
   if(shift.status!=='PUBLISHED')continue;
   const c=companyById.get(String(shift.companyId));
-  if(!c||!hasModule(c,'STANDBY')||!ft_bool_(c.remindShift))continue;
+  if(!c||!hasModule(c,'STANDBY'))continue;
   const segments=segmentsByShift.get(String(shift.id));
   const assignments=segments?.length?segments:[shift];
   for(const item of assignments){
@@ -2414,7 +2415,7 @@ function ft_pushOperationalEvents_(now,source){
    if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)continue;
    const ref=String(item.id)+'|'+String(item.start);
    const beginsIn=start-nowMs;
-   if(beginsIn>0&&beginsIn<=24*MS_H)
+   if(ft_bool_(c.remindShift)&&beginsIn>0&&beginsIn<=24*MS_H)
     add(c,u,'PUSH_SHIFT_REMINDER',ref,
      'FireTime Pro · Bereitschaft in 24 Stunden',
      'Dein Bereitschaftsdienst beginnt am '+Utilities.formatDate(new Date(start),FT_TZ,'dd.MM. HH:mm')+' Uhr.');
@@ -2458,7 +2459,11 @@ function ft_pushOperationalEvents_(now,source){
  return events;
 }
 function ft_pushOperationsTick_(){
- if(!ft_pushWorkerUrl_())return {sent:0,checked:0};
+ // A health marker identifies the latest execution of the automated reminder sweep.
+ // This is diagnostic metadata only and never contains employee details.
+ try{PropertiesService.getScriptProperties().setProperty('FT_PUSH_LAST_CHECK_AT',ft_now_());}
+ catch(e){console.warn('Push-Diagnosezeit konnte nicht gespeichert werden.');}
+ if(!ft_pushWorkerUrl_())return {sent:0,checked:0,reason:'FT_PUSH_WORKER_URL fehlt'};
  const now=new Date();
  const companies=ft_get_('Companies').filter(c=>ft_bool_(c.active));
  const modules={};for(const c of companies)modules[c.id]=ft_license_(c);
@@ -3267,6 +3272,38 @@ function ft_setup(){
 }
 
 function ft_installTriggers(){ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='ft_tick').forEach(t=>ScriptApp.deleteTrigger(t));ScriptApp.newTrigger('ft_tick').timeBased().everyMinutes(15).create();return 'Automatisierung eingerichtet.';}
+
+/** Diagnose fuer die automatischen Push-Erinnerungen: nur lesen, keine Push-Ausloesung.
+ * Ausgabe enthaelt keine Telefonnummern, Adressen, Device-Endpunkte oder Zugangsschluessel.
+ * Im bestehenden Apps-Script-Editor direkt ausfuehren, NICHT ft_setup().
+ */
+function ft_pushDiagnose_EINMAL(){
+ const all=ScriptApp.getProjectTriggers().map(t=>t.getHandlerFunction());
+ const props=PropertiesService.getScriptProperties();
+ const last=props.getProperty('FT_PUSH_LAST_CHECK_AT')||'Noch kein protokollierter Durchlauf';
+ let activeDevices=0,pending=0,failed=0;
+ try{activeDevices=ft_pushRows_().length;}catch(e){console.warn('PushDevices nicht lesbar:',e.message);}
+ try{
+  const now=Date.now();
+  pending=ft_get_('Shifts').filter(s=>s.status==='PUBLISHED'&&s.userId&&
+   s.actualStatus!=='DONE'&&new Date(s.end).getTime()<=now-4*3600000&&
+   new Date(s.end).getTime()>=now-7*86400000).length;
+  failed=ft_get_('Notifications').filter(n=>String(n.kind||'').startsWith('PUSH_')&&n.status==='ERROR').length;
+ }catch(e){console.warn('Push-Status nicht vollständig verfügbar:',e.message);}
+ const result={version:FT_VERSION,triggerFtTick:all.filter(x=>x==='ft_tick').length,
+  lastPushSweep:last,workerUrlConfigured:Boolean(ft_pushWorkerUrl_()),
+  registeredDevices:activeDevices,unconfirmedShiftsLast7Days:pending,
+  failedPushRecords:failed,
+  hinweis:'Falls triggerFtTick=0: ft_pushTriggerRepair_EINMAL starten. Kein Setup ausführen.'};
+ Logger.log(JSON.stringify(result));return result;
+}
+/** Repariert ausschliesslich einen fehlenden ft_tick-Zeittrigger; keine Datenmigration. */
+function ft_pushTriggerRepair_EINMAL(){
+ const existing=ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='ft_tick');
+ if(existing.length)return {ok:true,created:false,count:existing.length};
+ ScriptApp.newTrigger('ft_tick').timeBased().everyMinutes(15).create();
+ return {ok:true,created:true,count:1,interval:'15 Minuten'};
+}
 
 /** Nur Kontrolle, keine Neuanlage und keine Aenderung bestehender Daten! */
 function ft_upgradeCheck(){
