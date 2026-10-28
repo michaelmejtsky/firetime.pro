@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-26-pwa-network-first-v1822"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!DOCTYPE html><html lang="de"><head><meta name="firetime-build" content="2026-10-28-standby-calendar-delete-v1823"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>
 :root{--accent:#f37850;--secondary:#172c44;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0a1523;color:#eef5fc}
 *{box-sizing:border-box}body{margin:0}h1{font-size:25px;margin:0}h2{font-size:19px;margin:0 0 15px}h3{font-size:16px;margin:0 0 12px}p{line-height:1.55}
@@ -316,6 +316,8 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
 .ft-standby-unsafe{font-size:11px;color:#ffcb91;line-height:1.5;margin-top:8px}
 .ft-standby-current{font-size:12px;color:#d1e5f1;line-height:1.5;margin-top:7px;overflow-wrap:anywhere}
 .ft-standby-current strong{color:#eaf9ff}
+.ft-standby-delete{margin-top:8px}
+.ft-standby-delete .btn{font-size:12px;padding:6px 9px;white-space:nowrap}
 @media(max-width:700px){.ft-standby-plan-table{overflow-x:auto}.ft-standby-plan-table table{min-width:620px}}
 
 /* Compact collective accounting monthly report. */
@@ -1012,7 +1014,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.22';
+const FT_VISIBLE_VERSION='1.8.23';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -3273,7 +3275,9 @@ function ftStandbyDayRow_(date,shift,split,staff){
  return '<tr><td><strong>'+E(ftRosterDate_(date))+'</strong></td>'+
   '<td class="ft-standby-avail-cell">'+availNames+details+'</td>'+
   '<td>'+selectHtml+assignedLine+warning+'</td>'+
-  '<td data-standby-status="1">'+E(ftStandbyStatusText_(shift?.status))+'</td></tr>';
+  '<td data-standby-status="1">'+E(ftStandbyStatusText_(shift?.status))+
+ (shift?.id&&ST.h?.standbyDeleteSupported?'<div class="ft-standby-delete"><button type="button" class="btn danger" data-act="planDelete" data-id="'+E(shift.id)+'" data-day="'+E(date)+'" aria-label="Bereitschaft am '+E(ftRosterDate_(date))+' löschen">Dienst löschen</button></div>':'')+
+ '</td></tr>';
 }
 
 // Separate server-verified approval, publication and calendar invitations.
@@ -3755,6 +3759,20 @@ if(a==='planRefreshAvailability'){
  await load();return;
 }
 if(a==='planSuggest'){await run(async()=>{const r=await api('planSuggest',{companyId:firm().id,month:ST.month});await load();say(r.assigned+' Bereitschaften vorgeschlagen, '+r.gaps.length+' Tage offen.');});return;}
+if(a==='planDelete'){
+ if(!isAdmin()){say('Nur Firmenadministratoren können Bereitschaftsdienste löschen.',true);return;}
+ const shift=ST.h?.shifts?.find(s=>s.id===id),day=btn.dataset.day;
+ if(!shift||shift.day!==day){say('Bereitschaft nicht gefunden. Bitte Planung aktualisieren.',true);return;}
+ if(!confirm('Bereitschaft am '+ftRosterDate_(day)+' wirklich löschen? Ein vorhandener Google-Kalendertermin wird ebenfalls entfernt. Bereits abgerechnete Dienste sind geschützt.'))return;
+ btn.disabled=true;
+ try{
+  const result=await api('planDelete',{companyId:firm().id,month:ST.month,shiftId:id,day});
+  await load();
+  say('Bereitschaft am '+ftRosterDate_(result.day)+' gelöscht'+(result.calendarEventsRemoved?' – Google-Kalendertermine entfernt.':'.'));
+ }catch(err){say('Dienst konnte nicht gelöscht werden: '+String(err.message||err),true);}
+ finally{if(btn.isConnected)btn.disabled=false;}
+ return;
+}
 if(a==='planFinalize'||a==='planPublish'||a==='planCalendarShare'){
  const state=ST.h?.standbyWorkflow;
  if(!isAdmin()||!state?.supported){say('Bitte zuerst die neue Code.gs V1.8.0 bereitstellen.',true);return;}
