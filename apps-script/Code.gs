@@ -1681,7 +1681,7 @@ function ft_planCalendarShare_(actor,p){
     }
     ft_syncShiftParts_(c,shift);count+=split.length;
    }else if(shift.userId){
-    const prevUser=previous[shift.id]||'__UNKNOWN_PREVIOUS_GUEST__';
+    const prevUser=String(previous[shift.id]||'__UNKNOWN_PREVIOUS_GUEST__').split('|')[0];
     ft_syncShift_(c,shift,{...ft_publicRow_(shift),userId:prevUser});count++;
    }
   }catch(err){warns.push(shift.day+': '+String(err.message||err));}
@@ -3774,7 +3774,7 @@ function ft_handoverRespond_(actor,p){
  if(!accept&&String(p.status)!=='DECLINED')throw Error('Bitte zustimmen oder ablehnen.');
  const s=ft_one_('Shifts',req.shiftId);
  if(!s||s.status!=='PUBLISHED')throw Error('Der Dienst ist nicht mehr gueltig.');
- let warning='';
+ let warning='',calendarWasShared=false;
  if(accept){
   if(ft_sickOverlap_(c.id,req.toUserId,req.start,req.end))throw Error('Uebernahme waehrend Krankenstand nicht moeglich.');
   ft_monthEditableRange_(c.id,req.fromUserId,req.start,req.end);
@@ -3802,10 +3802,12 @@ function ft_handoverRespond_(actor,p){
   s.actualStatus='PLANNED';s.confirmedAt='';s.updatedAt=ft_now_();ft_save_('Shifts',s);
   ft_audit_(actor,'HANDOVER_SPLIT','ShiftSegments',old.id,before,{parts});
  }
+ const prev=ft_publicRow_(req);req.status=accept?'ACCEPTED':'DECLINED';req.respondedAt=ft_now_();ft_save_('ShiftChanges',req);
+ ft_audit_(actor,accept?'ACCEPT':'DECLINE','ShiftChanges',req.id,prev,req);
  if(accept&&ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)){
   const splitNow=ft_segmentRows_(s);
-  const wasShared=Boolean(s.eventId||splitNow.some(x=>x.calendarEventId));
-  if(wasShared){
+  calendarWasShared=Boolean(s.eventId||splitNow.some(x=>x.calendarEventId));
+  if(calendarWasShared){
    try{
     ft_syncShiftParts_(c,s);
     // Keep plan and calendar approval states in sync after an accepted handover.
@@ -3822,9 +3824,8 @@ function ft_handoverRespond_(actor,p){
    }
   }
  }
- const prev=ft_publicRow_(req);req.status=accept?'ACCEPTED':'DECLINED';req.respondedAt=ft_now_();ft_save_('ShiftChanges',req);
- ft_audit_(actor,accept?'ACCEPT':'DECLINE','ShiftChanges',req.id,prev,req);
- if(accept&&!warning&&ft_bool_(c.calendarOn)&&!ft_standbyCalendarMatches_(
+
+ if(accept&&!warning&&calendarWasShared&&ft_bool_(c.calendarOn)&&!ft_standbyCalendarMatches_(
     ft_planSchedule_(c,String(s.day).slice(0,7)),
     ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7))))
    warning='Übernahme gespeichert. Falls der Kalender bereits veröffentlicht wurde, bitte Kalenderabgleich ausführen.';
@@ -3924,9 +3925,15 @@ function ft_calendarUpdateSick_(c,row){
 function ft_calendarResync_(actor,p){
  ft_allowed_(actor,['SYSADMIN','ADMIN']);const c=ft_company_(actor,p.companyId||actor.companyId);
  ft_need_(actor,c,'CALENDAR');const month=ft_month_(p.month);if(!ft_bool_(c.calendarOn))throw Error('Firmenkalender ist nicht aktiviert.');
- const list=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.status==='PUBLISHED'&&x.day.startsWith(month)&&ft_segmentRows_(x).length);
+ const list=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.status==='PUBLISHED'&&x.day.startsWith(month));
  let count=0,warnings=[];
- for(const s of list){try{ft_syncShiftParts_(c,s);count++;}catch(e){warnings.push(s.day+': '+e.message);}}
+ for(const s of list){
+  try{
+   const parts=ft_segmentRows_(s);
+   if(parts.length){ft_syncShiftParts_(c,s);count+=parts.length;}
+   else if(s.userId){ft_syncShift_(c,s,{...ft_publicRow_(s),userId:s.userId});count++;}
+  }catch(e){warnings.push(s.day+': '+e.message);}
+ }
  return {count,warnings};
 }
 function ft_calendarSyncParts_(c,s){
