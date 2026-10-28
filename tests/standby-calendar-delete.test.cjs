@@ -127,10 +127,10 @@ test('published split duty creates distinct calendar invitations with each corre
  assert.equal(shift.eventId,'');
  assert.deepEqual(calls.map(x=>x.name),[
   'Bereitschaft – Anna Beispiel','Bereitschaft – Bernd Muster']);
- assert.equal(calls[0].start,parts[0].start);
- assert.equal(calls[0].end,parts[0].end);
- assert.equal(calls[1].start,parts[1].start);
- assert.equal(calls[1].end,parts[1].end);
+ assert.equal(calls[0].start,new Date(parts[0].start).toISOString());
+ assert.equal(calls[0].end,new Date(parts[0].end).toISOString());
+ assert.equal(calls[1].start,new Date(parts[1].start).toISOString());
+ assert.equal(calls[1].end,new Date(parts[1].end).toISOString());
  assert.deepEqual(calls.map(x=>x.options.guests),['anna@example.test','bernd@example.test']);
  assert.ok(calls.every(x=>x.options.sendInvites===true));
  assert.ok(parts.every(x=>x.calendarEventId.startsWith('created-')));
