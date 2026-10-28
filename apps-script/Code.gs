@@ -1673,7 +1673,7 @@ function ft_planCalendarShare_(actor,p){
    const split=ft_segmentRows_(shift);
    if(split.length){
     for(const part of split){
-     if(part.calendarEventId&&previous[part.id]!==part.userId){
+     if(part.calendarEventId&&previous[part.id]&&String(previous[part.id]).split('|')[0]!==part.userId){
       const event=ft_calendar_(c).getEventById(part.calendarEventId);
       if(event)event.deleteEvent();
       part.calendarEventId='';ft_save_('ShiftSegments',part);
@@ -3824,7 +3824,6 @@ function ft_handoverRespond_(actor,p){
  }
  const prev=ft_publicRow_(req);req.status=accept?'ACCEPTED':'DECLINED';req.respondedAt=ft_now_();ft_save_('ShiftChanges',req);
  ft_audit_(actor,accept?'ACCEPT':'DECLINE','ShiftChanges',req.id,prev,req);
- if(accept&&!warning&&!ft_bool_(c.calendarOn))warning='';
  if(accept&&!warning&&ft_bool_(c.calendarOn)&&!ft_standbyCalendarMatches_(
     ft_planSchedule_(c,String(s.day).slice(0,7)),
     ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7))))
