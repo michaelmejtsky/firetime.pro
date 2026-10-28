@@ -3149,6 +3149,7 @@ function ft_home_(u,p){
   workflowReady:Boolean(c&&ft_workflowReady_()),
   balanceCutoverSupported:true,
   activityDefaultsSupported:true,
+  standbyDeleteSupported:true,
   commSupported:true,
   backgroundPushSupported:true,
   pauseClockSupported:true,
