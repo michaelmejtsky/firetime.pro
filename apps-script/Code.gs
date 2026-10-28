@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.23-standby-calendar-delete-20261028';
+const FT_VERSION='1.8.24-single-calendar-duty-20261028';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1937,10 +1937,88 @@ function ft_planSuggest_(actor,p){const {c,m}=ft_planCheck_(actor,p),users=ft_ge
  for(let d=1;d<=ft_days_(m);d++){const day=m+'-'+String(d).padStart(2,'0'),existing=shifts.find(s=>s.day===day);if(existing&&existing.userId)continue;const avail=users.filter(u=>submitted.has(u.id)&&all.some(a=>a.userId===u.id&&Number(a.day)===d));avail.sort((a,b)=>scores[a.id]-scores[b.id]||a.name.localeCompare(b.name));if(!avail.length){gaps.push(day);continue;}const u=avail[0],range=ft_shiftRange_(day,c),before=existing?ft_publicRow_(existing):{};const row=existing||{id:ft_uuid_(),companyId:c.id,day,status:'DRAFT',eventId:''};row.userId=u.id;row.start=range[0].toISOString();row.end=range[1].toISOString();row.updatedAt=ft_now_();row.status='DRAFT';row.actualStatus='PLANNED';row.confirmedAt='';if(existing)ft_save_('Shifts',row);else ft_add_('Shifts',row);ft_audit_(actor,'SUGGEST','Shifts',row.id,before,row);scores[u.id]=(scores[u.id]||0)+1+(ft_holiday_(day)||[6,7].includes(Number(Utilities.formatDate(new Date(day+'T12:00'),FT_TZ,'u')))?1:0);assigned++;}
  return {assigned,gaps};}
 
-function ft_planAssign_(actor,p){const {c,m}=ft_planCheck_(actor,p),day=ft_str_(p.day,10);if(!day.startsWith(m)||ft_localDate_(ft_date_(day))!==day)throw Error('Tag nicht im Monat');const uid=String(p.userId||''),u=uid?ft_user_(actor,uid):null;if(u&&u.companyId!==c.id)throw Error('Mitarbeiter gehört nicht zur Firma');if(u){const available=ft_get_('Availability').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m&&Number(x.day)===Number(day.slice(-2))&&x.answer==='YES');const submitted=ft_get_('AvailabilitySubmissions').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m);if((!available||!submitted)&&!p.confirmAvailability)throw Error('Keine bestätigte Verfügbarkeit. Ausnahme ausdrücklich bestätigen.');}const prev=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.day===day),old=prev?ft_publicRow_(prev):{};if(prev&&ft_get_('ShiftSegments').some(x=>x.shiftId===prev.id))throw Error('Geteilten Dienst bitte ueber die Uebergabefunktion bearbeiten.');if(prev&&prev.status==='PUBLISHED'&&!p.confirmChange)throw Error('Veröffentlichter Dienst: Änderung ausdrücklich bestätigen.');const bounds=ft_shiftRange_(day,c),r=prev||{id:ft_uuid_(),companyId:c.id,day,eventId:'',status:'DRAFT'};if(uid&&ft_sickOverlap_(c.id,uid,bounds[0].toISOString(),bounds[1].toISOString()))
- throw Error('Mitarbeiter ist fuer diesen Bereitschaftszeitraum krank gemeldet.');
+function ft_planAssign_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p),day=ft_str_(p.day,10);
+ if(!day.startsWith(m)||ft_localDate_(ft_date_(day))!==day)throw Error('Tag nicht im Monat');
+ const uid=String(p.userId||''),u=uid?ft_user_(actor,uid):null;
+ if(u&&u.companyId!==c.id)throw Error('Mitarbeiter gehört nicht zur Firma');
+ if(u){
+  const available=ft_get_('Availability').some(x=>x.companyId===c.id&&x.userId===uid&&
+   x.month===m&&Number(x.day)===Number(day.slice(-2))&&x.answer==='YES');
+  const submitted=ft_get_('AvailabilitySubmissions').some(x=>x.companyId===c.id&&x.userId===uid&&x.month===m);
+  if((!available||!submitted)&&!p.confirmAvailability)throw Error('Keine bestätigte Verfügbarkeit. Ausnahme ausdrücklich bestätigen.');
+ }
+ const prev=ft_get_('Shifts').find(s=>s.companyId===c.id&&s.day===day);
+ const old=prev?ft_publicRow_(prev):{};
+ if(prev&&ft_get_('ShiftSegments').some(x=>x.shiftId===prev.id))
+  throw Error('Geteilten Dienst bitte ueber die Uebergabefunktion bearbeiten.');
+ if(prev&&prev.status==='PUBLISHED'&&!p.confirmChange)
+  throw Error('Veröffentlichter Dienst: Änderung ausdrücklich bestätigen.');
+ const bounds=ft_shiftRange_(day,c),start=bounds[0].toISOString(),end=bounds[1].toISOString();
+ if(uid&&ft_sickOverlap_(c.id,uid,start,end))
+  throw Error('Mitarbeiter ist fuer diesen Bereitschaftszeitraum krank gemeldet.');
+ const changed=!!prev&&(String(prev.userId||'')!==uid||String(prev.start)!==start||String(prev.end)!==end);
+ if(prev&&!changed)return {row:prev,calendarUpdated:false,calendarNeedsShare:false,unchanged:true};
+ // Never silently replace worked/settled shifts. Closed months must remain immutable.
+ if(prev&&prev.status==='PUBLISHED'){
+  if(prev.actualStatus==='DONE'||prev.confirmedAt)
+   throw Error('Geleistete oder bestätigte Bereitschaft kann nicht direkt umgeteilt werden.');
+  for(const personId of new Set([prev.userId,uid].filter(Boolean)))
+   ft_monthEditableRange_(c.id,personId,start,end);
+ }
+ // Capture the previous approval state BEFORE changing the shift. This ensures
+ // a single correction inherits approvals only if the month really was published.
+ const publishedChange=!!prev&&prev.status==='PUBLISHED'&&changed;
+ const beforePlan=publishedChange?ft_planSchedule_(c,m):null;
+ const state=publishedChange?ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m):null;
+ const wasFixed=!!state&&state.fixedHash===beforePlan.signature;
+ const wasPublished=wasFixed&&state.publishedHash===beforePlan.signature;
+ const wasShared=wasPublished&&ft_standbyCalendarMatches_(beforePlan,state);
+ const previouslyInvited=!!old.eventId||wasShared;
+ const r=prev||{id:ft_uuid_(),companyId:c.id,day,eventId:'',status:'DRAFT'};
  if(prev&&prev.userId!==uid){r.actualStatus='PLANNED';r.confirmedAt='';}
- r.userId=uid;r.start=bounds[0].toISOString();r.end=bounds[1].toISOString();r.updatedAt=ft_now_();if(!prev)ft_add_('Shifts',r);else ft_save_('Shifts',r);ft_audit_(actor,'ASSIGN','Shifts',r.id,old,r);return {row:r,calendarNeedsShare:prev&&prev.status==='PUBLISHED'};}
+ r.userId=uid;r.start=start;r.end=end;r.updatedAt=ft_now_();
+ if(!prev)ft_add_('Shifts',r);else ft_save_('Shifts',r);
+ ft_audit_(actor,'ASSIGN','Shifts',r.id,old,r);
+ let calendarUpdated=false,warning='';
+ // Only this one published shift is changed in Google Calendar.
+ // Never send repeat invitations to every other employee in the month.
+ if(publishedChange&&previouslyInvited){
+  if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn)){
+   warning='Dienst gespeichert. Kalender deaktiviert: bestehenden Termin bitte prüfen.';
+  }else{
+   try{
+    ft_syncShift_(c,r,old);
+    calendarUpdated=true;
+   }catch(err){
+    warning='Dienst gespeichert, Google-Kalender noch nicht aktualisiert: '+String(err.message||err);
+   }
+  }
+ }
+ // Keep the existing month approval intact for an authorized replacement.
+ // Unassigning a day creates a gap, so it still requires a new monthly approval.
+ if(publishedChange&&wasPublished&&uid){
+  const after=ft_planSchedule_(c,m);
+  const before=ft_publicRow_(state);
+  state.fixedHash=after.signature;
+  state.publishedHash=after.signature;
+  if(wasShared&&calendarUpdated){
+   state.sharedHash=after.signature;
+   state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(after).current);
+   state.sharedAt=ft_now_();state.sharedBy=actor.id;
+   state.shareStatus='SENT';state.warnings='';
+  }else if(wasShared){
+   state.shareStatus='PARTIAL';
+   state.warnings=(warning||'Kalenderabgleich erforderlich.').slice(0,1000);
+  }
+  state.updatedAt=ft_now_();
+  ft_save_('PlanMonths',state);
+  ft_audit_(actor,'PLAN_SINGLE_SHIFT_CORRECTION','PlanMonths',state.id,before,ft_publicRow_(state));
+ }
+ return {row:r,calendarUpdated,
+  calendarNeedsShare:publishedChange&&(previouslyInvited&&!calendarUpdated),
+  warning};
+}
 
 function ft_planDelete_(actor,p){
  const {c,m}=ft_planCheck_(actor,p);
