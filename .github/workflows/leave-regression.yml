@@ -1,0 +1,27 @@
+name: FireTime Pro Urlaub Regression
+on:
+  pull_request:
+    paths:
+      - 'apps-script/Code.gs'
+      - 'index.html'
+      - 'tests/leave-self-service.test.cjs'
+      - 'tests/balance.test.cjs'
+      - '.github/workflows/leave-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps-script/Code.gs'
+      - 'tests/leave-self-service.test.cjs'
+      - '.github/workflows/leave-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/leave-self-service.test.cjs tests/balance.test.cjs

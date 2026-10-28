@@ -764,7 +764,8 @@ function ft_report_(c,u,month,skipCumulative,source){
   t.incidentSunday=hoursByType.INCIDENT.sunday;
   t.incidentHoliday=hoursByType.INCIDENT.holiday;
   t.statutoryHolidayWorkHours=t.holiday;
-  source.Leaves.filter(l=>l.companyId===c.id&&l.userId===u.id&&l.status==='APPROVED')
+  // A cancellation request keeps its approved credit until an administrator confirms it.
+  source.Leaves.filter(l=>l.companyId===c.id&&l.userId===u.id&&['APPROVED','CANCEL_PENDING'].includes(l.status))
     .forEach(l=>{
       const all=Number(l.days)||1;
       const fromD=l.from>month+'-01'?l.from:month+'-01';
@@ -4561,4 +4562,5 @@ function ft_absenceUpgrade(){
   policy:'Automatische Jahresgutschrift bleibt deaktiviert, bis die Firma das Urlaubsjahr explizit freigibt.',
   note:'Keine bestehenden Urlaubssalden oder Anträge wurden verändert.'};
 }
+
 
