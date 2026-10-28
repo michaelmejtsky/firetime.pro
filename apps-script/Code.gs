@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.21-session-fast-nav-20261026';
+const FT_VERSION='1.8.23-standby-calendar-delete-20261028';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -1579,6 +1579,34 @@ function ft_planSchedule_(c,month){
  const signature=ft_sha_(JSON.stringify(rows.filter(s=>s.userId).map(s=>[s.day,s.userId,s.start,s.end])));
  return {rows,gaps,signature};
 }
+function ft_standbyCalendarAssignments_(schedule){
+ const ids=new Set(schedule.rows.map(s=>s.id));
+ const children=ft_get_('ShiftSegments').filter(x=>ids.has(x.shiftId));
+ const grouped=new Map();
+ children.forEach(part=>{if(!grouped.has(part.shiftId))grouped.set(part.shiftId,[]);grouped.get(part.shiftId).push(part);});
+ const current={},missing=[];
+ schedule.rows.forEach(shift=>{
+  const parts=grouped.get(shift.id)||[];
+  if(parts.length){
+   parts.forEach(part=>{
+    current[part.id]=part.userId+'|'+part.start+'|'+part.end;
+    if(!part.calendarEventId)missing.push(part.id);
+   });
+  }else if(shift.userId){
+   current[shift.id]=shift.userId+'|'+shift.start+'|'+shift.end;
+   if(!shift.eventId)missing.push(shift.id);
+  }
+ });
+ return {current,missing};
+}
+function ft_standbyCalendarMatches_(schedule,state){
+ if(!state||state.shareStatus!=='SENT'||state.sharedHash!==schedule.signature)return false;
+ const {current,missing}=ft_standbyCalendarAssignments_(schedule);
+ if(missing.length)return false;
+ let shared={};try{shared=JSON.parse(String(state.sharedAssignments||'{}'));}catch(_){}
+ const keys=Object.keys(current);
+ return keys.length>0&&keys.every(k=>shared[k]===current[k]);
+}
 function ft_planWorkflow_(actor,p){
  const {c,m}=ft_planCheck_(actor,p),schedule=ft_planSchedule_(c,m);
  const ready=Boolean(ft_db_().getSheetByName('PlanMonths'));
@@ -1587,7 +1615,7 @@ function ft_planWorkflow_(actor,p){
  const legacyPublished=schedule.rows.some(x=>x.status==='PUBLISHED')&&!state;
  const fixed=Boolean(state?.fixedHash&&state.fixedHash===schedule.signature);
  const published=Boolean(fixed&&state.publishedHash===schedule.signature);
- const shared=Boolean(published&&state.sharedHash===schedule.signature&&state.shareStatus==='SENT');
+ const shared=Boolean(published&&ft_standbyCalendarMatches_(schedule,state));
  const calendarEnabled=ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)&&!!c.calendarId;
  return {supported:true,companyId:c.id,month:m,gaps:schedule.gaps.length,
   fixed,published,shared,calendarEnabled,
@@ -1635,12 +1663,11 @@ function ft_planCalendarShare_(actor,p){
  const {c,m}=ft_planCheck_(actor,p),plan=ft_planSchedule_(c,m),state=ft_planState_(c,m);
  if(!ft_enabled_(c,'CALENDAR')||!ft_bool_(c.calendarOn))throw Error('Google-Kalender ist nicht freigeschaltet oder aktiviert.');
  if(state.fixedHash!==plan.signature||state.publishedHash!==plan.signature)throw Error('Bitte den geänderten Plan zuerst festlegen und veröffentlichen.');
- if(state.sharedHash===plan.signature&&state.shareStatus==='SENT')return {alreadyShared:true,count:state.calendarEvents,warnings:[]};
+ if(ft_standbyCalendarMatches_(plan,state))return {alreadyShared:true,count:state.calendarEvents,warnings:[]};
  // Prüfen, bevor ein Termin angelegt wird. Eine Teilantwort wird dauerhaft als solche gespeichert.
  ft_calendar_(c);
  const warns=[];let count=0;
  let previous={};try{previous=JSON.parse(String(state.sharedAssignments||'{}'));}catch(_){}
- const nextAssignments={...previous};
  for(const shift of plan.rows){
   try{
    const split=ft_segmentRows_(shift);
@@ -1653,18 +1680,19 @@ function ft_planCalendarShare_(actor,p){
      }
     }
     ft_syncShiftParts_(c,shift);count+=split.length;
-    for(const part of split)nextAssignments[part.id]=part.userId;
    }else if(shift.userId){
     const prevUser=previous[shift.id]||'__UNKNOWN_PREVIOUS_GUEST__';
     ft_syncShift_(c,shift,{...ft_publicRow_(shift),userId:prevUser});count++;
-    nextAssignments[shift.id]=shift.userId;
    }
   }catch(err){warns.push(shift.day+': '+String(err.message||err));}
  }
  const before=ft_publicRow_(state);
  state.sharedAt=ft_now_();state.sharedBy=actor.id;state.sharedHash=plan.signature;
  state.shareStatus=warns.length?'PARTIAL':'SENT';state.calendarEvents=count;
- state.warnings=warns.join(' | ').slice(0,1000);state.sharedAssignments=JSON.stringify(nextAssignments);state.updatedAt=ft_now_();ft_save_('PlanMonths',state);
+ state.warnings=warns.join(' | ').slice(0,1000);
+ // Store actual users AND ranges, never stale entries from deleted segments.
+ state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(plan).current);
+ state.updatedAt=ft_now_();ft_save_('PlanMonths',state);
  ft_audit_(actor,'PLAN_CALENDAR_SHARE','PlanMonths',state.id,before,ft_publicRow_(state));
  return {count,warnings:warns,shareStatus:state.shareStatus};
 }
@@ -1914,6 +1942,39 @@ function ft_planAssign_(actor,p){const {c,m}=ft_planCheck_(actor,p),day=ft_str_(
  if(prev&&prev.userId!==uid){r.actualStatus='PLANNED';r.confirmedAt='';}
  r.userId=uid;r.start=bounds[0].toISOString();r.end=bounds[1].toISOString();r.updatedAt=ft_now_();if(!prev)ft_add_('Shifts',r);else ft_save_('Shifts',r);ft_audit_(actor,'ASSIGN','Shifts',r.id,old,r);return {row:r,calendarNeedsShare:prev&&prev.status==='PUBLISHED'};}
 
+function ft_planDelete_(actor,p){
+ const {c,m}=ft_planCheck_(actor,p);
+ const s=ft_one_('Shifts',String(p.shiftId||''));
+ if(!s||s.companyId!==c.id||!String(s.day).startsWith(m)||String(p.day||'')!==String(s.day))
+  throw Error('Bereitschaft für diesen Tag nicht gefunden.');
+ const parts=ft_segmentRows_(s);
+ if(s.actualStatus==='DONE'||s.confirmedAt||parts.some(part=>part.actualStatus==='DONE'||part.confirmedAt))
+  throw Error('Bereits bestätigte Bereitschaft kann nicht gelöscht werden. Bitte eine dokumentierte Korrektur vornehmen.');
+ if(ft_get_('ShiftChanges').some(x=>x.shiftId===s.id&&x.status==='PENDING'))
+  throw Error('Zuerst offene Übernahmeanfragen abschließen oder ablehnen.');
+ for(const uid of new Set((parts.length?parts.map(x=>x.userId):[s.userId]).filter(Boolean)))
+  ft_monthEditableRange_(c.id,uid,s.start,s.end);
+ // Never remove the Sheets source if a Google invitation could not be cancelled.
+ // Stored event IDs must be cleaned even if calendarOn was disabled afterwards.
+ const eventIds=[s.eventId,...parts.map(x=>x.calendarEventId)].filter(Boolean);
+ if(eventIds.length){
+  const cal=ft_calendar_(c);
+  for(const id of new Set(eventIds)){
+   const event=cal.getEventById(id);
+   if(event)event.deleteEvent();
+  }
+ }
+ const old=ft_publicRow_(s);
+ parts.sort((a,b)=>b.__row-a.__row).forEach(part=>{
+  const before=ft_publicRow_(part);
+  ft_sheet_('ShiftSegments').deleteRow(part.__row);ft_invalidate_('ShiftSegments');
+  ft_audit_(actor,'DELETE','ShiftSegments',part.id,before,{});
+ });
+ ft_sheet_('Shifts').deleteRow(s.__row);ft_invalidate_('Shifts');
+ ft_audit_(actor,'DELETE','Shifts',s.id,old,{reason:'Admin removed standby assignment'});
+ return {deleted:true,day:s.day,calendarEventsRemoved:eventIds.length};
+}
+
 function ft_planPublish_(actor,p){const {c,m}=ft_planCheck_(actor,p),all=ft_get_('Shifts').filter(x=>x.companyId===c.id&&x.day.startsWith(m)),gaps=[];for(let d=1;d<=ft_days_(m);d++){const day=m+'-'+String(d).padStart(2,'0');if(!all.some(x=>x.day===day&&x.userId))gaps.push(day);}if(gaps.length)throw Error('Noch unbesetzte Tage: '+gaps.join(', '));if(ft_bool_(c.calendarOn))ft_calendar_(c);let published=0,warnings=[];
  all.forEach(row=>{if(row.status==='PUBLISHED'&&(!ft_bool_(c.calendarOn)||row.eventId))return;const prev=ft_publicRow_(row);row.status='PUBLISHED';row.updatedAt=ft_now_();ft_save_('Shifts',row);ft_audit_(actor,'PUBLISH','Shifts',row.id,prev,row);published++;if(ft_bool_(c.calendarOn)){try{ft_syncShift_(c,row,prev);}catch(e){warnings.push(row.day+': '+e.message);}}});return {published,warnings,calendarEnabled:ft_bool_(c.calendarOn)};}
 
@@ -1929,8 +1990,9 @@ function ft_calendarTest_(u,companyId){ft_allowed_(u,['SYSADMIN','ADMIN']);const
 
 function ft_calendar_(c){if(!c.calendarId)throw Error('Kalender-ID fehlt. Unter Firmeneinstellungen eintragen.');const cal=CalendarApp.getCalendarById(c.calendarId);if(!cal)throw Error('Google-Kalender nicht verfügbar. firetime.pro@gmail.com als Bearbeiter freigeben.');return cal;}
 
+function ft_standbyCalendarTitle_(u){return 'Bereitschaft – '+u.name;}
 function ft_syncShift_(c,s,previous){if(!ft_bool_(c.calendarOn))return;const cal=ft_calendar_(c),old=previous||s;let oldEvent=old.eventId?cal.getEventById(old.eventId):null;if(!s.userId){if(oldEvent){oldEvent.deleteEvent();s.eventId='';ft_save_('Shifts',s);}return;}
- const u=ft_one_('Users',s.userId);if(!u)throw Error('Mitarbeiter nicht gefunden');const name=c.name+' – Bereitschaftsdienst ('+u.name+')',details='Bereitschaft von 07:00 bis 07:00 am Folgetag.\nErfasst über FireTime Pro.\nÄnderungen nur über die FireTime-Pro-Dienstplanung.';
+ const u=ft_one_('Users',s.userId);if(!u)throw Error('Mitarbeiter nicht gefunden');const name=ft_standbyCalendarTitle_(u),details='Bereitschaft von 07:00 bis 07:00 am Folgetag.\nErfasst über FireTime Pro.\nÄnderungen nur über die FireTime-Pro-Dienstplanung.';
  if(oldEvent&&old.userId===s.userId){oldEvent.setTitle(name).setTime(new Date(s.start),new Date(s.end)).setDescription(details);oldEvent.removeAllReminders();oldEvent.addPopupReminder(1440);return;}
  if(oldEvent)oldEvent.deleteEvent();const event=cal.createEvent(name,new Date(s.start),new Date(s.end),{description:details,guests:u.email,sendInvites:true});event.removeAllReminders();event.addPopupReminder(1440);s.eventId=event.getId();ft_save_('Shifts',s);}
 
@@ -2819,6 +2881,7 @@ function ft_api(token,action,p){
   case 'planFinalize':return ft_lock_(()=>ft_planFinalize_(u,p));
   case 'planCalendarShare':return ft_lock_(()=>ft_planCalendarShare_(u,p));
   case 'planSuggest':return ft_lock_(()=>ft_planSuggest_(u,p));
+  case 'planDelete':return ft_lock_(()=>ft_planDelete_(u,p));
   case 'planAssign':{
    const old=ft_get_('Shifts').find(s=>s.companyId===String(p.companyId||u.companyId)&&s.day===p.day);
    const previous=old?{userId:old.userId,status:old.status}:null;
@@ -3739,9 +3802,33 @@ function ft_handoverRespond_(actor,p){
   s.actualStatus='PLANNED';s.confirmedAt='';s.updatedAt=ft_now_();ft_save_('Shifts',s);
   ft_audit_(actor,'HANDOVER_SPLIT','ShiftSegments',old.id,before,{parts});
  }
+ if(accept&&ft_enabled_(c,'CALENDAR')&&ft_bool_(c.calendarOn)){
+  const splitNow=ft_segmentRows_(s);
+  const wasShared=Boolean(s.eventId||splitNow.some(x=>x.calendarEventId));
+  if(wasShared){
+   try{
+    ft_syncShiftParts_(c,s);
+    // Keep plan and calendar approval states in sync after an accepted handover.
+    const m=String(s.day).slice(0,7),state=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===m);
+    if(state&&state.sharedHash===ft_planSchedule_(c,m).signature){
+     state.sharedAssignments=JSON.stringify(ft_standbyCalendarAssignments_(ft_planSchedule_(c,m)).current);
+     state.sharedAt=ft_now_();state.shareStatus='SENT';state.warnings='';state.updatedAt=ft_now_();
+     ft_save_('PlanMonths',state);
+    }
+   }catch(err){
+    warning='Übernahme gespeichert, Google-Kalender nicht vollständig aktualisiert: '+String(err.message||err);
+    const state=ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7));
+    if(state){state.shareStatus='PARTIAL';state.warnings=warning.slice(0,1000);state.updatedAt=ft_now_();ft_save_('PlanMonths',state);}
+   }
+  }
+ }
  const prev=ft_publicRow_(req);req.status=accept?'ACCEPTED':'DECLINED';req.respondedAt=ft_now_();ft_save_('ShiftChanges',req);
  ft_audit_(actor,accept?'ACCEPT':'DECLINE','ShiftChanges',req.id,prev,req);
- if(accept)warning='Einteilung geändert: Kalenderabgleich über den separaten Button erforderlich.';
+ if(accept&&!warning&&!ft_bool_(c.calendarOn))warning='';
+ if(accept&&!warning&&ft_bool_(c.calendarOn)&&!ft_standbyCalendarMatches_(
+    ft_planSchedule_(c,String(s.day).slice(0,7)),
+    ft_planSheetRows_().find(x=>x.companyId===c.id&&x.month===String(s.day).slice(0,7))))
+   warning='Übernahme gespeichert. Falls der Kalender bereits veröffentlicht wurde, bitte Kalenderabgleich ausführen.';
  try{const source=ft_one_('Users',req.fromUserId);if(source)ft_notification_(c,source,'HANDOVER_ANSWER',req.id+'-'+req.status,
    'FireTime Pro – Bereitschaftsuebergabe '+(accept?'angenommen':'abgelehnt'),
    'Deine Anfrage wurde '+(accept?'angenommen':'abgelehnt')+'. '+ft_publicGithubUrl_());}
@@ -3832,7 +3919,7 @@ function ft_calendarUpdateSick_(c,row){
   if(s.userId!==row.userId||!s.eventId)continue;
   const event=cal.getEventById(s.eventId);if(!event)continue;
   const u=ft_one_('Users',s.userId);if(!u)continue;
-  event.setTitle((ft_sickOverlap_(c.id,u.id,s.start,s.end)?'⚠ Vertretung offen · ':'')+c.name+' – Bereitschaft ('+u.name+')');
+  event.setTitle(ft_standbyCalendarTitle_(u));
  }
 }
 function ft_calendarResync_(actor,p){
@@ -3854,8 +3941,9 @@ function ft_syncShiftParts_(c,s){
  for(const part of parts){
   let ev=part.calendarEventId?cal.getEventById(part.calendarEventId):null;
   const u=ft_one_('Users',part.userId);if(!u)continue;
-  const title=(ft_sickOverlap_(c.id,part.userId,part.start,part.end)?'⚠ Vertretung offen · ':'')+c.name+' – Bereitschaft ('+u.name+')';
-  const details='Dienstabschnitt ueber FireTime Pro. '+Utilities.formatDate(new Date(part.start),FT_TZ,'dd.MM.yyyy HH:mm')+' – '+Utilities.formatDate(new Date(part.end),FT_TZ,'dd.MM.yyyy HH:mm');
+  const title=ft_standbyCalendarTitle_(u);
+  const details='Bereitschaft – Dienstabschnitt über FireTime Pro. '+Utilities.formatDate(new Date(part.start),FT_TZ,'dd.MM.yyyy HH:mm')+' – '+Utilities.formatDate(new Date(part.end),FT_TZ,'dd.MM.yyyy HH:mm')+
+   (ft_sickOverlap_(c.id,part.userId,part.start,part.end)?'\\nAchtung: Vertretungsbedarf wegen Krankenstand.':'');
   if(ev){ev.setTitle(title);ev.setTime(new Date(part.start),new Date(part.end));ev.setDescription(details);}
   else {ev=cal.createEvent(title,new Date(part.start),new Date(part.end),{description:details,guests:u.email,sendInvites:true});
    ev.addPopupReminder(1440);part.calendarEventId=ev.getId();ft_save_('ShiftSegments',part);}
