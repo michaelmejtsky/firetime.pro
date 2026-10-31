@@ -1559,6 +1559,13 @@ function ftCommPhotoPreview_(file){
   for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
  }catch(err){throw Error('Anhang konnte nicht decodiert werden.');}
  const blob=new Blob([bytes],{type}),objectUrl=URL.createObjectURL(blob);
+ // Mobile WebKit/Android WebViews may show a black or empty blob: PDF iframe.
+ // Keep the PDF private and offer native download/share instead of an embedded viewer.
+ const mobilePdf=isPdf&&(
+  navigator.userAgentData?.mobile===true||
+  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'')||
+  (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)
+ );
  const dialog=document.createElement('dialog');
  dialog.className='ft-msg-photo-dialog ft-photo-viewer ft-attachment-viewer';
  dialog.setAttribute('aria-label',isPdf?'PDF zur Nachricht':'Foto zur Nachricht');
@@ -1569,15 +1576,39 @@ function ftCommPhotoPreview_(file){
  header.append(title);
  const download=document.createElement('a');download.className='btn';
  download.href=objectUrl;download.download=String(file.name|| (isPdf?'FireTime-Anhang.pdf':'FireTime-Foto.jpg'));
- download.textContent=isPdf?'PDF speichern / öffnen':'Bild speichern';
+ download.textContent=isPdf?'PDF herunterladen':'Bild speichern';
  header.append(download,close);
  if(isPdf){
-  const frame=document.createElement('iframe');frame.src=objectUrl;
-  frame.title='Mehrseitiges PDF-Dokument';frame.className='ft-pdf-frame';
-  dialog.append(header,frame);
-  const note=document.createElement('p');note.className='muted small';
-  note.textContent='Falls die PDF-Vorschau auf deinem iPhone nicht angezeigt wird, verwende „PDF speichern / öffnen“. Alle Seiten bleiben erhalten.';
-  dialog.append(note);
+  if(mobilePdf){
+   const note=document.createElement('p');note.className='muted small';
+   note.textContent='Die eingebettete PDF-Vorschau funktioniert auf manchen Handys nicht. Bitte das PDF herunterladen oder mit einer anderen App teilen. Alle Seiten bleiben erhalten.';
+   const actions=document.createElement('div');actions.className='actions';
+   const open=document.createElement('a');open.className='btn primary';
+   open.href=objectUrl;open.target='_blank';open.rel='noopener noreferrer';
+   open.textContent='PDF extern öffnen';
+   actions.append(open);
+   if(typeof File==='function'&&typeof navigator.share==='function'&&
+      typeof navigator.canShare==='function'){
+    const pdfFile=new File([bytes],download.download,{type:'application/pdf'});
+    if(navigator.canShare({files:[pdfFile]})){
+     const share=document.createElement('button');share.type='button';
+     share.className='btn';share.textContent='PDF teilen / in Dateien sichern';
+     share.addEventListener('click',async()=>{
+      try{await navigator.share({files:[pdfFile],title:download.download});}
+      catch(err){if(err?.name!=='AbortError')console.warn('PDF-Teilen fehlgeschlagen.');}
+     });
+     actions.append(share);
+    }
+   }
+   dialog.append(header,note,actions);
+  }else{
+   const frame=document.createElement('iframe');frame.src=objectUrl;
+   frame.title='Mehrseitiges PDF-Dokument';frame.className='ft-pdf-frame';
+   dialog.append(header,frame);
+   const note=document.createElement('p');note.className='muted small';
+   note.textContent='Falls die PDF-Vorschau nicht angezeigt wird, verwende „PDF herunterladen“. Alle Seiten bleiben erhalten.';
+   dialog.append(note);
+  }
  }else{
   const img=document.createElement('img');img.alt='Angehängtes Foto';img.src=objectUrl;img.decoding='async';
   img.addEventListener('error',()=>{
