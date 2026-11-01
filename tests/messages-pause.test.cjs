@@ -297,7 +297,7 @@ test('four-stage tasks require recipient evidence and admin review, with return 
 
 test('task overview renders four stages for staff and admins with deadlines and review controls',()=>{
  const code=section(frontend,'function ftTaskStatusLabel_','/** Repositioniert');
- const ST={h:{commSupported:true},commOpen:'t3',taskFilter:'ALL',comm:{users:[],recipients:[],replies:[],
+ const ST={h:{commSupported:true},commSection:'TASK',commOpen:'t3',taskFilter:'ALL',comm:{users:[],recipients:[],replies:[],
   threads:['OPEN','ACCEPTED','DONE','CLOSED'].map((status,i)=>({id:'t'+(i+1),kind:'TASK',status,title:'Task '+i,createdBy:'admin',recipientId:'staff',dueDate:'2026-10-31'}))}};
  ST.comm.taskOverview=ST.comm.threads;
  let admin=false;
@@ -333,4 +333,29 @@ test('working time range uses Vienna dates once per day and includes overnight e
  const render=vm.runInNewContext(timeCode+';time',ctx);
  assert.doesNotMatch(render(),/Employee Test|<th>Mitarbeiter/);
  admin=true;assert.match(render(),/Employee Test/);assert.match(render(),/<th>Mitarbeiter/);
+});
+
+test('Post/Aufgaben separates message history and creation from the task workflow',()=>{
+ const code=section(frontend,'function ftTaskStatusLabel_','/** Repositioniert');
+ const task={id:'task',kind:'TASK',status:'DONE',title:'Task title',body:'Task body',createdBy:'admin',recipientId:'staff'};
+ const message={id:'msg',kind:'MESSAGE',title:'Message title',body:'Message body',createdBy:'admin',recipientId:'staff',createdAt:'2026-11-01T07:00:00Z'};
+ const ST={h:{commSupported:true},commOpen:'msg',commCompose:true,taskFilter:'CLOSED',comm:{users:[],recipients:[],
+  threads:[task,message],taskOverview:[task],replies:[{threadId:'msg',authorId:'staff',body:'Earlier message reply',createdAt:'2026-11-01T08:00:00Z'},
+   {threadId:'task',authorId:'staff',body:'Task evidence note',createdAt:'2026-11-01T08:00:00Z'}]}};
+ let admin=false;
+ const ctx={ST,me:()=>({id:admin?'admin':'staff'}),isAdmin:()=>admin,E:x=>String(x??''),ftTimeToday_:()=> '2026-11-01',
+  ftCommPhotoButton_:()=>'',ftViennaDateTime:x=>x||'',hint:()=>'',select:()=>'',input:()=>''};
+ const render=vm.runInNewContext(code+';ftMessages_',ctx);
+ let html=render();
+ assert.match(html,/<h2>Post\/Aufgaben/);assert.match(html,/data-act="commSection" data-id="TASK"/);
+ assert.match(html,/data-act="commSection" data-id="MESSAGE"/);
+ assert.match(html,/value="MESSAGE"/);assert.match(html,/Nachricht erstellen/);
+ assert.match(html,/Message title/);assert.match(html,/Earlier message reply/);assert.match(html,/07:00:00Z/);
+ assert.doesNotMatch(html,/Task title|Task evidence note|ft-task-summary|name="dueDate"/);
+ ST.commSection='TASK';ST.commOpen='msg';html=render();
+ assert.match(html,/ft-task-summary/);assert.doesNotMatch(html,/Message title|Earlier message reply|ftCommCreateForm|Aufgabe erstellen/);
+ admin=true;ST.taskFilter='ALL';html=render();
+ assert.match(html,/value="TASK"/);assert.match(html,/Aufgabe erstellen/);assert.match(html,/Task title/);
+ assert.doesNotMatch(html,/Nachricht erstellen|Message title/);
+ ST.commOpen='task';assert.match(render(),/Task evidence note/);
 });

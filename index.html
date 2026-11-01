@@ -732,6 +732,7 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-admin-staff-row .ft-admin-name{grid-column:1/-1}.ft-admin-duty-grid{grid-template-columns:1fr}}
 @media(max-width:390px){.ft-admin-staff-row{gap:10px;padding:11px}.ft-admin-staff-row strong{font-size:13px}}
 .ft-task-deadline{display:inline-block;margin:4px 0 0 6px;padding:3px 7px;border:1px solid currentColor;border-radius:6px;font-weight:700}.ft-task-deadline.is-overdue{color:#ffb4ab;background:#541e24}
+.ft-comm-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0 20px}.ft-comm-section{display:flex;flex-direction:column;gap:7px;padding:16px;text-align:left;border:1px solid var(--border,#476072);border-radius:12px;background:transparent;color:inherit;cursor:pointer;min-width:0}.ft-comm-section strong{font-size:18px}.ft-comm-section span{font-size:12px;opacity:.8}.ft-comm-section.on{outline:2px solid var(--accent,#f37850)}
 </style><script src="./config.js"></script><link rel="manifest" href="./manifest.webmanifest"><meta name="theme-color" content="#172c44"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="FireTime Pro"><link rel="apple-touch-icon" href="./assets/firetime-192.png"></head><body><div id="app"></div><div id="toast" class="toast hide"></div>
 <div id="ft-install-mask" class="ft-install-backdrop" role="presentation" aria-hidden="true">
   <div class="ft-install-dialog" role="dialog" aria-modal="true" aria-labelledby="ft-install-title" aria-describedby="ft-install-info">
@@ -1005,7 +1006,7 @@ function ftWarmSchedule_(){
  // gateway and competed with real taps. Views fetch only when requested.
  // Session-scoped RAM views are still reused when revisited.
 }
-const LABELS={messages:'Aufgaben',sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
+const LABELS={messages:'Post/Aufgaben',sick:'Krankenstand',dashboard:'Übersicht',customers:'Kundenverwaltung',license:'Gekaufte Module',staff:'Mitarbeiter',time:'Zeiterfassung',reports:'Monatsberichte',leave:'Urlaub',work:'Arbeitsdienstplan',standby:'Bereitschaftsplan',availability:'Verfügbarkeit',rules:'Zuschlagsregeln',settings:'Firmenprofil',profile:'Mein Konto'};
 const MODULES=[['TIME','Zeiterfassung','Arbeitszeiten und tatsächliche Tätigkeiten erfassen'],['REPORTS','Monatsberichte','Soll-/Ist-Stunden, Stundensaldo und PDF-Berichte'],['LEAVE','Urlaub','Urlaubsanträge und Freigaben'],['WORKPLAN','Arbeitsdienstplan','Fixzeiten, 12-/24-Stunden- und freie Schichten'],['STANDBY','Bereitschaft','Bereitschaftseinteilung und separates Bereitschaftskonto'],['AVAILABILITY','Verfügbarkeit','Monatliche Meldung der verfügbaren Bereitschaftstage'],['CALENDAR','Google-Kalender','Kalendereinladungen an eingeteilte Mitarbeiter'],['PAY_PREVIEW','Vergütungsvorschau (Zusatzmodul)','Unverbindliche Bruttovorschau, Bereitschaftsvergütung und Zuschläge'],['SICK','Krankenstandsverwaltung (Zusatzmodul)','Krankenstandsmeldungen, Prüfungen und Zeitgutschriften']];
 const E=v=>String(v==null?'':v).replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const app=document.getElementById('app');
@@ -1015,7 +1016,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.26';
+const FT_VISIBLE_VERSION='1.8.27';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1429,7 +1430,7 @@ window.addEventListener('pageshow',()=>{
 });
 function mobileNav(){
  const tabs=nav(),top=['dashboard','time','standby','messages'].filter(t=>tabs.includes(t));
- const groups=[['Zeit & Berichte',['reports']],['Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
+ const groups=[['Zeit & Berichte',['reports']],['Post/Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
  const remaining=tabs.filter(t=>!top.includes(t));
  const symbols={dashboard:'⌂',time:'◷',standby:'▦',messages:'✉',reports:'▤'};
  const mobileButtons=top.map(t=>`<button data-tab="${t}" class="${ST.tab===t?'on':''}" aria-label="${E(LABELS[t])}"><span class="ft-nav-symbol" aria-hidden="true">${symbols[t]}</span><span>${E(t==='dashboard'?'Start':t==='time'?'Zeit':t==='standby'?'Bereitschaft':t==='messages'?'Post':'Berichte')}</span>${t==='messages'?'<span class="ft-msg-badge"></span>':''}</button>`).join('');
@@ -1742,14 +1743,17 @@ function ftTaskDeadline_(task){
   (overdue?'Überfällig · ':'Frist: ')+E(task.dueDate.split('-').reverse().join('.'))+'</span>';
 }
 function ftMessages_(){
- if(!ST.h?.commSupported)return '<section class="card"><h2>Aufgaben</h2><p class="muted">Bitte zuerst Code.gs V1.8.5 veröffentlichen. Bestehende Module bleiben unverändert.</p></section>';
+ if(!ST.h?.commSupported)return '<section class="card"><h2>Post/Aufgaben</h2><p class="muted">Bitte zuerst Code.gs V1.8.5 veröffentlichen. Bestehende Module bleiben unverändert.</p></section>';
  const data=ST.comm;
- if(!data)return '<section class="card"><h2>Aufgaben</h2><p class="muted">'+
+ if(!data)return '<section class="card"><h2>Post/Aufgaben</h2><p class="muted">'+
   (ST.commError?E(ST.commError):'Nachrichten werden geladen …')+'</p>'+
   '<button type="button" class="btn" data-act="commRefresh">Erneut laden</button></section>';
  const users=new Map((data.users||[]).map(x=>[String(x.id),x.name]));
  const label=id=>E(users.get(String(id))||'Mitarbeiter');
- const chosen=(data.threads||[]).find(x=>x.id===ST.commOpen);
+ const section=ST.commSection==='TASK'?'TASK':'MESSAGE';
+ const taskSection=section==='TASK';
+ const sectionThreads=(data.threads||[]).filter(x=>x.kind===section);
+ const chosen=sectionThreads.find(x=>x.id===ST.commOpen);
  const isManager=isAdmin(),recipientOptions=(data.recipients||[]).map(x=>
   [x.id,(!isManager?(x.role==='ADMIN'?'Administrator · ':'Kollege · '):'')+x.name]);
  const myTasks=isManager?(data.taskOverview||[]):(data.threads||[]).filter(t=>t.kind==='TASK');
@@ -1771,18 +1775,18 @@ function ftMessages_(){
        (t.status==='DONE'?'Dokumentation öffnen':'Öffnen')+'</button></div>').join('')||
    '<p class="muted">Für diesen Filter sind keine Aufgaben vorhanden.</p>')+
   '</div></section>';
- const composer=ST.commCompose?'<section class="card ft-msg-composer"><h3>Neue '+(isManager?'Nachricht oder Aufgabe':'Nachricht')+'</h3>'+
+ const composer=ST.commCompose&&(!taskSection||isManager)?'<section class="card ft-msg-composer"><h3>Neue '+(taskSection?'Aufgabe':'Nachricht')+'</h3>'+
   hint('Nur du und der ausgewählte Empfänger können diese Unterhaltung lesen. Mitarbeiter können Kollegen und Firmenadministratoren anschreiben; Aufgaben vergibt nur die Administration.','Wer kann das lesen?')+
   '<form id="ftCommCreateForm">'+
-  (isManager?select('kind','Art',[['MESSAGE','Nachricht'],['TASK','Aufgabe mit Frist']],'MESSAGE'):'')+
+  '<input type="hidden" name="kind" value="'+section+'">'+
   select('recipientId','Empfänger',recipientOptions,recipientOptions[0]?.[0]||'')+
   input('Betreff','title','','text','required maxlength="120"')+
-  '<label class="field"><span>Nachricht / Aufgabenbeschreibung</span><textarea name="body" maxlength="3000" rows="4" required></textarea></label>'+
-  (isManager?input('Frist (nur für Aufgaben)','dueDate','','date'):'')+
+  '<label class="field"><span>'+(taskSection?'Aufgabenbeschreibung':'Nachricht')+'</span><textarea name="body" maxlength="3000" rows="4" required></textarea></label>'+
+  (taskSection?input('Frist','dueDate','','date'):'')+
   '<label class="field"><span>Anhang (optional: Foto oder mehrseitiges PDF, bis 10 MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,application/pdf,.pdf"></label>'+
   '<div class="actions"><button type="submit" class="btn primary">Senden</button>'+
   '<button type="button" class="btn" data-act="commCloseCompose">Abbrechen</button></div></form></section>':'';
- const threads=(data.threads||[]).filter(x=>x.kind!=='TASK'||selectedTaskFilter==='ALL'||x.status===selectedTaskFilter).map(x=>{
+ const threads=sectionThreads.filter(x=>!taskSection||selectedTaskFilter==='ALL'||x.status===selectedTaskFilter).map(x=>{
   const task=x.kind==='TASK',selected=x.id===ST.commOpen;
   return '<button type="button" class="ft-msg-thread'+(x.unread?' is-unread':'')+
    (selected?' is-selected':'')+'" data-act="commOpen" data-id="'+E(x.id)+'">'+
@@ -1798,8 +1802,9 @@ function ftMessages_(){
   (chosen.kind==='TASK'?'<span class="ft-msg-task-status">'+E(ftTaskStatusLabel_(chosen.status))+'</span>':'')+'</div>'+
   '<p class="ft-msg-body">'+E(chosen.body)+'</p>'+
   '<p class="muted small">Von '+label(chosen.createdBy)+' an '+label(chosen.recipientId)+
-  ftTaskDeadline_(chosen)+'</p>'+
+  ftTaskDeadline_(chosen)+' · '+E(ftViennaDateTime(chosen.createdAt))+'</p>'+
   ftCommPhotoButton_(chosen.attachmentId,chosen.id)+
+  '<h4>Verlauf</h4>'+(replies.length?'':'<p class="muted small">Noch keine Antworten.</p>')+
   replies.map(x=>'<div class="ft-msg-reply"><strong>'+label(x.authorId)+'</strong>'+
    '<p>'+E(x.body)+'</p><small>'+E(ftViennaDateTime(x.createdAt))+'</small>'+
    ftCommPhotoButton_(x.attachmentId,chosen.id)+'</div>').join('')+
@@ -1820,13 +1825,25 @@ function ftMessages_(){
   '<label class="field"><span>Antwort</span><textarea name="body" required maxlength="3000" rows="3"></textarea></label>'+
   '<label class="field"><span>Anhang zur Antwort (Foto oder PDF bis 10 MB)</span><input type="file" accept="image/jpeg,image/png,application/pdf,.pdf" name="photo"></label>'+
   '<button class="btn primary" type="submit">Antwort senden</button></form></section>':'';
- return '<div class="ft-msg-heading"><div><h2>Aufgaben</h2>'+
-  '<p class="muted small">'+Number(data.unread||0)+' ungelesen · E-Mail bei neuen Nachrichten und Antworten</p></div>'+
-  '<div class="actions"><button class="btn primary" type="button" data-act="commNew">+ Neu</button>'+
-  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div></div>'+
-  composer+taskBoard+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>Aufgaben und Nachrichten</h3>'+
-  (threads||'<p class="muted">Noch keine Nachrichten oder Aufgaben.</p>')+
+ const sections=[['TASK','Aufgaben'],['MESSAGE','Nachrichten']].map(([kind,title])=>{
+  const items=(data.threads||[]).filter(x=>x.kind===kind),unread=items.filter(x=>x.unread).length;
+  return '<button type="button" class="ft-comm-section'+(section===kind?' on':'')+
+   '" data-act="commSection" data-id="'+kind+'" aria-pressed="'+(section===kind)+'">'+
+   '<strong>'+title+'</strong><span>'+items.length+' '+(kind==='TASK'?'Aufgaben':'Unterhaltungen')+
+   (unread?' · '+unread+' ungelesen':'')+'</span></button>';
+ }).join('');
+ return '<div class="ft-msg-heading"><div><h2>Post/Aufgaben</h2>'+
+  '<p class="muted small">Aufgaben und persönliche Nachrichten</p></div>'+
+  '<button class="btn" type="button" data-act="commRefresh">Aktualisieren</button></div>'+
+  '<div class="ft-comm-sections" aria-label="Postbereiche">'+sections+'</div>'+
+  '<div class="ft-msg-heading"><h3>'+(taskSection?'Aufgaben':'Nachrichten')+'</h3>'+
+  ((!taskSection||isManager)?'<button class="btn primary" type="button" data-act="commNew">'+
+   (taskSection?'+ Aufgabe erstellen':'+ Nachricht erstellen')+'</button>':'')+'</div>'+
+  composer+(taskSection?taskBoard:'')+'<div class="ft-msg-layout"><section class="card ft-msg-list"><h3>'+
+  (taskSection?'Aufgaben nach Status':'Nachrichtenverlauf')+'</h3>'+
+  (threads||'<p class="muted">'+(taskSection?'Keine Aufgaben für diesen Filter.':'Noch keine Nachrichten. Erstelle eine neue Nachricht.')+'</p>')+
   '</section>'+detail+'</div>';
+
 }
 
 
@@ -3648,13 +3665,21 @@ if(a==='commAccept'||a==='commReopen'||a==='commClose'){
  finally{if(btn.isConnected)btn.disabled=false;}
  return;
 }
-if(a==='commNew'){ST.commCompose=true;page();return;}
+if(a==='commSection'){
+ if(!['TASK','MESSAGE'].includes(id))return;
+ ST.commSection=id;ST.commCompose=false;ST.commOpen='';page();return;
+}
+if(a==='commNew'){
+ if(ST.commSection==='TASK'&&!isAdmin())return;
+ ST.commCompose=true;page();return;
+}
 if(a==='commCloseCompose'){ST.commCompose=false;page();return;}
 if(a==='commRefresh'){ST.comm=null;await ftCommFetch_(true);return;}
 if(a==='commOpen'){
  ST.commOpen=id;
  // Open the already loaded conversation immediately, even on slow mobile data.
  const thread=ST.comm?.threads?.find(t=>String(t.id)===String(id));
+ if(thread)ST.commSection=thread.kind;
  const wasUnread=Boolean(thread?.unread);
  if(thread)thread.unread=false;
  if(wasUnread)ftCommSetBadge_(Math.max(0,Number(ST.comm?.unread||0)-1));
@@ -4049,6 +4074,7 @@ if(form.id==='ftCommCreateForm'){
   const result=await api('commCreate',{companyId:firm().id,kind:p.kind||'MESSAGE',recipientId:p.recipientId,
    title:p.title,body:p.body,dueDate:p.dueDate||'',photo});
   ST.commCompose=false;ST.commOpen=result.thread?.id||'';
+  if(result.thread)ST.commSection=result.thread.kind;
   if(ST.comm&&result.thread){
    ST.comm.threads=[{...result.thread,unread:false},...(ST.comm.threads||[])];
    if(result.thread.kind==='TASK'){
@@ -4071,9 +4097,9 @@ if(form.id==='ftCommCompleteForm'){
   const result=await api('commTaskStatus',{companyId:firm().id,threadId:form.dataset.thread,status:'DONE',
    photo,note:String(p.note||'')});
   ftCommUpdateLocalTask_(form.dataset.thread,'DONE',result);
-  say(result.mailSent?'Aufgabe abgeschlossen, Foto gespeichert und Auftraggeber benachrichtigt.':
+  say(result.mailSent?'Aufgabe als erledigt gemeldet, Foto gespeichert und zur Kontrolle übermittelt.':
    'Aufgabe und Foto gespeichert. E-Mail-Benachrichtigung bitte prüfen.',!result.mailSent);
- }catch(err){say('Aufgabe konnte nicht abgeschlossen werden: '+String(err.message||err),true);}
+ }catch(err){say('Aufgabe konnte nicht als erledigt gemeldet werden: '+String(err.message||err),true);}
  finally{if(button?.isConnected)button.disabled=false;}
  return;
 }
