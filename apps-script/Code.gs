@@ -5,7 +5,7 @@
  * Nur API, kein Google-HTML-WebApp-Frontend.
  * Öffentlicher Zugriff führt nicht zu google.script.run.
  */
-const FT_VERSION='1.8.25-shift-confirm-push-20261028';
+const FT_VERSION='1.8.26-task-review-20261101';
 function doGet(e){
  return ContentService.createTextOutput('FireTime Pro API. Bitte die GitHub-Website öffnen.')
   .setMimeType(ContentService.MimeType.TEXT);
@@ -2787,7 +2787,7 @@ function ft_commMail_(c,recipient,sender,thread,eventId,activity){
   (activity==='REPLY'?'geantwortet.':activity==='STATUS'?'den Aufgabenstatus geändert.':thread.kind==='TASK'?'eine Aufgabe erteilt.':'eine Nachricht gesendet.')+
   '\n\n'+ft_commDecode_(thread.titleEncoded)+
   (thread.dueDate?'\nFrist: '+thread.dueDate.slice(8,10)+'.'+thread.dueDate.slice(5,7)+'.'+thread.dueDate.slice(0,4):'')+
-  '\n\nBitte öffne FireTime Pro → Nachrichten & Aufgaben:\n'+url);}
+  '\n\nBitte öffne FireTime Pro → Aufgaben:\n'+url);}
  catch(err){console.warn('Mailstatus fehlgeschlagen:',String(err.message||err).slice(0,130));}
  try{ft_pushNotice_(c,recipient,sender,thread,eventId,activity);}
  catch(err){console.warn('Pushbenachrichtigung fehlgeschlagen:',String(err.message||err).slice(0,130));}
@@ -2853,27 +2853,41 @@ function ft_commTaskStatus_(actor,p){
  const thread=ft_commThread_(actor,p.threadId);
  if(thread.kind!=='TASK')throw Error('Das ist keine Aufgabe.');
  const next=String(p.status||'');
- if(!['OPEN','ACCEPTED','DONE'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
+ if(!['OPEN','ACCEPTED','DONE','CLOSED'].includes(next))throw Error('Unbekannter Aufgabenstatus.');
  const owner=String(thread.recipientId)===String(actor.id);
  const creator=String(thread.createdBy)===String(actor.id);
+ const manager=creator&&['ADMIN','SYSADMIN'].includes(actor.role);
  // Employees can accept and complete ONLY their personal assigned tasks.
  if(next==='ACCEPTED'&&(!owner||thread.status!=='OPEN'))
   throw Error('Nur die zugewiesene Person kann eine offene Aufgabe annehmen.');
  if(next==='DONE'&&(!owner||thread.status!=='ACCEPTED'))
   throw Error('Bitte die eigene Aufgabe zuerst annehmen, bevor du sie abschließt.');
- if(next==='OPEN'&&(!creator||actor.role==='STAFF'))
+ if(next==='CLOSED'&&(!manager||thread.status!=='DONE'))
+  throw Error('Nur der Auftraggeber kann eine erledigte Aufgabe nach Kontrolle abschließen.');
+ if(next==='OPEN'&&(!manager||!['ACCEPTED','DONE','CLOSED'].includes(thread.status)))
   throw Error('Nur der Auftraggeber kann die Aufgabe wieder öffnen.');
  if(thread.status===next)return {ok:true,status:next};
+ const note=ft_str_(p.note||'',1000).trim();
+ if(next==='OPEN'&&!note)throw Error('Bitte einen Grund für die Nachbearbeitung angeben.');
  const c=ft_company_(actor,thread.companyId);
  let evidenceId='',evidenceReply=null;
  if(next==='DONE'){
   if(!p.photo)throw Error('Zum Abschließen der Aufgabe ist ein Foto als Dokumentation erforderlich.');
+  if(!['image/jpeg','image/png'].includes(String(p.photo.mime||'')))
+   throw Error('Als Fotodokumentation ist ein JPEG- oder PNG-Foto erforderlich.');
   // Store a real image, protected by the same company-scoped private Drive
   // retrieval as existing photos. Never accept an arbitrary external image URL.
   evidenceId=ft_commPhotoSave_(actor,c,p.photo);
   evidenceReply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
    bodyEncoded:ft_commEncode_(ft_str_(p.note||'Aufgabe durchgeführt – Fotodokumentation',1000)),
    createdAt:ft_commNextUpdateTime_(thread),attachmentId:evidenceId};
+  ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,evidenceReply);
+ }
+ if(next==='OPEN'||next==='CLOSED'){
+  evidenceReply={id:ft_uuid_(),companyId:c.id,threadId:thread.id,authorId:actor.id,
+   bodyEncoded:ft_commEncode_(next==='CLOSED'?'Nach Kontrolle abgeschlossen.':
+    'Zur Nachbearbeitung zurückgegeben: '+note),
+   createdAt:ft_commNextUpdateTime_(thread),attachmentId:''};
   ft_absenceAdd_('CommReplies',FT_COMM_REPLY_COLS_,evidenceReply);
  }
  const before=thread.status;thread.status=next;

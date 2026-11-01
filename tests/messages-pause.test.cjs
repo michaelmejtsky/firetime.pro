@@ -258,3 +258,79 @@ test('image viewer and contextual UI are current, and PWA cache works in subpath
  assert.ok(cache,'versioned PWA cache must be present');
  assert.equal(cache[1],version[1].replace(/\./g,''),'PWA cache matches UI version');
 });
+
+test('four-stage tasks require recipient evidence and admin review, with return history',()=>{
+ const {api,rows,users,mailEvents}=communications(),[admin,staff,other,outsider]=[users[0],users[1],users[2],users[4]];
+ const id=api.ft_commCreate_(admin,{companyId:'a',recipientId:staff.id,kind:'TASK',title:'Prüfung',body:'Kontrollieren'}).thread.id;
+ const change=(actor,status,extra={})=>api.ft_commTaskStatus_(actor,{threadId:id,status,...extra});
+ const photo={mime:'image/jpeg',data:Buffer.from([255,216,255,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]).toString('base64')};
+ assert.throws(()=>change(admin,'CLOSED'),/erledigte Aufgabe/);
+ assert.throws(()=>change(staff,'CLOSED'),/Auftraggeber/);
+ assert.throws(()=>change(other,'ACCEPTED'),/keine Berechtigung/);
+ assert.throws(()=>change(outsider,'CLOSED'),/keine Berechtigung/);
+ change(staff,'ACCEPTED');
+ assert.throws(()=>change(admin,'CLOSED'),/erledigte Aufgabe/);
+ assert.throws(()=>change(staff,'DONE',{photo:{mime:'application/pdf',data:'invalid'}}),/Foto/);
+ assert.equal(rows.CommReplies.length,0);
+ change(staff,'DONE',{photo,note:'Wartung erledigt'});
+ assert.equal(rows.CommThreads[0].status,'DONE');
+ assert.throws(()=>change(staff,'CLOSED'),/Auftraggeber/);
+ assert.throws(()=>change(staff,'OPEN',{note:'Zurück'}),/Auftraggeber/);
+ assert.throws(()=>change(admin,'OPEN'),/Grund/);
+ assert.equal(rows.CommThreads[0].status,'DONE');
+ change(admin,'OPEN',{note:'Bitte Schild nachbessern'});
+ assert.equal(api.ft_commList_(staff,{companyId:'a'}).threads[0].status,'OPEN');
+ const replies=api.ft_commList_(staff,{companyId:'a'}).replies;
+ assert.match(replies.at(-1).body,/Bitte Schild nachbessern/);
+ assert.equal(replies[0].attachmentId,'photo-evidence');
+ assert.throws(()=>change(staff,'DONE',{photo}),/zuerst annehmen/);
+ change(staff,'ACCEPTED');change(staff,'DONE',{photo});change(admin,'CLOSED');
+ assert.equal(rows.CommThreads[0].status,'CLOSED');
+ assert.equal(api.ft_commList_(admin,{companyId:'a'}).taskOverview[0].status,'CLOSED');
+ assert.match(api.ft_commList_(staff,{companyId:'a'}).replies.at(-1).body,/Nach Kontrolle abgeschlossen/);
+ assert.equal(mailEvents.at(-1).recipientId,staff.id);
+ assert.throws(()=>change(staff,'ACCEPTED'),/offene Aufgabe/);
+ change(admin,'OPEN',{note:'Weitere Kontrolle'});
+ assert.equal(rows.CommThreads[0].status,'OPEN');
+ assert.equal(rows.CommReplies.filter(x=>x.attachmentId).length,2);
+});
+
+test('task overview renders four stages for staff and admins with deadlines and review controls',()=>{
+ const code=section(frontend,'function ftTaskStatusLabel_','/** Repositioniert');
+ const ST={h:{commSupported:true},commOpen:'t3',taskFilter:'ALL',comm:{users:[],recipients:[],replies:[],
+  threads:['OPEN','ACCEPTED','DONE','CLOSED'].map((status,i)=>({id:'t'+(i+1),kind:'TASK',status,title:'Task '+i,createdBy:'admin',recipientId:'staff',dueDate:'2026-10-31'}))}};
+ ST.comm.taskOverview=ST.comm.threads;
+ let admin=false;
+ const ctx={ST,me:()=>({id:admin?'admin':'staff'}),isAdmin:()=>admin,E:x=>String(x??''),ftTimeToday_:()=> '2026-11-01',
+  ftCommPhotoButton_:()=>'',ftViennaDateTime:()=>'',hint:()=>''};
+ const render=vm.runInNewContext(code+';ftMessages_',ctx);
+ let html=render();
+ for(const stage of ['1. Neu','2. Angenommen','3. Erledigt – zur Kontrolle','4. Abgeschlossen'])assert.ok(html.includes(stage));
+ assert.match(html,/Überfällig/);assert.doesNotMatch(html,/data-act="commClose"/);
+ ST.commOpen='t2';assert.match(render(),/ftCommCompleteForm/);
+ ST.commOpen='t1';assert.match(render(),/data-act="commAccept"/);
+ admin=true;ST.commOpen='t3';html=render();
+ assert.match(html,/data-act="commClose"/);assert.match(html,/data-act="commReopen"/);
+ ST.taskFilter='CLOSED';html=render();
+ assert.doesNotMatch(html,/data-act="commOpen" data-id="t1"/);
+ assert.match(html,/data-act="commOpen" data-id="t4"/);
+});
+
+test('working time range uses Vienna dates once per day and includes overnight end dates',()=>{
+ const code=section(frontend,'function ftTimeRange_','function time(){');
+ const range=vm.runInNewContext(code+';ftTimeRange_', {E:x=>String(x)});
+ const html=range({start:'2026-11-01T07:00:00Z',end:'2026-11-01T09:30:00Z',breakMinutes:15});
+ assert.equal((html.match(/01\.11\.2026/g)||[]).length,1);
+ assert.match(html,/08:00–10:30 Uhr/);assert.match(html,/2 Std. 15 Min./);
+ const overnight=range({start:'2026-11-01T22:00:00Z',end:'2026-11-02T01:00:00Z'});
+ assert.match(overnight,/01\.11\.2026/);assert.match(overnight,/02\.11\.2026 · 02:00/);
+ const timeCode=section(frontend,'function time(){',"const FT_PDF_JOB_STORE=");
+ let admin=false;
+ const ctx={ST:{h:{activities:[{id:'1',userId:'staff',start:'2026-11-01T07:00:00Z',end:'2026-11-01T09:00:00Z'}]},month:'2026-11'},
+  isAdmin:()=>admin,hint:()=>'',monthPick:()=>'',ftTimerPanel_:()=>'',E:x=>String(x??''),
+  ftActivityPicker_:()=>'',input:()=>'',ftTimeToday_:()=> '2026-11-01',ftTimePauseHint_:()=>'',
+  ftTimeRange_:range,ftTimeLabel_:()=>'',ftTimePauseWarning_:()=>'',who:()=>({name:'Employee Test'}),optionsUsers:()=>''};
+ const render=vm.runInNewContext(timeCode+';time',ctx);
+ assert.doesNotMatch(render(),/Employee Test|<th>Mitarbeiter/);
+ admin=true;assert.match(render(),/Employee Test/);assert.match(render(),/<th>Mitarbeiter/);
+});
