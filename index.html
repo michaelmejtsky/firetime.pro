@@ -137,6 +137,7 @@ textarea{resize:vertical;overflow-wrap:anywhere;min-height:86px}
  .ft-mobile-bar{background:#13283d;border-top-color:#39546c;box-shadow:0 -6px 22px #02091295}
  .ft-mobile-bar button.on{background:#31516e}
  .ft-mobile-bar button{font-size:11px}
+ .ft-mobile-bar button[data-tab="messages"]>span:not(.ft-nav-symbol):not(.ft-msg-badge){max-width:100%;white-space:normal;line-height:1.15}
  .ft-mobile-panel{max-width:100%;overflow-x:hidden;border-radius:17px}
  .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
  .ft-leave-form .btn.primary{width:100%}
@@ -1016,7 +1017,7 @@ const ftReportHours_=v=>Number(v||0).toLocaleString('de-AT',{maximumFractionDigi
 
 const EUR=v=>Number(v||0).toLocaleString('de-AT',{style:'currency',currency:'EUR'});
 const FT_DISPLAY_TZ='Europe/Vienna';
-const FT_VISIBLE_VERSION='1.8.27';
+const FT_VISIBLE_VERSION='1.8.28';
 const FT_VIENNA_FORMAT=new Intl.DateTimeFormat('de-AT',{timeZone:FT_DISPLAY_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function ftViennaParts(value){
  if(!value)return null;
@@ -1433,7 +1434,7 @@ function mobileNav(){
  const groups=[['Zeit & Berichte',['reports']],['Post/Aufgaben',['messages']],['Planung & Dienste',['work','availability','sick']],['Personal & Urlaub',['leave','staff']],['Verwaltung',['customers','license','rules','settings']],['Konto',['profile']]];
  const remaining=tabs.filter(t=>!top.includes(t));
  const symbols={dashboard:'⌂',time:'◷',standby:'▦',messages:'✉',reports:'▤'};
- const mobileButtons=top.map(t=>`<button data-tab="${t}" class="${ST.tab===t?'on':''}" aria-label="${E(LABELS[t])}"><span class="ft-nav-symbol" aria-hidden="true">${symbols[t]}</span><span>${E(t==='dashboard'?'Start':t==='time'?'Zeit':t==='standby'?'Bereitschaft':t==='messages'?'Post':'Berichte')}</span>${t==='messages'?'<span class="ft-msg-badge"></span>':''}</button>`).join('');
+ const mobileButtons=top.map(t=>`<button data-tab="${t}" class="${ST.tab===t?'on':''}" aria-label="${E(LABELS[t])}"><span class="ft-nav-symbol" aria-hidden="true">${symbols[t]}</span><span>${E(t==='dashboard'?'Start':t==='time'?'Zeit':t==='standby'?'Bereitschaft':t==='messages'?LABELS[t]:'Berichte').replace('/','/<wbr>')}</span>${t==='messages'?'<span class="ft-msg-badge"></span>':''}</button>`).join('');
  const grouped=groups.map(([title,items])=>{const visible=items.filter(t=>remaining.includes(t));return visible.length?`<section class="ft-mobile-group"><h3>${E(title)}</h3>${visible.map(t=>`<button class="${ST.tab===t?'on':''}" data-tab="${t}">${E(LABELS[t])}</button>`).join('')}</section>`:'';}).join('');
  return `<nav class="ft-mobile-bar" aria-label="Mobile Hauptnavigation">${mobileButtons}<button type="button" data-mobile-more="1" aria-expanded="false" aria-controls="ft-mobile-sheet" class="${remaining.includes(ST.tab)?'on':''}"><span class="ft-nav-symbol" aria-hidden="true">☰</span><span>Mehr</span></button></nav><div class="ft-mobile-sheet" id="ft-mobile-sheet"><div class="ft-mobile-panel"><div class="row between"><strong>Alle Funktionen</strong><button class="btn" type="button" data-mobile-more="1">Schließen</button></div>${grouped}<section class="ft-mobile-group"><h3>Sitzung</h3><button data-act="logout">Abmelden</button>${me().role==='SYSADMIN'&&firm()?'<button data-act="back">Zur Systemzentrale</button>':''}</section></div></div>`;
 }
