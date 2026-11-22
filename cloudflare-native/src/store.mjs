@@ -80,7 +80,7 @@ export async function commit(env,snapshot,runtime,{receipt=null,failure=false}={
  const propertyWrites=failure?[]:[...runtime.propertyWrites];
  const jobs=failure?[]:[...runtime.jobs.values()];
  const objects=failure?[]:[...runtime.objects.values()].filter(x=>runtime.initialObjects.get(x.id)!==JSON.stringify(x));
- if(!failure)for(const [key,job] of runtime.calendarChanges)jobs.push({id:'calendar-'+digest(key+'|'+JSON.stringify(job)),kind:'calendar',payload:{...job,planIds:runtime.tables.get('PlanMonths').rows.filter(r=>r.shareStatus==='QUEUED'&&runtime.original.get('PlanMonths'+'\0'+r.id)!==JSON.stringify(r)).map(r=>r.id)},created_at:new Date().toISOString()});
+ if(!failure)for(const [key,job] of runtime.calendarChanges)jobs.push({id:'calendar-'+crypto.randomUUID(),kind:'calendar',payload:{...job,planIds:runtime.tables.get('PlanMonths').rows.filter(r=>r.shareStatus==='QUEUED'&&runtime.original.get('PlanMonths'+'\0'+r.id)!==JSON.stringify(r)).map(r=>r.id)},created_at:new Date().toISOString()});
  if(!rows.length&&!persistentCache.length&&!propertyWrites.length&&!jobs.length&&!objects.length&&!receipt)return false;
  // New objects are immutable. Upload before the atomic index; a failed commit leaves
  // an unreachable object, never a database pointer to a missing file.

@@ -2,22 +2,37 @@
 
 **Stand: 22.11.2026 · Migrationskandidat, noch keine Produktivfreigabe.**
 
-Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt Sheets, R2 ersetzt die private Dateiablage in Drive. Normale Anmeldung, Stundenberechnung, Zeiterfassung, Urlaub, Planung, Nachrichten und PDFs benötigen kein Apps Script. Das vorhandene Frontend und seine 83 API-Aktionen bleiben kompatibel. Google Calendar bleibt eine optionale externe Integration über die offizielle REST-API. E-Mails benötigen einen verifizierten Absender bei Resend. Push wird direkt vom Worker zugestellt.
+Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt Sheets, R2 ersetzt die private Dateiablage in Drive. Normale Anmeldung, Stundenberechnung, Zeiterfassung, Urlaub, Planung, Aufgaben und PDFs benötigen kein Apps Script. Die bisherige Oberfläche bleibt im Bestand; die getrennte Cloudflare-Oberfläche erhält die vereinfachte Bedienung. Google Calendar bleibt eine optionale externe Integration über die offizielle REST-API. E-Mails benötigen einen verifizierten Absender bei Resend. Push wird direkt vom Worker zugestellt.
 
 Die bisherige produktive `config.js`, `index.html`, `cloudflare/worker.js` und `apps-script/Code.gs` werden von diesem Umbau **nicht geändert**. Keine Kundendaten, Passwörter, Exporte oder Cloudflare-Zugangsdaten gehören ins Repository.
 
 ## Was hier vorbereitet ist
 
-- Vollständiges API-kompatibles Backend aus dem aktuellen, unveränderten Fachkern; 37 abgeleitete Tabellenschemas, 83 API-Aktionen.
+- Vollständiges API-kompatibles Backend aus dem aktuellen, unveränderten Fachkern; 37 übernommene Tabellen plus 3 native Ergänzungen, 91 API-Aktionen.
 - Worker-eigene Oberfläche/PWA mit `/api` auf derselben Adresse; die GitHub-Oberfläche kann später ebenfalls auf die neue API zeigen.
 - D1-Indizes für Firma, Benutzer, E-Mail und Monat; Anmeldungen laden nur den betreffenden Benutzer und notwendige Authentifizierungsdaten.
 - Atomare Mehrtabellen-Buchungen mit Versionsprüfung. Gleichzeitige Änderungen werden erneut auf einer frischen Datenbasis berechnet. Anfragekennungen verhindern doppelte Zeitbuchungen bei wiederholten identischen Requests.
 - Bestehende Passwort-Hashes und 30-Tage-Sitzungen können übernommen werden. Der alte `FT_PEPPER` ist zwingend als Secret erforderlich. Keine neue Passwortvergabe notwendig.
-- Mandanten- und Rollenprüfungen aus dem bisherigen System, private Nachrichtenzugriffe einschließlich PDF-Anhängen.
+- Mandanten- und Rollenprüfungen aus dem bisherigen System, private Aufgabenzugriffe einschließlich PDF-Anhängen.
 - R2-Dateiprüfsummen, geschützte Downloads, unveränderte importierte Dateien.
 - Dauerhafte Zustellwarteschlange für E-Mail, Push und optionalen Kalender. `QUEUED` bedeutet vorgemerkt; `SENT` erst nach Bestätigung des Empfängerservers.
 - Geprüfte Datenübernahme mit Zellvergleich, Datei-Prüfsummen und Abrechnungsvergleich; optionaler vollständiger Apps-Script-Code mit zunächst inaktiver Umschaltsperre.
 - Getrennter, zugangsgeschützter Testbetrieb. Schreibzugriffe, echte Benachrichtigungen und Automatik sind im ausgelieferten Setup deaktiviert.
+
+## Neue Bedienung und Kalender
+
+Die Oberfläche enthält Aufgabenreiter mit Statusfarben und aufklappbaren Details, Mehrfachzuordnung an Mitarbeiter, getrennte Monats-/Jahreskonten, Urlaubsübersichten, farbige Abgabematrizen und vereinfachte Stammdaten. Details und selten benötigte Angaben sind eingeklappt. Alte Nachrichten bleiben im Importbestand erhalten, sind in den Aufgabenansichten und Aufgaben-APIs ausgeblendet.
+
+- **Firmenprofil → Hauptkalender-ID:** gemeinsamer Google-Kalender für Bereitschaften.
+- **Mitarbeiter → Bearbeiten → Persönliche Kalender-ID:** Kalender der jeweiligen Person, optional. Die Google-Kalender-ID verwenden, keinen Freigabelink.
+- **Haupt- und Mitarbeiterkalender aktivieren:** setzt das Firmenmodul voraus. Zusätzlich müssen Worker-Flag, Google-Servicekonto und Schreibrechte eingerichtet sein. Jeder Zielkalender muss für das Servicekonto mit Schreibrecht freigegeben werden. Kalender-IDs allein erteilen keinen Zugriff.
+- Der festgelegte und veröffentlichte Bereitschaftsplan wird über den bisherigen Schritt „Kalender teilen“ in den Hauptkalender und die eingetragenen persönlichen Kalender übertragen. Ohne persönliche ID bleibt der bisherige Einladungsweg bestehen; bei direkter Spiegelung wird keine zusätzliche Einladung an dieselbe Person erzeugt.
+- Aufgabenfristen erscheinen ganztägig im persönlichen Kalender. Änderungen aktualisieren den bestehenden Termin; nach endgültiger Kontrolle/Abschluss wird er entfernt. Zurückgesendete Aufgaben bleiben sichtbar; erneut geöffnete abgeschlossene Aufgaben erhalten einen neuen Termin. Ein Kalenderwechsel entfernt den bisherigen Spiegel.
+- Änderungen werden zunächst dauerhaft vorgemerkt, anschließend über die Zustellwarteschlange abgearbeitet. Wiederholungen einer laufenden Übertragung erzeugen keine neuen Termine. Echte Google-Zustellung wurde lokal simuliert; eine Freigabe erfordert einen Test mit dem vorgesehenen Servicekonto.
+- Die neue Pausen-Checkbox bestätigt eine tatsächlich genommene Pause. Bei mehr als sechs Stunden werden mindestens 30 Minuten berücksichtigt; vorhandene manuelle Pausen zählen mit. Ohne Pause bleiben die tatsächlichen Stunden erhalten, eine Abweichung kann vom Admin dokumentiert geprüft werden. Ein automatischer Hintergrund-Stopp erfindet keine Pause.
+- Urlaub in Stunden wird nur mit hinterlegter Tagesstundenbasis oder passendem Büroprofil angezeigt. Bei flexiblen Modellen wird keine pauschale 8-Stunden-Annahme verwendet. Fehlt bei einem flexiblen Urlaub über Monats-/Jahresgrenzen die konkrete Tageszuordnung, zeigt die Teilperiodenübersicht „Zuordnung offen“ statt erfundener anteiliger Urlaubstage.
+
+Die synthetische Oberflächenprüfung lässt sich nach dem Build mit `node tools/ui-preview.mjs` erstellen. Sie enthält ausschließlich Beispieldaten und deaktivierte Schreibzugriffe. Sie ist keine angebundene Staging-Instanz.
 
 ## Lokal prüfen
 
@@ -96,8 +111,8 @@ Im Staging werden selbst bei gesetzten Versand-Secrets keine Hintergrundzustellu
 ## Grenzen und ausstehende Abnahme
 
 - Kein Zugriff auf das produktive Cloudflare-Konto, den aktuellen Live-Sheet-Export oder dessen private Dateien war für diese Vorbereitung vorhanden. Es wurde nichts remote angelegt, importiert oder umgeschaltet.
-- Nicht jede der 83 Aktionen wurde einzeln Ende-zu-Ende getestet. Die gleiche vorhandene Fachlogik wird wiederverwendet; die geprüften kritischen Abläufe sind in `docs/ABNAHME.md` festgehalten.
-- Die Darstellung serverseitig erzeugter PDFs ist ein neuer, einfacherer Renderer. Enthaltene Zahlen/Texte bleiben aus dem Fachkern. Firmenlogos werden in diesem serverseitigen Renderer noch nicht eingebettet; die bestehende Browser-PDF-Erstellung und importierte PDFs bleiben erhalten. Vor Freigabe Sichtprüfung der mehrseitigen Berichte durchführen.
+- Nicht jede der 91 Aktionen wurde einzeln Ende-zu-Ende getestet. Die gleiche vorhandene Fachlogik wird wiederverwendet; die geprüften kritischen Abläufe sind in `docs/ABNAHME.md` festgehalten.
+- Die Darstellung serverseitig erzeugter PDFs ist ein neuer, einfacherer Renderer. Enthaltene Zahlen/Texte bleiben aus dem Fachkern. Firmenlogos werden in diesem serverseitigen Renderer noch nicht eingebettet; die neue Cloudflare-Oberfläche nutzt den Vektor-Renderer für Monats- und Sammelberichte. Importierte PDFs bleiben erhalten. Vor Freigabe Sichtprüfung der mehrseitigen Berichte durchführen.
 - Bestehende Daten werden verlustfrei als Datensätze mit indizierten JSON-Feldern in D1 gespeichert. Außer beim schlanken Login lädt ein Firmenaufruf zunächst den Firmenbestand; eine spätere fachweise SQL-Normalisierung ist möglich. Bei großen Datenmengen müssen reale Ladezeiten/CPU und Speicherverbrauch gemessen werden.
 - Globale Versionsprüfung ist bewusst konservativ: viele gleichzeitig schreibende Firmen können Konflikte erzeugen. Unter Last vor einer Freigabe prüfen.
 - Externe Zustellung ist mindestens einmal mit Wiederholungen; insbesondere Push kann nach einem Verbindungsabbruch doppelt eintreffen. E-Mails verwenden einen Idempotenzschlüssel, neue Kalendertermine stabile IDs. Provider-Zustellung ist keine Lesebestätigung.

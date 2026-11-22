@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0-migration-candidate",
+  "version": "2.1.0-migration-candidate",
   "sourceSha256": "039dd5daad8056f7c90e8dc98a1fd3592b0bd94c820ebc34b152196c94aef6a3",
   "tables": [
     "Companies",
@@ -38,9 +38,20 @@
     "LeaveFlexApprovals",
     "AbsencePdfArchive",
     "TimeBalanceStarts",
-    "TimerPauseEvents"
+    "TimerPauseEvents",
+    "EmployeePreferences",
+    "ActivityBreakPolicies",
+    "CalendarMirrors"
   ],
   "actions": [
+    "taskUpdate",
+    "breakReview",
+    "reportSubmissions",
+    "tasksCreate",
+    "yearOverview",
+    "availabilityOverview",
+    "pdfVector",
+    "summaryPdf",
     "home",
     "adminOverview",
     "onboard",

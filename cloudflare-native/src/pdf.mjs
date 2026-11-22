@@ -6,14 +6,35 @@ function literal(s){return win(s).replace(/[\\()]/g,'\\$&').replace(/[\r\n]/g,' 
 function wrap(text,width){const words=String(text).split(/\s+/),lines=[];let line='';for(let word of words){while(word.length>width){if(line){lines.push(line);line='';}lines.push(word.slice(0,width));word=word.slice(width);}if((line+' '+word).length>width&&line){lines.push(line);line=word;}else line+=(line?' ':'')+word;}if(line||!lines.length)lines.push(line);return lines;}
 export function renderPdf(blocks){
  const pages=[];let commands=[],y=798;
- const page=()=>{if(commands.length)pages.push(commands.join('\n'));commands=[];y=798;};
+ const page=()=>{if(commands.length){commands.push(`BT /F1 8 Tf 0.35 0.42 0.50 rg 42 24 Td (FireTime Pro - Seite ${pages.length+1}) Tj ET`);pages.push(commands.join('\n'));}commands=[];y=798;};
  const line=(text,x=42,size=9,bold=false)=>{if(y<45)page();commands.push(`BT /${bold?'F2':'F1'} ${size} Tf 0.08 0.15 0.24 rg ${x} ${y} Td (${literal(text)}) Tj ET`);};
  for(const block of blocks){
+  if(block.kind==='pagebreak'){page();continue;}
   if(block.kind==='table'){
-   const n=Math.max(1,...block.rows.map(x=>x.length)),width=510/n,chars=Math.max(7,Math.floor(width/4.6)-3);
-   for(const row of block.rows){const cells=row.map(c=>wrap(c.text,chars)),count=Math.max(...cells.map(c=>c.length));
-    for(let i=0;i<count;i++){if(y<45)page();for(let c=0;c<cells.length;c++)if(cells[c][i])line(cells[c][i],42+c*width,8.2,row[c].bold);y-=12;}y-=5;
+   const span=c=>Math.max(1,Number(c.colspan)||1),n=Math.max(1,...block.rows.map(row=>row.reduce((sum,c)=>sum+span(c),0))),width=510/n;
+   const measure=row=>row.map(c=>({cell:c,width:width*span(c),lines:wrap(c.text,Math.max(7,Math.floor((width*span(c)-14)/(9.2*.53))))}));
+   const height=row=>Math.max(...measure(row).map(c=>c.lines.length))*13+12;
+   const draw=(row,header=false,index=0)=>{
+    const cells=measure(row),count=Math.max(...cells.map(c=>c.lines.length));
+    let offset=0;
+    while(offset<count){
+     let capacity=Math.floor((y-45-12)/13);
+     if(capacity<1){page();if(block.header&&!header)draw(block.rows[0],true);capacity=Math.floor((y-45-12)/13);}
+     const take=Math.min(count-offset,Math.max(1,capacity)),partHeight=take*13+12;
+     commands.push(`${header?'0.10 0.21 0.31':index%2?'0.96 0.97 0.98':'1 1 1'} rg 42 ${y+3-partHeight} 510 ${partHeight} re f`);
+     let x=49;
+     for(const c of cells){for(let i=0;i<take;i++)if(c.lines[offset+i])commands.push(`BT /${header||c.cell.bold?'F2':'F1'} 9.2 Tf ${header?'1 1 1':'0.08 0.15 0.24'} rg ${x} ${y-10-i*13} Td (${literal(c.lines[offset+i])}) Tj ET`);x+=c.width;}
+     y-=partHeight;commands.push(`0.83 0.87 0.90 RG 0.4 w 42 ${y+3} m 552 ${y+3} l S`);offset+=take;
+    }
+
+   };
+   const header=block.header?block.rows[0]:null;
+   for(let i=0;i<block.rows.length;i++){
+    const row=block.rows[i],needed=height(row)+(row[0]?.keepWithNext&&block.rows[i+1]?height(block.rows[i+1]):0);
+    if(y-needed<45&&needed<650){page();if(header&&i>0)draw(header,true);}
+    draw(row,Boolean(header&&i===0),i);
    }
+   y-=12;
   }else{const size=block.size||9;for(const text of String(block.text).split('\n'))for(const ln of wrap(text,Math.floor(510/(size*.53)))){line(ln,42,size,block.bold);y-=size+4;}y-=5;}
  }
  page();if(!pages.length)pages.push('');

@@ -43,7 +43,8 @@ async function deliverCalendar(env,job){
  const base='calendars/'+encodeURIComponent(job.calendarId)+'/events';
  const options=job.delete?{method:'DELETE'}:job.create?{method:'POST',body:JSON.stringify({...job.data,id:job.eventId})}:{method:'PATCH',body:JSON.stringify(job.data)};
  const response=await google(env,(job.create?base:eventPath(job.calendarId,job.eventId))+'?sendUpdates=all',options);
- if(job.delete&&[404,410].includes(response.status)||job.create&&response.status===409)return;
+ if(job.delete&&[404,410].includes(response.status))return;
+ if(job.create&&response.status===409){const patch=await google(env,eventPath(job.calendarId,job.eventId)+'?sendUpdates=all',{method:'PATCH',body:JSON.stringify(job.data)});if(!patch.ok)throw Error('Kalenderaktualisierung HTTP '+patch.status);return;}
  if(!response.ok)throw Error('Kalenderzustellung HTTP '+response.status);
 }
 async function markNotification(db,id,status,error){
@@ -73,6 +74,7 @@ export async function drainOutbox(env){
    }else if(job.kind==='calendar')await deliverCalendar(env,payload);
    else throw Error('Unbekannter Hintergrundauftrag.');
    const changes=[statement(env.DB,"UPDATE outbox SET status='SENT',lease_until=0,error='' WHERE id=?",job.id),...await markNotification(env.DB,payload.notificationId,'SENT','')];
+   if(job.kind==='calendar'&&payload.mirrorId&&!payload.delete)changes.push(statement(env.DB,"UPDATE records SET data=json_set(data,'$.status','SENT') WHERE table_name='CalendarMirrors' AND record_id=? AND json_extract(data,'$.sourceHash')=? AND json_extract(data,'$.calendarId')=? AND json_extract(data,'$.eventId')=?",payload.mirrorId,payload.mirrorHash,payload.calendarId,payload.eventId));
    for(const id of gone)changes.push(statement(env.DB,"DELETE FROM records WHERE table_name='PushDevices' AND record_id=? AND company_id=?",id,payload.actor.companyId));
    changes.push(statement(env.DB,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'"));
    await env.DB.batch(changes);
@@ -83,6 +85,7 @@ export async function drainOutbox(env){
   }catch(err){
    const terminal=Number(job.attempts)+1>=8,error=String(err.message||'Zustellfehler').slice(0,150);
    const changes=[statement(env.DB,"UPDATE outbox SET status=?,payload=?,available_at=?,lease_until=0,error=? WHERE id=?",terminal?'ERROR':'RETRY',JSON.stringify(payload),Date.now()+Math.min(3600000,30000*2**Number(job.attempts)),error,job.id),...await markNotification(env.DB,payload.notificationId,terminal?'ERROR':'QUEUED',error)];
+   if(job.kind==='calendar'&&payload.mirrorId&&!payload.delete&&terminal)changes.push(statement(env.DB,"UPDATE records SET data=json_set(data,'$.status','ERROR') WHERE table_name='CalendarMirrors' AND record_id=? AND json_extract(data,'$.sourceHash')=? AND json_extract(data,'$.calendarId')=? AND json_extract(data,'$.eventId')=?",payload.mirrorId,payload.mirrorHash,payload.calendarId,payload.eventId));
    for(const id of gone)changes.push(statement(env.DB,"DELETE FROM records WHERE table_name='PushDevices' AND record_id=? AND company_id=?",id,payload.actor.companyId));
    changes.push(statement(env.DB,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'"));await env.DB.batch(changes);
    if(job.kind==='calendar'&&terminal)for(const planId of payload.planIds||[])await env.DB.batch([

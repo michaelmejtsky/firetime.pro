@@ -9,7 +9,7 @@ import {loadSnapshot,commit,Conflict} from '../dist/store.mjs';
 import {ViennaDate,formatDate} from '../dist/time.mjs';
 import contract from '../src/contract.json' with {type:'json'};
 
-test('all 83 existing actions and all 37 tables are included',()=>{assert.equal(contract.actions.length,83);assert.equal(contract.tables.length,37);for(const name of ['TimeBalanceStarts','TimerPauseEvents','LeaveFlexApprovals','PdfArchive','CommReads'])assert.ok(contract.tables.includes(name));});
+test('existing actions and tables remain present alongside the new product APIs',()=>{assert.ok(contract.actions.length>=83);assert.ok(contract.tables.length>=37);assert.ok(contract.actions.includes('tasksCreate'));assert.ok(contract.actions.includes('yearOverview'));for(const name of ['TimeBalanceStarts','TimerPauseEvents','LeaveFlexApprovals','PdfArchive','CommReads'])assert.ok(contract.tables.includes(name));});
 test('passwords match the original 1500-round SHA256 algorithm, including unicode',()=>{
  const env=testEnv(),core=createCore(new Runtime({env}));for(const password of ['long-test-password','Grüße 🐻 €']){let v='salt|'+password+'|'+env.FT_PEPPER;for(let i=0;i<1500;i++)v=createHash('sha256').update(v+'salt').digest('hex');assert.equal(core.ft_password_(password,'salt'),v);}
 });
@@ -64,7 +64,7 @@ test('Europe/Vienna local inputs, month boundaries, and DST produce real 23/25h 
 });
 test('private PDF attachments remain scoped to participants and return byte-identical content',async()=>{
  const env=testEnv(),bytes=Buffer.from('%PDF-1.4\n'+('synthetic '.repeat(20))),id='private-file';await env.FILES.put(id,bytes);env.DB.sqlite.prepare('INSERT INTO objects VALUES(?,?,?,?,?,0)').run(id,'Beleg.pdf','application/pdf',bytes.length,digest(bytes));
- seed(env,'CommThreads',{id:'t1',companyId:'c1',kind:'MESSAGE',titleEncoded:Buffer.from('Test').toString('base64url'),bodyEncoded:Buffer.from('Privat').toString('base64url'),createdBy:'u1',recipientId:'u2',attachmentId:id,status:'OPEN',createdAt:'2026-11-01T12:00:00.000Z',updatedAt:'2026-11-01T12:00:00.000Z'});
+ seed(env,'CommThreads',{id:'t1',companyId:'c1',kind:'TASK',titleEncoded:Buffer.from('Test').toString('base64url'),bodyEncoded:Buffer.from('Privat').toString('base64url'),createdBy:'u1',recipientId:'u2',attachmentId:id,status:'OPEN',createdAt:'2026-11-01T12:00:00.000Z',updatedAt:'2026-11-01T12:00:00.000Z'});
  const result=await execute(env,call('1','commPhoto',{threadId:'t1',attachmentId:id}));assert.equal(result.data.data,bytes.toString('base64'));
  await assert.rejects(()=>execute(env,call('a','commPhoto',{threadId:'t1',attachmentId:id})),/Berechtigung/);await assert.rejects(()=>execute(env,call('c','commPhoto',{threadId:'t1',attachmentId:id})),/Berechtigung/);
 });

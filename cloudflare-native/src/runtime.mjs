@@ -1,13 +1,13 @@
 import {Buffer} from 'node:buffer';
 import {createHash,createHmac,randomUUID} from 'node:crypto';
 import {formatDate,ViennaDate} from './time.mjs';
-import {documentModel} from './pdf.mjs';
+import {documentModel,renderPdf} from './pdf.mjs';
 import schemas from './schema.json' with {type:'json'};
 export const digest=value=>createHash('sha256').update(value).digest('hex');
 export class NotLoaded extends Error {constructor(id){super('Private Datei wurde nicht geladen.');this.fileId=id;}}
 export class Runtime {
  constructor({records=[],cache=[],properties=[],objects=[],files=new Map(),env={},calendars=new Map()}){
-  this.env=env;this.files=files;this.objects=new Map(objects.map(x=>[x.id,{...x}]));this.initialObjects=new Map(objects.map(x=>[x.id,JSON.stringify(x)]));
+  this.vectorPdf=blocks=>{const bytes=renderPdf(blocks);return {bytes,pages:Number(bytes.toString('latin1').match(/\/Type \/Pages \/Count (\d+)/)?.[1]||1)};};this.env=env;this.schema=schemas;this.files=files;this.objects=new Map(objects.map(x=>[x.id,{...x}]));this.initialObjects=new Map(objects.map(x=>[x.id,JSON.stringify(x)]));
   this.tables=new Map(Object.entries(schemas).map(([name,cols])=>[name,{cols:[...cols],rows:[]} ]));
   for(const record of records){const table=this.tables.get(record.table_name);if(!table)throw Error('Unbekannte Datenbanktabelle: '+record.table_name);table.rows.push(JSON.parse(record.data));}
   this.original=new Map();for(const [name,t] of this.tables)for(const r of t.rows)this.original.set(name+'\0'+r.id,JSON.stringify(r));
@@ -87,10 +87,10 @@ export class Runtime {
   const event=(eventId,initial={})=>{
    const key=id+'\0'+eventId;
    let job=ctx.calendarChanges.get(key);
-   if(!job){job={calendarId:id,eventId,data:structuredClone(initial),delete:false};ctx.calendarChanges.set(key,job);}
+   if(!job){const writable=['summary','description','location','start','end','attendees','reminders','transparency','colorId','visibility','status'];const clean=Object.fromEntries(Object.entries(initial).filter(([k])=>writable.includes(k)));if(ctx.env?.CALENDAR_ENABLED==='true'&&Array.isArray(clean.attendees)){const prefs=ctx.tables.get('EmployeePreferences')?.rows||[],users=ctx.tables.get('Users')?.rows||[];clean.attendees=clean.attendees.filter(a=>!users.some(u=>u.email===a.email&&prefs.some(p=>p.userId===u.id&&p.calendarId)));}job={calendarId:id,eventId,data:clean,delete:false};ctx.calendarChanges.set(key,job);}
    const api={getId:()=>eventId,setTitle:s=>{job.data.summary=s;return api;},setTime:(s,e)=>{job.data.start={dateTime:s.toISOString(),timeZone:'Europe/Vienna'};job.data.end={dateTime:e.toISOString(),timeZone:'Europe/Vienna'};return api;},setDescription:s=>{job.data.description=s;return api;},removeAllReminders:()=>{job.data.reminders={useDefault:false,overrides:[]};return api;},addPopupReminder:n=>{job.data.reminders??={useDefault:false,overrides:[]};job.data.reminders.overrides.push({method:'popup',minutes:n});return api;},deleteEvent:()=>{job.delete=true;return api;}};return api;
   };
-  return {getName:()=>entry.name,getEventById:eventId=>{if(!entry.events?.has(eventId))throw Error('Kalendertermin wurde nicht verifiziert.');return entry.events.get(eventId)===null?null:event(eventId,entry.events.get(eventId));},createEvent:(title,start,end,opts={})=>{const ev=event(randomUUID().replaceAll('-',''));ev.setTitle(title).setTime(start,end).setDescription(opts.description||'');const job=ctx.calendarChanges.get(id+'\0'+ev.getId());job.create=true;job.data.attendees=String(opts.guests||'').split(',').filter(Boolean).map(email=>({email}));return ev;}};
+  return {getName:()=>entry.name,getEventById:eventId=>{if(!entry.events?.has(eventId))throw Error('Kalendertermin wurde nicht verifiziert.');return entry.events.get(eventId)===null?null:event(eventId,entry.events.get(eventId));},createEvent:(title,start,end,opts={})=>{const ev=event(randomUUID().replaceAll('-',''));ev.setTitle(title).setTime(start,end).setDescription(opts.description||'');const job=ctx.calendarChanges.get(id+'\0'+ev.getId());job.create=true;job.data.attendees=String(opts.guests||'').split(',').filter(Boolean).filter(email=>{const u=ctx.tables.get('Users').rows.find(x=>x.email===email);return !u||!ctx.tables.get('EmployeePreferences').rows.some(p=>p.userId===u.id&&p.calendarId);}).map(email=>({email}));return ev;}};
  }
  changedRows(){
   const changes=[],seen=new Set();

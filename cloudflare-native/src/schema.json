@@ -439,5 +439,40 @@
     "timerId",
     "start",
     "end"
+  ],
+  "EmployeePreferences": [
+    "id",
+    "companyId",
+    "userId",
+    "leaveHoursPerDay",
+    "calendarId",
+    "updatedBy",
+    "updatedAt"
+  ],
+  "ActivityBreakPolicies": [
+    "id",
+    "companyId",
+    "userId",
+    "activityId",
+    "mode",
+    "confirmed",
+    "minutes",
+    "reviewedBy",
+    "reviewedAt",
+    "reviewNote",
+    "updatedBy",
+    "updatedAt"
+  ],
+  "CalendarMirrors": [
+    "id",
+    "companyId",
+    "userId",
+    "sourceType",
+    "sourceId",
+    "calendarId",
+    "eventId",
+    "sourceHash",
+    "status",
+    "updatedAt"
   ]
 }
