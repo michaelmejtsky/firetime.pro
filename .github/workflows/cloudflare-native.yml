@@ -1,0 +1,38 @@
+name: FireTime Cloudflare migration candidate
+on:
+  pull_request:
+    paths: ['cloudflare-native/**', 'apps-script/Code.gs', 'cloudflare/worker.js', 'index.html', '.github/workflows/cloudflare-native.yml']
+  push:
+    branches: [main, codex/cloudflare-migration]
+    paths: ['cloudflare-native/**', 'apps-script/Code.gs', 'cloudflare/worker.js', 'index.html', '.github/workflows/cloudflare-native.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: cloudflare-native/package-lock.json
+      - run: npm ci
+        working-directory: cloudflare-native
+      - run: npm run build
+        working-directory: cloudflare-native
+      - run: npm test
+        working-directory: cloudflare-native
+      - run: npm run test:runtime
+        working-directory: cloudflare-native
+      - run: node --test tests/*.test.cjs
+      - run: npm run bundle
+        working-directory: cloudflare-native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FireTime-Cloudflare-Migrationspaket
+          path: cloudflare-native/dist/release/
+          if-no-files-found: error

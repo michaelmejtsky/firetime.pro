@@ -1,0 +1,23 @@
+{
+  "name": "firetime-cloudflare-native",
+  "private": true,
+  "type": "module",
+  "version": "2.0.0-migration-candidate",
+  "scripts": {
+    "build": "node tools/build.mjs && node tools/generate-exporter.mjs && node tools/build-freeze.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy:staging": "npm run build && wrangler deploy",
+    "import:check": "node tools/migrate.mjs check",
+    "reconcile": "node tools/reconcile.mjs",
+    "test:runtime": "node tools/smoke.mjs",
+    "bundle": "node tools/package.mjs"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "wrangler": "4.50.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
