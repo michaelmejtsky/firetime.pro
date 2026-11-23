@@ -1,3 +1,4 @@
+import {fileStorage} from './drive.mjs';
 import {Runtime,digest} from './runtime.mjs';
 export class Conflict extends Error{}
 export const statement=(db,sql,...args)=>db.prepare(sql).bind(...args);
@@ -51,18 +52,19 @@ export async function loadSnapshot(env,input,{system=false}={}){
   if(!active||JSON.parse(active.data).status!=='ACTIVE'||!sess||Date.parse(JSON.parse(sess.data).expiresAt)<=Date.now())throw Object.assign(Error('Sitzung abgelaufen. Bitte erneut anmelden.'),{status:401});
   const live=JSON.parse(active.data);if(live.role!==user.role||live.companyId!==user.companyId)throw new Conflict('Berechtigungen wurden geändert. Bitte erneut laden.');user=live;
  }
- const fileIds=new Set();
+ const fileIds=new Set(),logoIds=new Set(),requiredFileIds=new Set();
  // Logo only for a brand/full shell response; private attachment reads load exactly the requested file.
- const wantLogo=system||input.type==='brand'||input.action==='profileGet'||input.action==='pdf'||(input.action==='home'&&!input.data?.compact);
+ const homeLogo=input.action==='home'&&(!input.data?.view||['all','dashboard','settings'].includes(input.data.view))&&input.data?.skipLogo!==true&&!input.data?.compact;
+ const wantLogo=(system&&env.FILE_STORAGE!=='drive')||input.type==='brand'||input.action==='profileGet'||input.action==='pdf'||homeLogo;
  for(const r of records){const data=JSON.parse(r.data);
-  if(wantLogo&&r.table_name==='Companies'&&data.logoId)fileIds.add(String(data.logoId));
-  if(['pdfChunk','pdfBatchChunk','absencePdfChunk'].includes(input.action)&&data.id===input.data?.id&&data.fileId)fileIds.add(String(data.fileId));
+  if(wantLogo&&r.table_name==='Companies'&&data.logoId){fileIds.add(String(data.logoId));logoIds.add(String(data.logoId));}
+  if(['pdfChunk','pdfBatchChunk','absencePdfChunk'].includes(input.action)&&data.id===input.data?.id&&data.fileId){fileIds.add(String(data.fileId));requiredFileIds.add(String(data.fileId));}
  }
  if(input.action==='commPhoto'&&input.data?.attachmentId){
   // Read authorization BEFORE loading bytes; the domain repeats the check before returning them.
   const threads=records.filter(x=>x.table_name==='CommThreads').map(x=>JSON.parse(x.data));
   const t=threads.find(x=>x.id===input.data.threadId&&(x.createdBy===user?.id||x.recipientId===user?.id));
-  if(t){const allowed=[t.attachmentId,...records.filter(x=>x.table_name==='CommReplies').map(x=>JSON.parse(x.data)).filter(x=>x.threadId===t.id&&x.companyId===t.companyId).map(x=>x.attachmentId)];if(allowed.includes(input.data.attachmentId))fileIds.add(input.data.attachmentId);}
+  if(t){const allowed=[t.attachmentId,...records.filter(x=>x.table_name==='CommReplies').map(x=>JSON.parse(x.data)).filter(x=>x.threadId===t.id&&x.companyId===t.companyId).map(x=>x.attachmentId)];if(allowed.includes(input.data.attachmentId)){fileIds.add(input.data.attachmentId);requiredFileIds.add(input.data.attachmentId);}}
  }
  // Metadata is needed for archive/status checks; fetch only tenant-linked IDs.
  const referenced=new Set(fileIds);
@@ -71,7 +73,7 @@ export async function loadSnapshot(env,input,{system=false}={}){
  const ids=[...referenced];
  const queries=[];for(let i=0;i<ids.length;i+=80){const chunk=ids.slice(i,i+80);queries.push(statement(db,'SELECT * FROM objects WHERE id IN ('+chunk.map(()=>'?').join(',')+')',...chunk));}
  if(queries.length)for(const result of await db.batch(queries))objects.push(...result.results);
- const files=new Map();await Promise.all([...fileIds].map(async id=>{const meta=objects.find(x=>x.id===id);if(!meta||meta.trashed)return;const obj=await env.FILES.get(id);if(!obj)return;const bytes=new Uint8Array(await obj.arrayBuffer());if(bytes.length!==meta.size||digest(bytes)!==meta.sha256)throw Error('Dateiprüfsumme stimmt nicht.');files.set(id,bytes);}));
+ const files=new Map(),storage=fileStorage(env);await Promise.all([...fileIds].map(async id=>{try{const meta=objects.find(x=>x.id===id);if(!meta||meta.trashed)return;const obj=await storage.get(id);if(!obj)return;const bytes=new Uint8Array(await obj.arrayBuffer());if(bytes.length!==meta.size||digest(bytes)!==meta.sha256)throw Error('Dateiprüfsumme stimmt nicht.');files.set(id,bytes);}catch(err){if(!logoIds.has(id)||requiredFileIds.has(id))throw err;}}));
  return {revision:Number(batch[0].results[0]?.value||0),records,cache:batch[2].results,properties:batch[3].results,objects,files,env,user};
 }
 export async function commit(env,snapshot,runtime,{receipt=null,failure=false}={}){
@@ -84,9 +86,9 @@ export async function commit(env,snapshot,runtime,{receipt=null,failure=false}={
  if(!rows.length&&!persistentCache.length&&!propertyWrites.length&&!jobs.length&&!objects.length&&!receipt)return false;
  // New objects are immutable. Upload before the atomic index; a failed commit leaves
  // an unreachable object, never a database pointer to a missing file.
- const uploaded=[];
+ const uploaded=[],storage=fileStorage(env);
  try{
-  if(!failure)for(const [id,bytes] of runtime.newFiles){const m=runtime.objects.get(id);if(m?.trashed)continue;await env.FILES.put(id,bytes,{httpMetadata:{contentType:m.mime},customMetadata:{sha256:m.sha256}});uploaded.push(id);}
+  if(!failure)for(const [id,bytes] of runtime.newFiles){const m=runtime.objects.get(id);if(m?.trashed)continue;await storage.put(id,bytes,{httpMetadata:{contentType:m.mime},customMetadata:{sha256:m.sha256,filename:encodeURIComponent(m.name)}});uploaded.push(id);}
   const guard=crypto.randomUUID();
   const statements=[statement(db,"INSERT INTO commit_guards(id) VALUES((SELECT CASE WHEN CAST(value AS INTEGER)=? THEN ? ELSE NULL END FROM metadata WHERE key='revision'))",snapshot.revision,guard)];
   for(const r of rows){
@@ -101,7 +103,8 @@ export async function commit(env,snapshot,runtime,{receipt=null,failure=false}={
   statements.push(statement(db,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'"),statement(db,'DELETE FROM commit_guards WHERE id=?',guard));
   await db.batch(statements);return true;
  }catch(err){
-  for(const id of uploaded)try{await env.FILES.delete(id);}catch{}
+  // A batch may have committed even if its response was lost. Never remove a committed file.
+  for(const id of uploaded)try{const live=await statement(db,'SELECT id FROM objects WHERE id=? AND trashed=0',id).first();if(!live)await storage.delete(id);}catch{}
   if(/commit_guards|NOT NULL/.test(String(err.message)))throw new Conflict('Daten wurden gleichzeitig geändert. Bitte erneut laden.');
   throw err;
  }

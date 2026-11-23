@@ -231,6 +231,7 @@ function ft_nativeInitialize_(p){
  const company=ft_companyCreate_(admin,{name:'BSB3100',slug:'bsb3100',color:'#ff784f'});
  ft_licenseSave_(admin,{companyId:company.id,modules:['TIME','REPORTS','LEAVE','WORKPLAN','STANDBY','AVAILABILITY','CALENDAR']});
  ft_profileSave_(admin,{companyId:company.id,workModel:'FLEX',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24,secondaryColor:'#19354d',welcomeText:''});
+ if(p.publicUrl)PropertiesService.getScriptProperties().setProperty('FT_PUBLIC_GITHUB_URL',p.publicUrl);
  PropertiesService.getScriptProperties().setProperty('FT_NATIVE_INITIALIZED',ft_now_());
  ft_audit_(admin,'NATIVE_FIRST_START','Users',admin.id,{}, {email:admin.email,companyId:company.id});
  return {email:admin.email,companyId:company.id,initialized:true};

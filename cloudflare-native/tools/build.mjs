@@ -61,7 +61,7 @@ const generated=`// GENERATED from apps-script/Code.gs. Run npm run build. No ru
 fs.mkdirSync(path.join(root,'dist/public'),{recursive:true});
 fs.writeFileSync(path.join(root,'src/schema.json'),JSON.stringify(schemas,null,2)+'\n');
 fs.writeFileSync(path.join(root,'dist/core.mjs'),generated);
-fs.writeFileSync(path.join(root,'dist/first-start-schema.mjs'),'export default '+JSON.stringify(fs.readFileSync(path.join(root,'migrations/0001_native.sql'),'utf8'))+';\n');
+fs.writeFileSync(path.join(root,'dist/first-start-schema.mjs'),'export default '+JSON.stringify(fs.readdirSync(path.join(root,'migrations')).filter(x=>x.endsWith('.sql')).sort().map(x=>fs.readFileSync(path.join(root,'migrations',x),'utf8')).join('\n'))+';\n');
 const gateway=fs.readFileSync(path.join(repo,'cloudflare/worker.js'),'utf8');
 fs.writeFileSync(path.join(root,'dist/push.mjs'),gateway.slice(gateway.indexOf('const PUSH_MAX_BATCH'),gateway.indexOf('async function pushInternal')).replace("kind:notification.kind||'MESSAGE'","kind:notification.kind||'MESSAGE',...(Number.isSafeInteger(notification.unreadCount)?{unreadCount:notification.unreadCount}:{})")+'\nexport {pushOne,pushConfigured};\n');
 for(const file of fs.readdirSync(path.join(root,'src')))fs.copyFileSync(path.join(root,'src',file),path.join(root,'dist',file));
@@ -73,14 +73,14 @@ html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION=
  .replace("body:JSON.stringify(request),cache:","body:JSON.stringify(request),cache:");
 // Each user intent carries one idempotency key; no automatic retry of writes.
 html=html.replace("headers:{'Content-Type':'application/json'},\n      body:JSON.stringify(request)","headers:{'Content-Type':'application/json','X-Request-Id':crypto.randomUUID()},\n      body:JSON.stringify(request)");
-html=html.replace('<body>','<body><div style="padding:8px 16px;background:#7b431d;color:#fff;font:14px system-ui">FireTime Pro · Cloudflare-Testversion · getrennte Datenkopie</div>');
+html=html.replace('<body>','<body><div style="padding:8px 16px;background:#7b431d;color:#fff;font:14px system-ui">FireTime Pro · Cloudflare-Testversion</div>');
 html=html.replace('const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};','const views={dashboard,customers,license,staff,time,reports,totals:ftTotals_,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};').replace("['Zeit & Berichte',['reports']]","['Zeit & Berichte',['reports','totals']]").replaceAll('Post/Aufgaben','Aufgaben').replaceAll('ungelesene Nachrichten','ungelesene Aufgaben').replaceAll('Kalender teilen & Einladungen','Haupt- und Mitarbeiterkalender').replaceAll('Im Kalender teilen & Einladungen senden','In Haupt- und Mitarbeiterkalender übertragen').replaceAll('Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.','Monats-PDFs enthalten scharfen Text und getrennte Abschnitte für Arbeit und Bereitschaft.');
 html=html.replace('</head>','<style>'+fs.readFileSync(path.join(root,'ui/clarity.css'),'utf8')+'</style></head>').replace('</script></body>',fs.readFileSync(path.join(root,'ui/clarity.js'),'utf8')+'\n</script></body>');
 fs.writeFileSync(path.join(root,'dist/public/index.html'),html);
 const sw=fs.readFileSync(path.join(root,'dist/public/sw.js'),'utf8').replace(/firetime-shell-\d+-v\d+/g,'firetime-native-preview-v210');
 fs.writeFileSync(path.join(root,'dist/public/sw.js'),sw);
 fs.writeFileSync(path.join(root,'dist/public/config.js'),"window.FT_API_URL = location.origin + '/api';\n");
-const actions=['taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
+const actions=['storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
 const manifest={version:'2.1.0-migration-candidate',sourceSha256:createHash('sha256').update(source).digest('hex'),tables:Object.keys(schemas),actions,overrides:Object.keys(overrides)};
 fs.writeFileSync(path.join(root,'src/contract.json'),JSON.stringify(manifest,null,2)+'\n');
 fs.copyFileSync(path.join(root,'src/contract.json'),path.join(root,'dist/contract.json'));

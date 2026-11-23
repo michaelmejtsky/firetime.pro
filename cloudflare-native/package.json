@@ -11,7 +11,8 @@
     "import:check": "node tools/migrate.mjs check",
     "reconcile": "node tools/reconcile.mjs",
     "test:runtime": "node tools/smoke.mjs",
-    "bundle": "node tools/package.mjs"
+    "bundle": "node tools/package.mjs",
+    "deploy:fresh": "npm run build && wrangler deploy --config wrangler.fresh.jsonc"
   },
   "devDependencies": {
     "acorn": "^8.15.0",

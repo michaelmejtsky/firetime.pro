@@ -4,7 +4,7 @@ import {Runtime,digest} from '../dist/runtime.mjs';
 import {createCore} from '../dist/core.mjs';
 import schemas from '../src/schema.json' with {type:'json'};
 export function d1(){
- const sqlite=new DatabaseSync(':memory:');sqlite.exec(fs.readFileSync(new URL('../migrations/0001_native.sql',import.meta.url),'utf8'));
+ const sqlite=new DatabaseSync(':memory:');for(const name of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())sqlite.exec(fs.readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
  const api={sqlite,async exec(sql){sqlite.exec(sql);return {count:1,duration:0};},prepare(sql){return {args:[],bind(...args){this.args=args;return this;},async first(){const row=sqlite.prepare(sql).get(...this.args);return row?{...row}:null;},async all(){return {results:sqlite.prepare(sql).all(...this.args).map(x=>({...x})),success:true};},async run(){const result=sqlite.prepare(sql).run(...this.args);return {success:true,meta:{changes:Number(result.changes)}};},sql};},async batch(statements){sqlite.exec('BEGIN IMMEDIATE');try{const results=statements.map(s=>{const stmt=sqlite.prepare(s.sql);let results=[],changes=0;if(stmt.columns().length)results=stmt.all(...s.args).map(x=>({...x}));else changes=Number(stmt.run(...s.args).changes);return {results,success:true,meta:{changes}};});sqlite.exec('COMMIT');return results;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};return api;
 }
 export function r2(){const objects=new Map();return {objects,async put(id,bytes){objects.set(id,new Uint8Array(bytes));},async get(id){const bytes=objects.get(id);return bytes?{arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)}:null;},async delete(id){objects.delete(id);}};}

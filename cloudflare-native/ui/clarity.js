@@ -1,7 +1,7 @@
 // Product redesign layer for the isolated Cloudflare app.
 const FT_CLARITY_OLD={nav,mobileNav,page,action,submit,api,time,staff,reports,leave,availability,rules,settings,ftMessages_,ftLocalPdf,ftTimerPanel_,ftAbsencePanel_,ftCommUpdateLocalTask_,ftStandbySections_,ftActivityPicker_};
 const FT_CLARITY_CACHE=new Map(),FT_CLARITY_PENDING=new Set();
-const FT_CLARITY_READS=new Set(['yearOverview','availabilityOverview','pdfVector','summaryPdf','reportSubmissions']);
+const FT_CLARITY_READS=new Set(['storageStatus','driveStorageTest','yearOverview','availabilityOverview','pdfVector','summaryPdf','reportSubmissions']);
 LABELS.messages='Aufgaben';LABELS.totals='Gesamtstunden';
 const uiHours=n=>ftReportHours_(Number(n)||0)+' h';
 const uiDate=s=>E(ftLeaveDate(String(s||'').slice(0,10)));
@@ -160,6 +160,8 @@ action=async function(button){
  if(act==='ui:person'){ST.uiPerson=id;page();return;}
  if(act==='ui:availabilityMonth'){ST.month=id;ST.availMonth='';ST.uiAvailOpen=true;await load();return;}
  if(act==='ui:reportOpen'){const [uid,month]=id.split('|');ST.selected=uid;ST.month=month;ST.tab='reports';await load();return;}
+ if(act==='ui:driveConnect'){button.disabled=true;try{const result=await api('driveConnect');const url=new URL(result.url);if(url.origin!=='https://accounts.google.com'||url.pathname!=='/o/oauth2/v2/auth')throw Error('Google-Verbindungsadresse ist ungültig.');window.location.assign(url.href);}catch(err){say(err.message,true);if(button.isConnected)button.disabled=false;}return;}
+ if(act==='ui:driveTest'){button.disabled=true;try{const r=await api('driveStorageTest');say('Drive-Ordner erreichbar: '+r.email);}catch(err){say(err.message,true);}finally{if(button.isConnected)button.disabled=false;}return;}
  if(act==='ui:annualPdf'){button.disabled=true;try{await uiDownloadPdf(await api('summaryPdf',{companyId:firm().id,userId:id,year:Number(['totals','leave'].includes(ST.tab)?ST.uiYear||ST.month.slice(0,4):ST.month.slice(0,4)),month:String(['totals','leave'].includes(ST.tab)?ST.uiYear||ST.month.slice(0,4):ST.month.slice(0,4))+ST.month.slice(4)}));}catch(err){say(err.message,true);}finally{if(button.isConnected)button.disabled=false;}return;}
  if(act==='ui:breakReview'){const note=prompt('Pausenabweichung prüfen. Tatsächliche Arbeitszeit bleibt unverändert. Grund / Prüfergebnis:');if(!note)return;await run(async()=>{await api('breakReview',{activityId:id,companyId:firm().id,note});await load();},'Pausenabweichung geprüft.');return;}
 };
@@ -186,3 +188,11 @@ document.addEventListener('toggle',event=>{
 document.addEventListener('change',event=>{const el=event.target;if(el.name==='uiYear'){ST.uiYear=el.value;page();}if(el.form?.id==='uiTimeForm'&&el.name==='start')ftTimeSyncEndDate_(el.form);});
 
 settings=function(){return FT_CLARITY_OLD.settings().replace('Google-Kalender-ID','Hauptkalender-ID für Bereitschaften').replace('Google-Kalender aktivieren','Haupt- und Mitarbeiterkalender aktivieren').replace('<h2>Arbeitszeitmodell</h2>','<h2>Arbeitszeitmodell</h2><p class="ui-note">Persönliche Kalender-IDs stehen in den Mitarbeiter-Stammdaten. Bereitschaften werden in den Hauptkalender und den jeweiligen Mitarbeiterkalender übertragen. Aufgabenfristen erscheinen im persönlichen Kalender. Alle Zielkalender müssen für das Kalender-Servicekonto mit Schreibrecht freigegeben sein.</p>');};
+
+function uiDriveStoragePanel(){
+ if(me()?.role!=='SYSADMIN')return '';
+ return '<section class="card"><h2>Dateiablage · Google Drive</h2>'+uiRemote('storageStatus',{},s=>s.provider!=='drive'?'<p>Die Testkonfiguration verwendet eine andere Dateiablage.</p>':'<p>PDFs, Fotos und Anhänge werden privat im verbundenen Google-Konto gespeichert. Stunden und Mitarbeiter bleiben in Cloudflare.</p>'+uiKpis([['Verbindung',s.connected?'Verbunden':'Noch nicht verbunden'],['Google-Konto',s.email||'Noch nicht konfiguriert']])+(s.configured?'<div class="actions">'+uiButton(s.connected?'Google-Zugriff erneuern':'Google Drive verbinden','driveConnect','',true)+(s.connected?uiButton('Verbindung prüfen','driveTest'):'')+'</div>':'<p class="ui-note">Einmalig in Google Cloud einen OAuth-Web-Client einrichten. Client-ID und Client-Secret in Cloudflare hinterlegen; anschließend hier verbinden.</p>')+(s.folderUrl?'<p><a href="'+E(s.folderUrl)+'" target="_blank" rel="noopener noreferrer">Privaten FireTime-Ordner öffnen</a></p>':'')+uiFold('Adresse für die Google-Einrichtung','<p>Diese Adresse exakt als autorisierte Weiterleitungsadresse beim Google-OAuth-Client hinterlegen:</p><code style="overflow-wrap:anywhere">'+E(s.callbackUrl)+'</code>')+'<p class="ui-caption">Der Ordner wird von FireTime angelegt. Bitte nicht öffentlich freigeben. Zugriff auf Aufgabenanhänge und Berichte wird weiterhin über FireTime geprüft.</p>','uiDriveStorage')+'</section>';
+}
+const UI_STORAGE_OLD_SETTINGS=settings,UI_STORAGE_OLD_CUSTOMERS=customers;
+settings=function(){return uiDriveStoragePanel()+UI_STORAGE_OLD_SETTINGS();};
+customers=function(){return uiDriveStoragePanel()+UI_STORAGE_OLD_CUSTOMERS();};

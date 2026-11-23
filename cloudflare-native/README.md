@@ -1,8 +1,8 @@
 # FireTime Pro – Cloudflare-Umbau
 
-**Stand: 22.11.2026 · Migrationskandidat, noch keine Produktivfreigabe.**
+**Stand: 23.11.2026 · Migrationskandidat, noch keine Produktivfreigabe.**
 
-Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt Sheets, R2 ersetzt die private Dateiablage in Drive. Normale Anmeldung, Stundenberechnung, Zeiterfassung, Urlaub, Planung, Aufgaben und PDFs benötigen kein Apps Script. Die bisherige Oberfläche bleibt im Bestand; die getrennte Cloudflare-Oberfläche erhält die vereinfachte Bedienung. Google Calendar bleibt eine optionale externe Integration über die offizielle REST-API. E-Mails benötigen einen verifizierten Absender bei Resend. Push wird direkt vom Worker zugestellt.
+Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt Sheets. Der neue Neustart verwendet private Dateien in Google Drive über die direkte Drive-API; die bisher vorbereitete R2-Staging-Variante bleibt optional. Normale Anmeldung, Stundenberechnung, Zeiterfassung, Urlaub, Planung, Aufgaben und PDFs benötigen kein Apps Script. Die bisherige Oberfläche bleibt im Bestand; die getrennte Cloudflare-Oberfläche erhält die vereinfachte Bedienung. Google Calendar bleibt eine optionale externe Integration über die offizielle REST-API. E-Mails benötigen einen verifizierten Absender bei Resend. Push wird direkt vom Worker zugestellt.
 
 Die bisherige produktive `config.js`, `index.html`, `cloudflare/worker.js` und `apps-script/Code.gs` werden von diesem Umbau **nicht geändert**. Keine Kundendaten, Passwörter, Exporte oder Cloudflare-Zugangsdaten gehören ins Repository.
 
@@ -10,18 +10,22 @@ Die bisherige produktive `config.js`, `index.html`, `cloudflare/worker.js` und `
 
 Für die neue Einrichtung ohne Datenübernahme gilt **`docs/NEUSTART.md`**. Ein geschützter `/first-start`-Dialog legt das Schema, einen neuen Systemadmin und BSB3100 an. Schlüssel und Passwort werden direkt vor Ort eingegeben. Bestehende Daten werden nicht überschrieben. Der alte FT_PEPPER ist nur bei einer Übernahme alter Passwörter erforderlich; für den Neustart wird ein neuer dauerhafter Schlüssel verwendet.
 
+## Neue Dateiablage ohne R2
+
+Die konkrete neue Instanz verwendet `wrangler.fresh.jsonc`, die bereits angelegte D1-Datenbank und `FILE_STORAGE=drive`. Es ist kein R2-Abo und keine R2-Bindung dafür erforderlich. Die private Google-Verbindung wird nur vom Systemadmin eingerichtet. Einzelheiten und nötige Google-Einstellungen: **`docs/GOOGLE_DRIVE.md`**. Solange Google noch nicht verbunden ist, funktionieren Erststart, Anmeldung und normale Zeitbuchung; Datei-Uploads/-Abrufe benötigen die Freigabe. Die folgenden R2-Migrationsbefehle betreffen nur den alten optionalen Importpfad.
+
 ## Was hier vorbereitet ist
 
-- Vollständiges API-kompatibles Backend aus dem aktuellen, unveränderten Fachkern; 37 übernommene Tabellen plus 3 native Ergänzungen, 91 API-Aktionen.
+- Vollständiges API-kompatibles Backend aus dem aktuellen, unveränderten Fachkern; 37 übernommene Tabellen plus 3 native Ergänzungen, 94 API-Aktionen.
 - Worker-eigene Oberfläche/PWA mit `/api` auf derselben Adresse; die GitHub-Oberfläche kann später ebenfalls auf die neue API zeigen.
 - D1-Indizes für Firma, Benutzer, E-Mail und Monat; Anmeldungen laden nur den betreffenden Benutzer und notwendige Authentifizierungsdaten.
 - Atomare Mehrtabellen-Buchungen mit Versionsprüfung. Gleichzeitige Änderungen werden erneut auf einer frischen Datenbasis berechnet. Anfragekennungen verhindern doppelte Zeitbuchungen bei wiederholten identischen Requests.
 - Bestehende Passwort-Hashes und 30-Tage-Sitzungen können übernommen werden. Der alte `FT_PEPPER` ist zwingend als Secret erforderlich. Keine neue Passwortvergabe notwendig.
 - Mandanten- und Rollenprüfungen aus dem bisherigen System, private Aufgabenzugriffe einschließlich PDF-Anhängen.
-- R2-Dateiprüfsummen, geschützte Downloads, unveränderte importierte Dateien.
+- Prüfsummen und geschützte Downloads für private Dateien; Drive-Uploads mit reservierten IDs und verschlüsselter OAuth-Verbindung. R2 bleibt für alte Migrationstests verfügbar.
 - Dauerhafte Zustellwarteschlange für E-Mail, Push und optionalen Kalender. `QUEUED` bedeutet vorgemerkt; `SENT` erst nach Bestätigung des Empfängerservers.
 - Geprüfte Datenübernahme mit Zellvergleich, Datei-Prüfsummen und Abrechnungsvergleich; optionaler vollständiger Apps-Script-Code mit zunächst inaktiver Umschaltsperre.
-- Getrennter, zugangsgeschützter Testbetrieb. Schreibzugriffe, echte Benachrichtigungen und Automatik sind im ausgelieferten Setup deaktiviert.
+- Getrennter, zugangsgeschützter R2-Testbetrieb mit deaktivierten Schreib-/Zustellflags. Die ausdrücklich separate frische Drive-Konfiguration erlaubt den privaten Erststart und neue Buchungen; Zustellung und Automatik bleiben bis zur Abnahme aus.
 
 ## Neue Bedienung und Kalender
 
@@ -115,7 +119,7 @@ Im Staging werden selbst bei gesetzten Versand-Secrets keine Hintergrundzustellu
 ## Grenzen und ausstehende Abnahme
 
 - Kein Zugriff auf das produktive Cloudflare-Konto, den aktuellen Live-Sheet-Export oder dessen private Dateien war für diese Vorbereitung vorhanden. Es wurde nichts remote angelegt, importiert oder umgeschaltet.
-- Nicht jede der 91 Aktionen wurde einzeln Ende-zu-Ende getestet. Die gleiche vorhandene Fachlogik wird wiederverwendet; die geprüften kritischen Abläufe sind in `docs/ABNAHME.md` festgehalten.
+- Nicht jede der 94 Aktionen wurde einzeln Ende-zu-Ende getestet. Die gleiche vorhandene Fachlogik wird wiederverwendet; die geprüften kritischen Abläufe sind in `docs/ABNAHME.md` festgehalten.
 - Die Darstellung serverseitig erzeugter PDFs ist ein neuer, einfacherer Renderer. Enthaltene Zahlen/Texte bleiben aus dem Fachkern. Firmenlogos werden in diesem serverseitigen Renderer noch nicht eingebettet; die neue Cloudflare-Oberfläche nutzt den Vektor-Renderer für Monats- und Sammelberichte. Importierte PDFs bleiben erhalten. Vor Freigabe Sichtprüfung der mehrseitigen Berichte durchführen.
 - Bestehende Daten werden verlustfrei als Datensätze mit indizierten JSON-Feldern in D1 gespeichert. Außer beim schlanken Login lädt ein Firmenaufruf zunächst den Firmenbestand; eine spätere fachweise SQL-Normalisierung ist möglich. Bei großen Datenmengen müssen reale Ladezeiten/CPU und Speicherverbrauch gemessen werden.
 - Globale Versionsprüfung ist bewusst konservativ: viele gleichzeitig schreibende Firmen können Konflikte erzeugen. Unter Last vor einer Freigabe prüfen.

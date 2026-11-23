@@ -1,3 +1,4 @@
+import {hasFileStorage,driveStatus,startDriveConnect,finishDriveConnect,testDriveConnection} from './drive.mjs';
 import {initializeFresh,firstStartPage} from './first-start.mjs';
 import {createCore} from './core.mjs';
 import {Runtime,digest} from './runtime.mjs';
@@ -5,7 +6,7 @@ import {loadSnapshot,commit,Conflict,readReceipt,statement} from './store.mjs';
 import {prepareCalendars,drainOutbox} from './effects.mjs';
 import contract from './contract.json' with {type:'json'};
 const TYPES=new Set(['login','activate','resetRequest','resetConfirm','logout','password','brand','api','pushInfo']);
-const READS=new Set(['home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
+const READS=new Set(['storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
 function allowedOrigin(request,env){const origin=request.headers.get('Origin')||'';const self=new URL(request.url).origin;const allowed=new Set([self,...String(env.PUBLIC_ORIGINS||'').split(',').map(x=>x.trim()).filter(x=>/^https:\/\//.test(x))]);return allowed.has(origin)?origin:origin?'':self;}
 function headers(origin){return {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Request-Id, X-FireTime-Staging-Key','Vary':'Origin'};}
 function json(value,status=200,origin=''){return new Response(JSON.stringify(value),{status,headers:headers(origin)});}
@@ -13,9 +14,9 @@ const secureEqual=(a,b)=>digest(String(a))===digest(String(b));
 function stagingAllowed(request,env){if(env.MIGRATION_MODE==='production')return true;const key=String(env.STAGING_ACCESS_KEY||'');if(key.length<32)return false;const cookie=request.headers.get('Cookie')||'';return secureEqual(request.headers.get('X-FireTime-Staging-Key')||'',key)||cookie.split(';').some(x=>x.trim()==='ft_staging='+digest(key+'|firetime-preview'));}
 async function body(request){if(Number(request.headers.get('Content-Length')||0)>16000000)throw Object.assign(Error('Anfrage zu groß.'),{status:413});const reader=request.body?.getReader();let length=0;const chunks=[];if(!reader)throw Error('Leere Anfrage.');while(true){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>16000000){await reader.cancel();throw Object.assign(Error('Anfrage zu groß.'),{status:413});}chunks.push(value);}const bytes=new Uint8Array(length);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}return JSON.parse(new TextDecoder().decode(bytes));}
 function validate(input){if(!input||typeof input!=='object'||!TYPES.has(input.type))throw Error('Ungültige Anfrage.');if(input.type==='api'&&(!contract.actions.includes(input.action)||input.data&&typeof input.data!=='object'))throw Error('Unbekannte API-Aktion.');if(['login','activate','resetConfirm','password'].includes(input.type)&&JSON.stringify(input).length>2000)throw Error('Anfrage zu groß.');}
-export async function execute(env,input,requestId=''){
+export async function execute(env,input,requestId='',requestOrigin=''){
  if(env.MIGRATION_MODE==='production'&&env.CUTOVER_CONFIRMED!=='true')throw Object.assign(Error('Produktivumschaltung wurde noch nicht freigegeben.'),{status:503});
- if(!env.DB||!env.FILES)throw Object.assign(Error('Cloudflare-Datenbank oder Dateiablage fehlt.'),{status:503});
+ if(!env.DB||!hasFileStorage(env))throw Object.assign(Error('Cloudflare-Datenbank oder Dateiablage fehlt.'),{status:503});
  if(!env.FT_PEPPER&&['login','activate','password','resetConfirm'].includes(input.type))throw Object.assign(Error('Passwortkonfiguration fehlt. FT_PEPPER als Worker-Secret einrichten.'),{status:503});
  const logicalWrite=input.type==='api'?!READS.has(input.action):!['brand','pushInfo'].includes(input.type);
  if(logicalWrite&&env.WRITE_ENABLED!=='true')throw Object.assign(Error('Testsystem ist schreibgeschützt. Datenübernahme und Freigabe fehlen noch.'),{status:503});
@@ -35,7 +36,13 @@ export async function execute(env,input,requestId=''){
     case 'logout':value=core.ft_logout(input.token);break;
     case 'password':value=core.ft_changePassword(input.token,input.current,input.next);break;
     case 'brand':value=core.ft_brandForLogin(input.slug);break;
-    case 'api':value=core.ft_api(input.token,input.action,input.data||{});break;
+    case 'api':
+     if(['storageStatus','driveStorageTest','driveConnect'].includes(input.action)){
+      const actor=core.ft_auth_(input.token);if(actor.role!=='SYSADMIN')throw Object.assign(Error('Nur der Systemadmin darf die Dateiablage verwalten.'),{status:403});
+      if(input.action==='storageStatus')value=await driveStatus(env,requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid');
+      if(input.action==='driveStorageTest')value=await testDriveConnection(env);
+      if(input.action==='driveConnect')value=await startDriveConnect(env,actor,digest(input.token),requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid');
+     }else value=core.ft_api(input.token,input.action,input.data||{});break;
    }
   }catch(err){
    try{await commit(env,snapshot,runtime,{failure:true});}catch(conflict){if(conflict instanceof Conflict&&attempt<2)continue;throw conflict;}
@@ -66,10 +73,16 @@ export default {
    if(request.method!=='POST')return json({ok:false,error:'Nur POST erlaubt.'},405,origin);
    if(request.headers.get('Origin')!==url.origin)return json({ok:false,error:'Einrichtung nur auf derselben Adresse möglich.'},403,origin);
    if(!String(request.headers.get('Content-Type')||'').startsWith('application/json'))return json({ok:false,error:'JSON erforderlich.'},415,origin);
-   try{const p=await body(request);if(JSON.stringify(p).length>4000)throw Object.assign(Error('Eingabe zu lang.'),{status:413});return json({ok:true,data:await initializeFresh(env,p)},200,origin);}
+   try{const p=await body(request);if(JSON.stringify(p).length>4000)throw Object.assign(Error('Eingabe zu lang.'),{status:413});return json({ok:true,data:await initializeFresh(env,{...p,publicUrl:url.origin+'/'})},200,origin);}
    catch(err){const error=/D1_|SQLITE_|constraint/.test(String(err.message))?'Datenbankeinrichtung fehlgeschlagen. Konfiguration prüfen.':String(err.message||'Einrichtung fehlgeschlagen.').slice(0,250);return json({ok:false,error},err.status||400,origin);}
   }
-  if(path==='/health')return json({ok:true,version:contract.version,mode:env.MIGRATION_MODE||'staging',databaseConfigured:Boolean(env.DB),filesConfigured:Boolean(env.FILES),writes:env.WRITE_ENABLED==='true'},200,origin);
+  if(path==='/drive-callback'){
+   const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
+   if(request.method!=='GET')return new Response('Nur GET erlaubt.',{status:405,headers:secureHeaders});
+   try{await finishDriveConnect(env,url);return new Response(null,{status:303,headers:{...secureHeaders,Location:'/?tab=settings&drive=connected'}});}
+   catch(err){return new Response(String(err.message||'Drive-Verbindung fehlgeschlagen.').slice(0,250),{status:err.status||400,headers:{...secureHeaders,'Content-Type':'text/plain; charset=utf-8'}});}
+  }
+  if(path==='/health')return json({ok:true,version:contract.version,mode:env.MIGRATION_MODE||'staging',databaseConfigured:Boolean(env.DB),fileStorage:env.FILE_STORAGE||'r2',filesConfigured:env.FILE_STORAGE==='drive'?Boolean(env.GOOGLE_DRIVE_CLIENT_ID&&env.GOOGLE_DRIVE_CLIENT_SECRET):Boolean(env.FILES),writes:env.WRITE_ENABLED==='true'},200,origin);
   if(path==='/staging-access'&&request.method==='POST'){
    if(!origin)return json({ok:false,error:'Origin nicht erlaubt.'},403,'');
    const form=await request.formData(),key=String(env.STAGING_ACCESS_KEY||'');
@@ -94,7 +107,7 @@ export default {
    if(input.type==='pushInfo')return json({ok:true,data:{configured:env.PUSH_ENABLED==='true'&&Boolean(env.VAPID_PUBLIC_KEY)&&Boolean(env.VAPID_PRIVATE_JWK),publicKey:env.PUSH_ENABLED==='true'?env.VAPID_PUBLIC_KEY||'':'',origin}},200,origin);
    const id=request.headers.get('X-Request-Id')||'';
    if(id&&!/^[a-zA-Z0-9_-]{12,100}$/.test(id))throw Error('Ungültige Anfragekennung.');
-   const result=await execute(env,input,id);
+   const result=await execute(env,input,id,url.origin);
    if(env.MIGRATION_MODE==='production'&&env.AUTOMATION_ENABLED==='true')ctx.waitUntil(drainOutbox(env));
    return json(result,200,origin);
   }catch(err){
@@ -108,11 +121,14 @@ export default {
  async scheduled(controller,env,ctx){
   if(env.AUTOMATION_ENABLED!=='true'||env.WRITE_ENABLED!=='true'||env.MIGRATION_MODE!=='production'||env.CUTOVER_CONFIRMED!=='true')return;
   ctx.waitUntil((async()=>{
-   for(let attempt=0;attempt<3;attempt++){
-    const snapshot=await loadSnapshot(env,{},{system:true}),runtime=new Runtime(snapshot),core=createCore(runtime);
-    core.ft_timerTick_();core.ft_tick();core.ft_pdfWorker_();
-    try{await commit(env,snapshot,runtime);break;}catch(err){if(!(err instanceof Conflict)||attempt===2)throw err;}
-   }
+   // File-provider failures must not roll back the clock or reminder bookkeeping.
+   for(const task of ['ft_timerTick_','ft_tick','ft_pdfWorker_'])try{
+    for(let attempt=0;attempt<3;attempt++){
+     const snapshot=await loadSnapshot(env,{},{system:true}),runtime=new Runtime(snapshot),core=createCore(runtime);
+     core[task]();
+     try{await commit(env,snapshot,runtime);break;}catch(err){if(!(err instanceof Conflict)||attempt===2)throw err;}
+    }
+   }catch(err){console.warn('firetime-scheduled',{task,status:err.status||500});}
    await drainOutbox(env);
    await env.DB.batch([statement(env.DB,'DELETE FROM cache WHERE expires_at<?',Date.now()),statement(env.DB,'DELETE FROM request_receipts WHERE expires_at<?',Date.now())]);
   })());

@@ -1,6 +1,5 @@
-// Neue leere Instanz. Separater Worker; ersetzt den bisherigen Testbetrieb nicht.
-// R2-Bucket firetime-pro-files muss im selben Konto vorhanden sein.
-// FT_PEPPER und FIRST_START_KEY nur als Secrets setzen.
+// Neue Instanz mit Cloudflare D1 und privater Google-Drive-Dateiablage.
+// Kein R2-Bucket erforderlich. Secrets nur direkt in Cloudflare setzen.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "firetime-pro-neu",
@@ -24,12 +23,6 @@
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [
-    {
-      "binding": "FILES",
-      "bucket_name": "firetime-pro-files"
-    }
-  ],
   "vars": {
     "MIGRATION_MODE": "production",
     "WRITE_ENABLED": "true",
@@ -39,7 +32,9 @@
     "MAIL_ENABLED": "false",
     "PUSH_ENABLED": "false",
     "CALENDAR_ENABLED": "false",
-    "AUTOMATION_ENABLED": "false"
+    "AUTOMATION_ENABLED": "false",
+    "FILE_STORAGE": "drive",
+    "GOOGLE_DRIVE_ACCOUNT": "firetime.pro@gmail.com"
   },
   "observability": {
     "enabled": true,
@@ -47,5 +42,10 @@
   },
   "limits": {
     "cpu_ms": 1000
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
   }
 }

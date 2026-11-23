@@ -1,3 +1,4 @@
+import {hasFileStorage} from './drive.mjs';
 import {createCore} from './core.mjs';
 import {Runtime,digest} from './runtime.mjs';
 import {loadSnapshot,commit,statement,Conflict} from './store.mjs';
@@ -7,22 +8,22 @@ export async function initializeFresh(env,p){
  if(env.FIRST_START_ENABLED!=='true')throw fail('Ersteinrichtung ist deaktiviert.',404);
  const key=String(env.FIRST_START_KEY||'');
  if(key.length<32||digest(p.key||'')!==digest(key))throw fail('Einrichtungsschlüssel ungültig.',403);
- if(!env.DB||!env.FILES||String(env.FT_PEPPER||'').length<32)throw fail('Datenbank, Dateiablage oder Passwortschlüssel fehlen.',503);
+ if(!env.DB||!hasFileStorage(env)||String(env.FT_PEPPER||'').length<32)throw fail('Datenbank, Dateiablage oder Passwortschlüssel fehlen.',503);
  if(env.WRITE_ENABLED!=='true')throw fail('Schreibzugriff ist noch nicht aktiviert.',503);
  if(env.MIGRATION_MODE==='production'&&env.CUTOVER_CONFIRMED!=='true')throw fail('Neustart wurde noch nicht freigegeben.',503);
  const email=String(p.email||'').trim().toLowerCase(),password=String(p.password||'');
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>200)throw fail('Gültige E-Mail-Adresse eingeben.');
  if(password.length<14||password.length>200||password!==p.confirm)throw fail('Passwörter müssen übereinstimmen und 14 bis 200 Zeichen lang sein.');
- const known=new Set(['records','metadata','commit_guards','cache','objects','properties','outbox','request_receipts','migrations','d1_migrations']);
+ const known=new Set(['records','metadata','commit_guards','cache','objects','properties','outbox','request_receipts','migrations','d1_migrations','integrations','oauth_states','file_locations']);
  const tables=(await statement(env.DB,"SELECT name FROM sqlite_master WHERE type='table'").all()).results.map(r=>r.name);
  if(tables.some(name=>!known.has(name)&&!name.startsWith('sqlite_')&&!name.startsWith('_cf_')))throw fail('Diese Datenbank gehört bereits zu einem anderen System.',409);
- for(const name of ['records','objects','properties','outbox','migrations'])if(tables.includes(name)&&await statement(env.DB,'SELECT 1 AS present FROM '+name+' LIMIT 1').first())throw fail('Datenbank enthält bereits Daten. Ersteinrichtung bleibt gesperrt.',409);
+ for(const name of ['records','objects','properties','outbox','migrations','integrations','file_locations'])if(tables.includes(name)&&await statement(env.DB,'SELECT 1 AS present FROM '+name+' LIMIT 1').first())throw fail('Datenbank enthält bereits Daten. Ersteinrichtung bleibt gesperrt.',409);
  // DDL is idempotent and is reached only after the private key and inputs passed.
  await env.DB.exec(schemaSql.replace(/--[^\n]*/g,'').replace(/\n/g,' '));
  const snapshot=await loadSnapshot(env,{},{system:true});
  if(snapshot.records.length||snapshot.properties.length)throw fail('System wurde bereits eingerichtet.',409);
  const runtime=new Runtime(snapshot),core=createCore(runtime);
- const result=core.ft_nativeInitialize_({email,password});
+ const result=core.ft_nativeInitialize_({email,password,publicUrl:p.publicUrl});
  try{await commit(env,snapshot,runtime);}catch(err){if(err instanceof Conflict)throw fail('Einrichtung wurde gleichzeitig abgeschlossen. Bitte anmelden.',409);throw err;}
  return result;
 }

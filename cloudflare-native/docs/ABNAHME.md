@@ -1,13 +1,15 @@
 # Abnahme – Cloudflare-Migrationskandidat
 
-Stand 22.11.2026. Keine Produktivfreigabe, kein Echtkundendatenimport.
+Stand 23.11.2026. Keine Produktivfreigabe, kein Echtkundendatenimport.
 
 ## Bereits lokal nachgewiesen
 
 | Prüfung | Ergebnis | Aussagegrenze |
 |---|---|---|
 | 130 bestehende Regressionstests | Bestanden | Bisheriger Quellstand, keine Google-Live-Ausführung |
-| 42 native Tests mit SQLite und D1-kompatiblem Adapter | Bestanden | Synthetische Daten, keine echte Mandantendatenbank |
+| 51 native Tests mit SQLite und D1-kompatiblem Adapter | Bestanden | Synthetische Daten, keine echte Mandantendatenbank |
+| Drive-Dateiablage | Foto-/PDF-Rundlauf, Zugriffsgrenzen, Prüfsummen, Wiederholungen, Papierkorb bei Rollback, verschlüsselte OAuth-Zustände und unabhängiger Zeit-Autostopp bei Drive-Ausfall geprüft | Google-Antworten simuliert; echte Freigabe und Dateiübertragung noch offen |
+| Neustart ohne R2 | Echter lokaler workerd: leere D1, Systemadmin-Login und Drive-Status vor Google-Verbindung | Kein Remote-Deploy |
 | workerd mit tatsächlichen lokalen D1/R2-Bindings | Bestanden | Login, Session, Shell, Zeitbuchung, PDF-Upload/Download, Health |
 | Wrangler deploy --dry-run | Bestanden | Worker lässt sich paketieren; keine Veröffentlichung |
 | Passwortvergleich, Unicode einschließlich Umlaut/Emoji | Identisch zum bisherigen Algorithmus | Alter produktiver FT_PEPPER muss sicher übernommen werden |
