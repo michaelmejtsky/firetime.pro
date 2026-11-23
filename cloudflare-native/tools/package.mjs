@@ -4,7 +4,7 @@ import {build} from 'esbuild';
 const root=path.resolve(import.meta.dirname,'..'),release=path.join(root,'dist/release');fs.mkdirSync(release,{recursive:true});
 await build({entryPoints:[path.join(root,'dist/worker.js')],outfile:path.join(release,'FireTime_Cloudflare_Worker.js'),bundle:true,format:'esm',platform:'browser',target:'es2022',external:['node:*'],minify:false,logLevel:'info'});
 fs.cpSync(path.join(root,'dist/public'),path.join(release,'public'),{recursive:true});
-for(const [source,target] of [['tools/FireTime_Cloudflare_Export.gs','FireTime_Cloudflare_Export.gs'],['dist/Code_Freeze_Vorbereitung.gs','Code_Freeze_Vorbereitung.gs'],['migrations/0001_native.sql','D1_Schema.sql'],['README.md','START_HIER.md'],['docs/ABNAHME.md','ABNAHME.md'],['docs/UMSCHALTUNG.md','UMSCHALTUNG.md']])fs.copyFileSync(path.join(root,source),path.join(release,target));
+for(const [source,target] of [['tools/FireTime_Cloudflare_Export.gs','FireTime_Cloudflare_Export.gs'],['dist/Code_Freeze_Vorbereitung.gs','Code_Freeze_Vorbereitung.gs'],['migrations/0001_native.sql','D1_Schema.sql'],['README.md','START_HIER.md'],['docs/ABNAHME.md','ABNAHME.md'],['docs/UMSCHALTUNG.md','UMSCHALTUNG.md'],['docs/NEUSTART.md','NEUSTART.md']])fs.copyFileSync(path.join(root,source),path.join(release,target));
 console.log('Worker, Oberfläche, Exportscript, optionale Freeze-Code.gs und Anleitungen unter dist/release erstellt. Keine Kundendaten/Secrets enthalten.');
 
 const repo=path.resolve(root,'..'),source=path.join(release,'source');

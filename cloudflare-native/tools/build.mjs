@@ -54,13 +54,14 @@ for(const name of Object.keys(overrides))if(!names.includes(name))throw Error('M
 let native=source;
 for(const node of [...ast.body].reverse())if(node.type==='FunctionDeclaration'&&(overrides[node.id.name]||nativeAliases.has(node.id.name))){const replacement=nativeAliases.has(node.id.name)?source.slice(node.start,node.end).replace('function '+node.id.name+'(', 'function ft_legacy_'+node.id.name.slice(3)+'('):overrides[node.id.name];native=native.slice(0,node.start)+replacement+native.slice(node.end);}
 native=native.replace("  case 'adminOverview':return ft_adminOverview_(u,p);\n  case 'adminOverview':return ft_adminOverview_(u,p);","  case 'adminOverview':return ft_adminOverview_(u,p);");
-const exports=['ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
+const exports=['ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
 const globals='Utilities,PropertiesService,CacheService,SpreadsheetApp,DriveApp,CalendarApp,MailApp,DocumentApp,ScriptApp,LockService,UrlFetchApp,Logger,MimeType,ContentService,Date';
 const domain=fs.readFileSync(path.join(root,'src/domain.js'),'utf8');
 const generated=`// GENERATED from apps-script/Code.gs. Run npm run build. No runtime eval.\nexport function createCore(runtime){\nconst {${globals}}=runtime.globals;\n${native}\nconst FT_NATIVE_PREF_COLS=runtime.schema.EmployeePreferences,FT_NATIVE_BREAK_COLS=runtime.schema.ActivityBreakPolicies;\n${domain}\nreturn {${exports.join(',')},headers:FT_HEADERS};\n}\n`;
 fs.mkdirSync(path.join(root,'dist/public'),{recursive:true});
 fs.writeFileSync(path.join(root,'src/schema.json'),JSON.stringify(schemas,null,2)+'\n');
 fs.writeFileSync(path.join(root,'dist/core.mjs'),generated);
+fs.writeFileSync(path.join(root,'dist/first-start-schema.mjs'),'export default '+JSON.stringify(fs.readFileSync(path.join(root,'migrations/0001_native.sql'),'utf8'))+';\n');
 const gateway=fs.readFileSync(path.join(repo,'cloudflare/worker.js'),'utf8');
 fs.writeFileSync(path.join(root,'dist/push.mjs'),gateway.slice(gateway.indexOf('const PUSH_MAX_BATCH'),gateway.indexOf('async function pushInternal')).replace("kind:notification.kind||'MESSAGE'","kind:notification.kind||'MESSAGE',...(Number.isSafeInteger(notification.unreadCount)?{unreadCount:notification.unreadCount}:{})")+'\nexport {pushOne,pushConfigured};\n');
 for(const file of fs.readdirSync(path.join(root,'src')))fs.copyFileSync(path.join(root,'src',file),path.join(root,'dist',file));

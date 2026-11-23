@@ -6,6 +6,10 @@ Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt S
 
 Die bisherige produktive `config.js`, `index.html`, `cloudflare/worker.js` und `apps-script/Code.gs` werden von diesem Umbau **nicht geändert**. Keine Kundendaten, Passwörter, Exporte oder Cloudflare-Zugangsdaten gehören ins Repository.
 
+## Frischer Neustart ohne Alt-Testdaten
+
+Für die neue Einrichtung ohne Datenübernahme gilt **`docs/NEUSTART.md`**. Ein geschützter `/first-start`-Dialog legt das Schema, einen neuen Systemadmin und BSB3100 an. Schlüssel und Passwort werden direkt vor Ort eingegeben. Bestehende Daten werden nicht überschrieben. Der alte FT_PEPPER ist nur bei einer Übernahme alter Passwörter erforderlich; für den Neustart wird ein neuer dauerhafter Schlüssel verwendet.
+
 ## Was hier vorbereitet ist
 
 - Vollständiges API-kompatibles Backend aus dem aktuellen, unveränderten Fachkern; 37 übernommene Tabellen plus 3 native Ergänzungen, 91 API-Aktionen.

@@ -20,3 +20,11 @@ try{
  const health=await mf.dispatchFetch('https://preview.test/health');assert.equal((await health.json()).mode,'staging');
  console.log('PASS: real workerd + D1 + R2: login, shell, activity, PDF upload/download, health. No remote deployment.');
 }finally{await mf.dispose();env.DB.sqlite.close();}
+
+const firstStartKey='synthetic-first-start-key-not-for-production';
+const fresh=new Miniflare({modules:[{type:'ESModule',path:'worker.js',contents:bundle.outputFiles[0].text}],compatibilityDate:'2025-11-17',compatibilityFlags:['nodejs_compat'],bindings:{...vars,FT_PEPPER:'synthetic-new-pepper-not-for-production',FIRST_START_ENABLED:'true',FIRST_START_KEY:firstStartKey},d1Databases:['DB'],r2Buckets:['FILES']});
+try{
+ const response=await fresh.dispatchFetch('https://fresh.test/first-start',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://fresh.test'},body:JSON.stringify({key:firstStartKey,email:'admin@example.test',password:'new-synthetic-password',confirm:'new-synthetic-password'})});const result=await response.json();assert.equal(response.status,200,JSON.stringify(result));
+ const login=await fresh.dispatchFetch('https://fresh.test/api',{method:'POST',headers:{'Content-Type':'application/json','X-FireTime-Staging-Key':vars.STAGING_ACCESS_KEY},body:JSON.stringify({type:'login',email:'admin@example.test',password:'new-synthetic-password'})});assert.equal(login.status,200,await login.text());
+ console.log('PASS: real workerd + initially empty D1: private first start, schema creation, BSB3100 and fresh system-admin login.');
+}finally{await fresh.dispose();}

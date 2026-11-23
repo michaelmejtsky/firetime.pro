@@ -1,3 +1,4 @@
+import {initializeFresh,firstStartPage} from './first-start.mjs';
 import {createCore} from './core.mjs';
 import {Runtime,digest} from './runtime.mjs';
 import {loadSnapshot,commit,Conflict,readReceipt,statement} from './store.mjs';
@@ -15,7 +16,7 @@ function validate(input){if(!input||typeof input!=='object'||!TYPES.has(input.ty
 export async function execute(env,input,requestId=''){
  if(env.MIGRATION_MODE==='production'&&env.CUTOVER_CONFIRMED!=='true')throw Object.assign(Error('Produktivumschaltung wurde noch nicht freigegeben.'),{status:503});
  if(!env.DB||!env.FILES)throw Object.assign(Error('Cloudflare-Datenbank oder Dateiablage fehlt.'),{status:503});
- if(!env.FT_PEPPER&&['login','activate','password','resetConfirm'].includes(input.type))throw Object.assign(Error('Passwortkonfiguration fehlt. Bestehenden FT_PEPPER sicher übernehmen.'),{status:503});
+ if(!env.FT_PEPPER&&['login','activate','password','resetConfirm'].includes(input.type))throw Object.assign(Error('Passwortkonfiguration fehlt. FT_PEPPER als Worker-Secret einrichten.'),{status:503});
  const logicalWrite=input.type==='api'?!READS.has(input.action):!['brand','pushInfo'].includes(input.type);
  if(logicalWrite&&env.WRITE_ENABLED!=='true')throw Object.assign(Error('Testsystem ist schreibgeschützt. Datenübernahme und Freigabe fehlen noch.'),{status:503});
  const requestHash=digest(JSON.stringify(input));
@@ -59,6 +60,15 @@ export async function execute(env,input,requestId=''){
 export default {
  async fetch(request,env,ctx){
   const url=new URL(request.url),origin=allowedOrigin(request,env),path=url.pathname.replace(/^\/firetime\.pro(?=\/)/,'');
+  if(path==='/first-start'){
+   if(env.FIRST_START_ENABLED!=='true')return json({ok:false,error:'Ersteinrichtung ist deaktiviert.'},404,origin);
+   if(request.method==='GET')return firstStartPage();
+   if(request.method!=='POST')return json({ok:false,error:'Nur POST erlaubt.'},405,origin);
+   if(request.headers.get('Origin')!==url.origin)return json({ok:false,error:'Einrichtung nur auf derselben Adresse möglich.'},403,origin);
+   if(!String(request.headers.get('Content-Type')||'').startsWith('application/json'))return json({ok:false,error:'JSON erforderlich.'},415,origin);
+   try{const p=await body(request);if(JSON.stringify(p).length>4000)throw Object.assign(Error('Eingabe zu lang.'),{status:413});return json({ok:true,data:await initializeFresh(env,p)},200,origin);}
+   catch(err){const error=/D1_|SQLITE_|constraint/.test(String(err.message))?'Datenbankeinrichtung fehlgeschlagen. Konfiguration prüfen.':String(err.message||'Einrichtung fehlgeschlagen.').slice(0,250);return json({ok:false,error},err.status||400,origin);}
+  }
   if(path==='/health')return json({ok:true,version:contract.version,mode:env.MIGRATION_MODE||'staging',databaseConfigured:Boolean(env.DB),filesConfigured:Boolean(env.FILES),writes:env.WRITE_ENABLED==='true'},200,origin);
   if(path==='/staging-access'&&request.method==='POST'){
    if(!origin)return json({ok:false,error:'Origin nicht erlaubt.'},403,'');

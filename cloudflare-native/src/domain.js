@@ -223,3 +223,15 @@ function ft_personalCalendarSync_(actor,company){
  return {queued};
 }
 function ft_tick(){const result=ft_legacy_tick();if(runtime.env.CALENDAR_ENABLED==='true')for(const c of ft_get_('Companies').filter(x=>ft_bool_(x.active)))ft_personalCalendarSync_({id:'SYSTEM',role:'SYSADMIN'},c);return result;}
+
+function ft_nativeInitialize_(p){
+ if(ft_get_('Users').length||ft_get_('Companies').length||runtime.properties.has('FT_NATIVE_INITIALIZED'))throw Error('System ist bereits eingerichtet.');
+ const salt=ft_rand_(),admin={id:ft_uuid_(),companyId:'',role:'SYSADMIN',name:'Michael Mejtsky',email:ft_email_(p.email),status:'ACTIVE',passwordHash:ft_password_(p.password,salt),salt,monthlyHours:0,hourlyRate:0,leaveEntitlement:0,leaveBalance:0,openingHours:0,startDate:'',workdays:'1,2,3,4,5',mustChange:false,createdAt:ft_now_()};
+ ft_add_('Users',admin);
+ const company=ft_companyCreate_(admin,{name:'BSB3100',slug:'bsb3100',color:'#ff784f'});
+ ft_licenseSave_(admin,{companyId:company.id,modules:['TIME','REPORTS','LEAVE','WORKPLAN','STANDBY','AVAILABILITY','CALENDAR']});
+ ft_profileSave_(admin,{companyId:company.id,workModel:'FLEX',workStart:'08:00',workHours:8,workdays:'1,2,3,4,5',standbyStart:'07:00',standbyHours:24,secondaryColor:'#19354d',welcomeText:''});
+ PropertiesService.getScriptProperties().setProperty('FT_NATIVE_INITIALIZED',ft_now_());
+ ft_audit_(admin,'NATIVE_FIRST_START','Users',admin.id,{}, {email:admin.email,companyId:company.id});
+ return {email:admin.email,companyId:company.id,initialized:true};
+}

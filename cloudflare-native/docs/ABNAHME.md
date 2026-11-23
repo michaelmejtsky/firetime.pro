@@ -7,7 +7,7 @@ Stand 22.11.2026. Keine Produktivfreigabe, kein Echtkundendatenimport.
 | Prüfung | Ergebnis | Aussagegrenze |
 |---|---|---|
 | 130 bestehende Regressionstests | Bestanden | Bisheriger Quellstand, keine Google-Live-Ausführung |
-| 38 native Tests mit SQLite und D1-kompatiblem Adapter | Bestanden | Synthetische Daten, keine echte Mandantendatenbank |
+| 42 native Tests mit SQLite und D1-kompatiblem Adapter | Bestanden | Synthetische Daten, keine echte Mandantendatenbank |
 | workerd mit tatsächlichen lokalen D1/R2-Bindings | Bestanden | Login, Session, Shell, Zeitbuchung, PDF-Upload/Download, Health |
 | Wrangler deploy --dry-run | Bestanden | Worker lässt sich paketieren; keine Veröffentlichung |
 | Passwortvergleich, Unicode einschließlich Umlaut/Emoji | Identisch zum bisherigen Algorithmus | Alter produktiver FT_PEPPER muss sicher übernommen werden |
@@ -22,6 +22,7 @@ Stand 22.11.2026. Keine Produktivfreigabe, kein Echtkundendatenimport.
 | Unbekanntes Schema / fehlende Datei / falscher Snapshot-Hash | Importprüfung bricht ab | Fehlende historische Dateien müssen vor Umschaltung geklärt werden |
 | E-Mail-Outbox | Erst QUEUED, nach Providerannahme SENT; Fehler führen zu Retry | Resend im Test simuliert, kein echter Versand |
 | 19-Uhr-Autostopp und Hintergrund-PDF | Bestanden | Tatsächliche Pause erhalten; Monats-PDF-Job endet READY |
+| Frischer Erststart | Schema aus leerer D1, privater Schlüssel, Erstlogin, vorhandene Daten abgewiesen, paralleler Erststart verhindert | Neue Cloudflare-Instanz und selbst gewähltes Nutzerpasswort noch einzurichten |
 | Aufgabenabläufe und Mehrfachzuordnung | Aufgabenfilter, unabhängige Mitarbeiterzustände, Rückgabe und erneute Durchführung geprüft | Alt-Nachrichten bleiben gespeichert, im neuen Workflow unsichtbar |
 | Automatische Pause | >6h, tatsächliche Bestätigung, vorhandene Pausen zählen, Abweichungsprüfung ohne erfundenen Abzug | Reale Mitarbeiterfälle zusätzlich abnehmen |
 | Jahres-/Urlaubskonto und Abgabematrix | Firmengrenzen, Mitarbeiterrechte, Jahreswechsel, freiwillige Stundenbasis geprüft | Keine reale Saldenprüfung |
