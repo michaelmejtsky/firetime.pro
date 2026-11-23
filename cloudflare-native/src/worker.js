@@ -1,3 +1,4 @@
+import {calendarAccountStatus,startCalendarConnect,finishCalendarConnect,calendarList,verifyCalendarSelection} from './calendar-oauth.mjs';
 import {hasFileStorage,driveStatus,startDriveConnect,finishDriveConnect,testDriveConnection} from './drive.mjs';
 import {initializeFresh,firstStartPage} from './first-start.mjs';
 import {createCore} from './core.mjs';
@@ -6,7 +7,7 @@ import {loadSnapshot,commit,Conflict,readReceipt,statement} from './store.mjs';
 import {prepareCalendars,drainOutbox} from './effects.mjs';
 import contract from './contract.json' with {type:'json'};
 const TYPES=new Set(['login','activate','resetRequest','resetConfirm','logout','password','brand','api','pushInfo']);
-const READS=new Set(['storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
+const READS=new Set(['calendarAccountStatus','calendarList','calendarSelectionTest','storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
 function allowedOrigin(request,env){const origin=request.headers.get('Origin')||'';const self=new URL(request.url).origin;const allowed=new Set([self,...String(env.PUBLIC_ORIGINS||'').split(',').map(x=>x.trim()).filter(x=>/^https:\/\//.test(x))]);return allowed.has(origin)?origin:origin?'':self;}
 function headers(origin){return {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Request-Id, X-FireTime-Staging-Key','Vary':'Origin'};}
 function json(value,status=200,origin=''){return new Response(JSON.stringify(value),{status,headers:headers(origin)});}
@@ -37,7 +38,13 @@ export async function execute(env,input,requestId='',requestOrigin=''){
     case 'password':value=core.ft_changePassword(input.token,input.current,input.next);break;
     case 'brand':value=core.ft_brandForLogin(input.slug);break;
     case 'api':
-     if(['storageStatus','driveStorageTest','driveConnect'].includes(input.action)){
+     if(['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest'].includes(input.action)){
+      const actor=core.ft_auth_(input.token),p=input.data||{},origin=requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid';
+      if(input.action==='calendarAccountStatus')value=await calendarAccountStatus(env,snapshot,p,origin);
+      if(input.action==='calendarConnect')value=await startCalendarConnect(env,snapshot,p,digest(input.token),origin);
+      if(input.action==='calendarList')value=await calendarList(env,snapshot,p);
+      if(['calendarSave','calendarSelectionTest'].includes(input.action)){const checked=await verifyCalendarSelection(env,snapshot,p);value=input.action==='calendarSave'?core.ft_calendarSelectionSave_(actor,checked):{writable:true,calendarId:checked.calendarId};}
+     }else if(['storageStatus','driveStorageTest','driveConnect'].includes(input.action)){
       const actor=core.ft_auth_(input.token);if(actor.role!=='SYSADMIN')throw Object.assign(Error('Nur der Systemadmin darf die Dateiablage verwalten.'),{status:403});
       if(input.action==='storageStatus')value=await driveStatus(env,requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid');
       if(input.action==='driveStorageTest')value=await testDriveConnection(env);
@@ -76,6 +83,12 @@ export default {
    try{const p=await body(request);if(JSON.stringify(p).length>4000)throw Object.assign(Error('Eingabe zu lang.'),{status:413});return json({ok:true,data:await initializeFresh(env,{...p,publicUrl:url.origin+'/'})},200,origin);}
    catch(err){const error=/D1_|SQLITE_|constraint/.test(String(err.message))?'Datenbankeinrichtung fehlgeschlagen. Konfiguration prüfen.':String(err.message||'Einrichtung fehlgeschlagen.').slice(0,250);return json({ok:false,error},err.status||400,origin);}
   }
+  if(path==='/calendar-callback'){
+   const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
+   if(request.method!=='GET')return new Response('Nur GET erlaubt.',{status:405,headers:secureHeaders});
+   try{await finishCalendarConnect(env,url);return new Response(null,{status:303,headers:{...secureHeaders,Location:'/?calendar=connected'}});}
+   catch(err){return new Response(String(err.message||'Kalenderverbindung fehlgeschlagen.').slice(0,250),{status:err.status||400,headers:{...secureHeaders,'Content-Type':'text/plain; charset=utf-8'}});}
+  }
   if(path==='/drive-callback'){
    const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
    if(request.method!=='GET')return new Response('Nur GET erlaubt.',{status:405,headers:secureHeaders});
@@ -108,7 +121,7 @@ export default {
    const id=request.headers.get('X-Request-Id')||'';
    if(id&&!/^[a-zA-Z0-9_-]{12,100}$/.test(id))throw Error('Ungültige Anfragekennung.');
    const result=await execute(env,input,id,url.origin);
-   if(env.MIGRATION_MODE==='production'&&env.AUTOMATION_ENABLED==='true')ctx.waitUntil(drainOutbox(env));
+   if(env.MIGRATION_MODE==='production'&&(env.AUTOMATION_ENABLED==='true'||env.CALENDAR_ENABLED==='true'))ctx.waitUntil(drainOutbox(env));
    return json(result,200,origin);
   }catch(err){
    const status=err instanceof Conflict?409:err.status||(/anmelden|Sitzung|Passwort ungültig|Zugang nicht aktiv/.test(err.message)?401:400);
@@ -119,7 +132,8 @@ export default {
   }
  },
  async scheduled(controller,env,ctx){
-  if(env.AUTOMATION_ENABLED!=='true'||env.WRITE_ENABLED!=='true'||env.MIGRATION_MODE!=='production'||env.CUTOVER_CONFIRMED!=='true')return;
+  if(env.AUTOMATION_ENABLED!=='true'){if(env.CALENDAR_ENABLED==='true'&&env.WRITE_ENABLED==='true'&&env.CUTOVER_CONFIRMED==='true')ctx.waitUntil(drainOutbox(env));return;}
+  if(env.WRITE_ENABLED!=='true'||env.MIGRATION_MODE!=='production'||env.CUTOVER_CONFIRMED!=='true')return;
   ctx.waitUntil((async()=>{
    // File-provider failures must not roll back the clock or reminder bookkeeping.
    for(const task of ['ft_timerTick_','ft_tick','ft_pdfWorker_'])try{

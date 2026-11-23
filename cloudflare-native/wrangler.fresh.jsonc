@@ -31,7 +31,8 @@
     "PUBLIC_ORIGINS": "",
     "MAIL_ENABLED": "false",
     "PUSH_ENABLED": "false",
-    "CALENDAR_ENABLED": "false",
+    "CALENDAR_ENABLED": "true",
+    "CALENDAR_AUTH": "oauth",
     "AUTOMATION_ENABLED": "false",
     "FILE_STORAGE": "drive",
     "GOOGLE_DRIVE_ACCOUNT": "firetime.pro@gmail.com"

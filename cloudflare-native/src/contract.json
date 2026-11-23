@@ -44,6 +44,11 @@
     "CalendarMirrors"
   ],
   "actions": [
+    "calendarAccountStatus",
+    "calendarConnect",
+    "calendarList",
+    "calendarSave",
+    "calendarSelectionTest",
     "storageStatus",
     "driveStorageTest",
     "driveConnect",

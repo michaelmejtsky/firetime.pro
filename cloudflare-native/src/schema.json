@@ -446,6 +446,7 @@
     "userId",
     "leaveHoursPerDay",
     "calendarId",
+    "calendarConnectionKey",
     "updatedBy",
     "updatedAt"
   ],
@@ -472,6 +473,7 @@
     "calendarId",
     "eventId",
     "sourceHash",
+    "connectionKey",
     "status",
     "updatedAt"
   ]

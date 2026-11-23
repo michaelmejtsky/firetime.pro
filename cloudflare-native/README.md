@@ -111,7 +111,7 @@ Die von Cloudflare zurückgegebene Testadresse öffnen, den separaten Testzugang
 |---|---|---|
 | E-Mail | `MAIL_API_KEY`, verifizierter `MAIL_FROM`, `MAIL_ENABLED=true` | Kein Versand; Passwort-Reset kann nicht zugesagt werden |
 | Push | bestehende `VAPID_PRIVATE_JWK`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, `PUSH_ENABLED=true` | Keine echten Push-Nachrichten |
-| Google Calendar | `GOOGLE_CALENDAR_SERVICE_ACCOUNT` als JSON-Secret, Kalender für dessen Adresse mit Schreibrecht freigeben, `CALENDAR_ENABLED=true` | Kalenderaktionen sind gesperrt, normale Zeitbuchungen funktionieren |
+| Google Calendar | Neue Instanz: OAuth-Verbindung direkt in FireTime, siehe `docs/KALENDER.md`. Zentralen Webclient samt `/calendar-callback` konfigurieren. | Kunden verbinden ihr Google-Konto und wählen bestehende Kalender; keine Dienstkonten-Freigaben nötig |
 | Automatik | `AUTOMATION_ENABLED=true`, `MIGRATION_MODE=production`, `CUTOVER_CONFIRMED=true`, `WRITE_ENABLED=true` | Keine Erinnerungen, keine automatische 19-Uhr-Schließung, keine Hintergrund-PDFs |
 
 Im Staging werden selbst bei gesetzten Versand-Secrets keine Hintergrundzustellungen ausgeführt. Vor Produktion sind reale Zustelltests an ausdrücklich gewählten Testempfängern und Kalenderprüfung notwendig; lokale Tests ersetzen das nicht. Bereits installierte PWAs müssen für Push auf der neuen Adresse neu angemeldet werden. Bleibt die GitHub-Adresse bestehen und bleiben die VAPID-Schlüssel gleich, ist eine Übernahme der vorhandenen Geräte grundsätzlich möglich; auf echten iPhones prüfen.

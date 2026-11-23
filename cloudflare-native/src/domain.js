@@ -114,6 +114,7 @@ function ft_reportApi_(actor,p){const result=ft_legacy_reportApi_(actor,p);resul
 function ft_pushStatus_(actor){const result=ft_legacy_pushStatus_(actor);result.deliveryConfigured=Boolean(runtime.pushEnabled&&runtime.env.VAPID_PRIVATE_JWK&&runtime.env.VAPID_PUBLIC_KEY);return result;}
 function ft_api(token,action,p){
  const actor=ft_auth_(token);p=p||{};
+ if(runtime.env.CALENDAR_AUTH==='oauth'&&['companyUpdate','userUpdate','userCreate'].includes(action)&&(p.calendarId!==undefined||p.calendarOn!==undefined))throw Error('Kalender bitte im Bereich Google Kalender verbinden und speichern.');
  if(action==='reportSubmissions')return ft_reportSubmissions_(actor,p);
  if(action==='yearOverview')return ft_yearOverview_(actor,p);
  if(action==='availabilityOverview')return ft_availabilityOverview_(actor,p);
@@ -193,7 +194,7 @@ function ft_personalCalendarSync_(actor,company){
  const add=(u,type,id,data)=>{
   const calendarId=String(ft_employeePref_(u)?.calendarId||'');if(!calendarId)return;
   if(calendarId===company.calendarId&&type!=='TASK')return; // The main event already is in this calendar.
-  const key='mirror_'+ft_sha_(company.id+'|'+u.id+'|'+type+'|'+id),eventId=ft_sha_(key+'|'+calendarId+'|'+ft_uuid_()),hash=ft_sha_(JSON.stringify(data));desired.set(key,{id:key,companyId:company.id,userId:u.id,sourceType:type,sourceId:id,calendarId,eventId,sourceHash:hash,status:'QUEUED',updatedAt:ft_now_(),data});
+  const key='mirror_'+ft_sha_(company.id+'|'+u.id+'|'+type+'|'+id),eventId=ft_sha_(key+'|'+calendarId+'|'+ft_uuid_()),hash=ft_sha_(JSON.stringify(data));desired.set(key,{id:key,companyId:company.id,userId:u.id,sourceType:type,sourceId:id,calendarId,eventId,connectionKey:ft_employeePref_(u)?.calendarConnectionKey||'calendar:'+company.id,sourceHash:hash,status:'QUEUED',updatedAt:ft_now_(),data});
  };
  const shifts=ft_get_('Shifts').filter(s=>s.companyId===company.id&&s.status==='PUBLISHED');
  for(const shift of shifts){const parts=ft_segmentRows_(shift);for(const s of parts.length?parts:[shift]){
@@ -207,8 +208,8 @@ function ft_personalCalendarSync_(actor,company){
   add(u,'TASK',task.id,{summary:'Aufgabe fällig: '+ft_commDecode_(task.titleEncoded)+' ['+status+']',start:{date:task.dueDate},end:{date:ft_localDate_(next)},description:'Aufgabenfrist · '+status+'\nDetails und Dokumentation in FireTime Pro: '+ft_clientUrl_(company),reminders:{useDefault:false,overrides:[{method:'popup',minutes:540}]}});
  }
  let queued=0;
- for(const old of all.slice().sort((a,b)=>b.__row-a.__row))if(!desired.has(old.id)||desired.get(old.id).calendarId!==old.calendarId){
-  runtime.enqueue('calendar',{calendarId:old.calendarId,eventId:old.eventId,delete:true,mirrorId:old.id,mirrorHash:old.sourceHash});
+ for(const old of all.slice().sort((a,b)=>b.__row-a.__row))if(!desired.has(old.id)||desired.get(old.id).calendarId!==old.calendarId||(desired.get(old.id).connectionKey!==(old.connectionKey||'calendar:'+company.id))){
+  runtime.enqueue('calendar',{companyId:company.id,userId:old.userId,connectionKey:old.connectionKey||'calendar:'+company.id,calendarId:old.calendarId,eventId:old.eventId,delete:true,mirrorId:old.id,mirrorHash:old.sourceHash});
   ft_absenceSheet_('CalendarMirrors',cols,false).deleteRow(old.__row);queued++;
  }
  // Reload after deletions: legacy row indices may have moved.
@@ -217,7 +218,7 @@ function ft_personalCalendarSync_(actor,company){
   if(existing&&existing.calendarId===value.calendarId&&existing.sourceHash===value.sourceHash)continue;
   // Keep an active event ID for edits. A new lifecycle gets a fresh ID because Google retains deleted-event tombstones.
   if(existing)value.eventId=existing.eventId;
-  runtime.enqueue('calendar',{calendarId:value.calendarId,eventId:value.eventId,create:!existing,data:value.data,mirrorId:value.id,mirrorHash:value.sourceHash});
+  runtime.enqueue('calendar',{companyId:company.id,userId:value.userId,connectionKey:value.connectionKey,calendarId:value.calendarId,eventId:value.eventId,create:!existing,data:value.data,mirrorId:value.id,mirrorHash:value.sourceHash});
   const {data,...row}=value;if(existing){Object.assign(existing,row);ft_absenceSave_('CalendarMirrors',cols,existing);}else ft_absenceAdd_('CalendarMirrors',cols,row);queued++;
  }
  return {queued};
@@ -235,4 +236,17 @@ function ft_nativeInitialize_(p){
  PropertiesService.getScriptProperties().setProperty('FT_NATIVE_INITIALIZED',ft_now_());
  ft_audit_(admin,'NATIVE_FIRST_START','Users',admin.id,{}, {email:admin.email,companyId:company.id});
  return {email:admin.email,companyId:company.id,initialized:true};
+}
+
+function ft_calendarSelectionSave_(actor,p){
+ const company=ft_company_(actor,p.companyId);ft_need_(actor,company,'CALENDAR');
+ if(p.userId){
+  const user=ft_user_(actor,p.userId);if(user.companyId!==company.id||(actor.role==='STAFF'&&actor.id!==user.id))throw Error('Kein Zugriff auf diesen Mitarbeiter.');
+  ft_employeePrefSave_(actor,user,{calendarId:p.calendarId});const pref=ft_employeePref_(user);pref.calendarConnectionKey=p.connectionKey||'';ft_absenceSave_('EmployeePreferences',FT_NATIVE_PREF_COLS,pref);
+ }else{
+  ft_allowed_(actor,['SYSADMIN','ADMIN']);
+  if(company.calendarId&&company.calendarId!==p.calendarId&&(ft_get_('Shifts').some(x=>x.companyId===company.id&&x.eventId)||ft_get_('ShiftSegments').some(x=>x.companyId===company.id&&x.calendarEventId)||ft_get_('WorkShifts').some(x=>x.companyId===company.id&&x.calendarEventId)))throw Error('Der Hauptkalender enthält bereits übertragene FireTime-Termine. Bitte zuerst den bisherigen Kalenderabgleich bereinigen lassen.');
+  ft_companyUpdate_(actor,{id:company.id,calendarId:p.calendarId,calendarOn:Boolean(p.calendarId)});
+ }
+ ft_personalCalendarSync_(actor,company);return {saved:true,calendarId:p.calendarId};
 }

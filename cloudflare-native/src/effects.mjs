@@ -1,3 +1,4 @@
+import {calendarOAuthFetch,writableCalendar,validateCalendarJobKey} from './calendar-oauth.mjs';
 import {Buffer} from 'node:buffer';
 import {statement} from './store.mjs';
 import {pushOne,pushConfigured} from './push.mjs';
@@ -25,26 +26,30 @@ export async function prepareCalendars(env,snapshot,input){
  const companies=snapshot.records.filter(r=>r.table_name==='Companies').map(r=>JSON.parse(r.data)).filter(c=>c.id===selected||input.action==='planDelete'&&snapshot.records.some(r=>r.table_name==='Shifts'&&r.record_id===input.data?.shiftId&&JSON.parse(r.data).companyId===c.id));
  for(const company of companies){
   if(!company.calendarId)continue;
-  const response=await google(env,'calendars/'+encodeURIComponent(company.calendarId));
-  if(!response.ok)throw Error('Kalenderzugriff fehlgeschlagen (HTTP '+response.status+').');
-  const data=await response.json(),events=new Map();
+  const connectionKey='calendar:'+company.id;
+  const response=env.CALENDAR_AUTH==='oauth'?null:await google(env,'calendars/'+encodeURIComponent(company.calendarId));
+  if(response&&!response.ok)throw Error('Kalenderzugriff fehlgeschlagen (HTTP '+response.status+').');
+  const data=env.CALENDAR_AUTH==='oauth'?await writableCalendar(env,connectionKey,company.calendarId):await response.json(),events=new Map();
+  const request=(path,options)=>env.CALENDAR_AUTH==='oauth'?calendarOAuthFetch(env,connectionKey,path,options):google(env,path,options);
 
   // Only events in the affected month or record are needed; no full external calendar scan.
   const relevant=new Set(snapshot.records.filter(r=>['Shifts','ShiftSegments','WorkShifts'].includes(r.table_name)).map(r=>JSON.parse(r.data)).filter(r=>r.companyId===company.id&&(r.id===input.data?.id||r.id===input.data?.shiftId||r.shiftId===input.data?.shiftId||!input.data?.month||String(r.day||r.start).startsWith(input.data.month))).flatMap(r=>[r.eventId,r.calendarEventId]).filter(Boolean));
   if(relevant.size>100)throw Error('Zu viele Kalendertermine in einem Vorgang. Bitte Zeitraum aufteilen.');
-  await Promise.all([...relevant].map(async id=>{const r=await google(env,eventPath(company.calendarId,id));if(r.status===404||r.status===410)events.set(id,null);else if(r.ok)events.set(id,await r.json());else throw Error('Kalendertermin nicht lesbar (HTTP '+r.status+').');}));
+  await Promise.all([...relevant].map(async id=>{const r=await request(eventPath(company.calendarId,id));if(r.status===404||r.status===410)events.set(id,null);else if(r.ok)events.set(id,await r.json());else throw Error('Kalendertermin nicht lesbar (HTTP '+r.status+').');}));
   // Unloaded existing IDs must never be synthesized: required operations fail closed.
-  calendars.set(company.calendarId,{verified:true,name:data.summary||company.name,events});
+  calendars.set(company.calendarId,{verified:true,name:data.summary||company.name,events,companyId:company.id,connectionKey});
  }
  return calendars;
 }
 async function deliverCalendar(env,job){
  if(env.CALENDAR_ENABLED!=='true')throw Error('Kalenderzustellung deaktiviert.');
+ const key=env.CALENDAR_AUTH==='oauth'?validateCalendarJobKey(job):'';
+ const request=(path,options)=>env.CALENDAR_AUTH==='oauth'?calendarOAuthFetch(env,key,path,options):google(env,path,options);
  const base='calendars/'+encodeURIComponent(job.calendarId)+'/events';
  const options=job.delete?{method:'DELETE'}:job.create?{method:'POST',body:JSON.stringify({...job.data,id:job.eventId})}:{method:'PATCH',body:JSON.stringify(job.data)};
- const response=await google(env,(job.create?base:eventPath(job.calendarId,job.eventId))+'?sendUpdates=all',options);
+ const response=await request((job.create?base:eventPath(job.calendarId,job.eventId))+'?sendUpdates=all',options);
  if(job.delete&&[404,410].includes(response.status))return;
- if(job.create&&response.status===409){const patch=await google(env,eventPath(job.calendarId,job.eventId)+'?sendUpdates=all',{method:'PATCH',body:JSON.stringify(job.data)});if(!patch.ok)throw Error('Kalenderaktualisierung HTTP '+patch.status);return;}
+ if(job.create&&response.status===409){const patch=await request(eventPath(job.calendarId,job.eventId)+'?sendUpdates=all',{method:'PATCH',body:JSON.stringify(job.data)});if(!patch.ok)throw Error('Kalenderaktualisierung HTTP '+patch.status);return;}
  if(!response.ok)throw Error('Kalenderzustellung HTTP '+response.status);
 }
 async function markNotification(db,id,status,error){
@@ -52,8 +57,10 @@ async function markNotification(db,id,status,error){
  return [statement(db,"UPDATE records SET data=json_set(data,'$.status',?,'$.sentAt',?,'$.error',?) WHERE table_name='Notifications' AND record_id=?",status,new Date().toISOString(),error,id)];
 }
 export async function drainOutbox(env){
- if(env.MIGRATION_MODE!=='production'||env.AUTOMATION_ENABLED!=='true')return {processed:0};
- const now=Date.now(),due=(await statement(env.DB,"SELECT current.* FROM outbox current WHERE (((current.status='QUEUED' OR current.status='RETRY') AND current.available_at<=?) OR (current.status='RUNNING' AND current.lease_until<?)) AND (current.kind<>'calendar' OR NOT EXISTS (SELECT 1 FROM outbox previous WHERE previous.kind='calendar' AND previous.rowid<current.rowid AND previous.status<>'SENT' AND json_extract(previous.payload,'$.calendarId')=json_extract(current.payload,'$.calendarId') AND json_extract(previous.payload,'$.eventId')=json_extract(current.payload,'$.eventId'))) ORDER BY current.rowid LIMIT 8",now,now).all()).results;
+ const calendarOnly=env.AUTOMATION_ENABLED!=='true';
+ if(env.CALENDAR_AUTH==='oauth'&&(env.WRITE_ENABLED!=='true'||env.CUTOVER_CONFIRMED!=='true'))return {processed:0};
+ if(env.MIGRATION_MODE!=='production'||(calendarOnly&&env.CALENDAR_ENABLED!=='true'))return {processed:0};
+ const now=Date.now(),due=(await statement(env.DB,"SELECT current.* FROM outbox current WHERE (((current.status='QUEUED' OR current.status='RETRY') AND current.available_at<=?) OR (current.status='RUNNING' AND current.lease_until<?)) AND (current.kind<>'calendar' OR NOT EXISTS (SELECT 1 FROM outbox previous WHERE previous.kind='calendar' AND previous.rowid<current.rowid AND previous.status<>'SENT' AND json_extract(previous.payload,'$.calendarId')=json_extract(current.payload,'$.calendarId') AND json_extract(previous.payload,'$.eventId')=json_extract(current.payload,'$.eventId'))) AND (?=0 OR current.kind='calendar') ORDER BY current.rowid LIMIT 8",now,now,calendarOnly?1:0).all()).results;
  const results=await Promise.all(due.map(async job=>{
   const claimed=await statement(env.DB,"UPDATE outbox SET status='RUNNING',lease_until=?,attempts=attempts+1 WHERE id=? AND (status IN ('QUEUED','RETRY') OR (status='RUNNING' AND lease_until<?)) RETURNING id",now+120000,job.id,now).first();if(!claimed)return false;
   const payload=JSON.parse(job.payload);let gone=[];

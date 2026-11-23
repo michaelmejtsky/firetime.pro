@@ -85,7 +85,7 @@ staff=function(){
  const card=form.closest('.card'),basic=document.createElement('div'),advanced=document.createElement('details');basic.className='ui-basic-fields';advanced.className='ui-fold';advanced.innerHTML='<summary>Weitere Angaben und Urlaubsregelung</summary><div class="ui-fold-body"></div>';
  const keep=['name','email','monthlyHours','hourlyRate','leaveBalance','leaveEntitlement'];
  for(const key of keep){const field=form.querySelector('[name="'+key+'"]')?.closest('label');if(field)basic.appendChild(field);}
- const current=myUsers().find(u=>u.id===ST.edit);basic.insertAdjacentHTML('beforeend',input('Persönliche Kalender-ID (optional)','calendarId',current?.calendarId||'')+input('Urlaubsstunden je Tag (nur wenn vereinbart)','leaveHoursPerDay',current?.leaveHoursPerDay??'','text','inputmode="decimal"'));
+ const current=myUsers().find(u=>u.id===ST.edit);basic.insertAdjacentHTML('beforeend','<p class="ui-caption">Kalender zuordnen: Firmenprofil → Google Kalender. Mitarbeiter können unter Mein Konto ihren eigenen Google-Kalender verbinden.</p>'+input('Urlaubsstunden je Tag (nur wenn vereinbart)','leaveHoursPerDay',current?.leaveHoursPerDay??'','text','inputmode="decimal"'));
  const controls=[...form.children].filter(x=>x.tagName==='BUTTON'||x.tagName==='INPUT'&&x.type==='hidden');const body=advanced.querySelector('.ui-fold-body');for(const child of [...form.children])if(!controls.includes(child))body.appendChild(child);
  form.prepend(basic);form.appendChild(advanced);for(const control of controls)form.appendChild(control);
  for(const note of form.querySelectorAll('.ft-staff-leave-opening-note,.ft-balance-start-help'))body.appendChild(note);
@@ -210,3 +210,54 @@ fileAsData=async function(file){
   return canvas.toDataURL(file.type==='image/jpeg'?'image/jpeg':'image/png',.9);
  }catch(err){say(err.message,true);return null;}finally{URL.revokeObjectURL(url);}
 };
+
+// Calendar OAuth stays entirely inside the customer's FireTime workflow.
+for(const name of ['calendarAccountStatus','calendarList','calendarSelectionTest'])FT_CLARITY_READS.add(name);
+function uiCalendarPanel(kind){
+ const c=firm();if(!c||!has('CALENDAR'))return '';
+ const personal=kind==='personal',p={companyId:c.id,kind},suffix=personal?'Personal':'Company';
+ return '<section class="card"><h2>'+ (personal?'Mein Google-Kalender':'Google Kalender · Firma')+'</h2><p>'+(personal?'Verbinde dein Google-Konto und wähle deinen bestehenden Kalender für Bereitschaften und Aufgabenfristen.':'Verbinde das Google-Konto deiner Firma. Danach kannst du vorhandene Kalender auswählen oder deren IDs eintragen. Keine Einrichtung in Google Cloud erforderlich.')+'</p>'+uiRemote('calendarAccountStatus',p,status=>{
+  if(!status.configured)return '<p class="ui-note">Die zentrale Kalenderverbindung wird noch vom FireTime-Systemadmin eingerichtet.</p>';
+  let body=uiKpis([['Google-Konto',status.email||'Noch nicht verbunden'],['Verbindung',status.connected?'Verbunden':'Noch nicht verbunden']])+uiButton(status.connected?'Google-Zugriff erneuern':'Google Kalender verbinden','calendarConnect',kind,true);
+  if(status.connected)body+=uiRemote('calendarList',p,result=>{
+   const users=myUsers().filter(x=>x.role==='STAFF'&&x.status==='ACTIVE');
+   const current=personal?me().calendarId:c.calendarId;
+   return '<form id="uiCalendarForm'+suffix+'" data-kind="'+kind+'"><div class="cols">'+(!personal?select('userId','Kalender zuordnen zu',[['','Hauptkalender der Firma'],...users.map(u=>[u.id,u.name])],''):'<input type="hidden" name="userId" value="'+E(me().id)+'">')+select('calendarChoice','Bestehenden Kalender auswählen',[['','Bitte auswählen'],...result.calendars.map(x=>[x.id,x.name+(x.primary?' (Hauptkalender)':'')])],current||'')+'</div>'+uiFold('Kalender-ID manuell eingeben',input('Kalender-ID (alternativ zur Auswahl)','calendarId','','text','maxlength="250"'))+'<p class="ui-caption">'+(personal?'Deine aktuelle Kalender-ID: '+E(current||'Noch kein Kalender ausgewählt'):'Für Mitarbeiter können hier Kalender zugeordnet werden, auf die das verbundene Firmenkonto Schreibzugriff hat. Andernfalls verbindet der Mitarbeiter sein Google-Konto unter „Mein Konto“.')+'</p><div class="actions"><button type="submit" class="btn primary">Kalender prüfen und speichern</button>'+uiButton('Zuordnung entfernen','calendarClear',kind)+'</div></form>';
+  },'uiCalendarList'+suffix);
+  if(me().role==='SYSADMIN')body+=uiFold('Zentrale Google-Einrichtung','<p>Diese Weiterleitungsadresse einmal beim zentralen Google-OAuth-Webclient ergänzen:</p><code style="overflow-wrap:anywhere">'+E(status.callbackUrl)+'</code><p>Google Calendar API aktivieren. Für Kundenbetrieb Google-Veröffentlichungsstatus und erforderliche Überprüfung abschließen.</p>');
+  return body;
+ },'uiCalendarAccount'+suffix)+'</section>';
+}
+const UI_CALENDAR_OLD_SETTINGS=settings,UI_CALENDAR_OLD_PROFILE=profile;
+settings=function(){const html=UI_CALENDAR_OLD_SETTINGS(),doc=document.createElement('div');doc.innerHTML=html;const form=doc.querySelector('#settingsForm');if(form)for(const name of ['calendarId','calendarOn']){const field=form.querySelector('[name="'+name+'"]');if(field)field.closest('label')?.remove();}form?.querySelector('[data-act="calendarTest"]')?.remove();return uiCalendarPanel('company')+doc.innerHTML;};
+profile=function(){return uiCalendarPanel('personal')+UI_CALENDAR_OLD_PROFILE();};
+const UI_CALENDAR_OLD_ACTION=action,UI_CALENDAR_OLD_SUBMIT=submit;
+action=async function(button){
+ const act=button.dataset.act,kind=button.dataset.id;
+ if(act==='ui:calendarConnect'){
+  button.disabled=true;try{const result=await api('calendarConnect',{companyId:firm().id,kind}),url=new URL(result.url);if(url.origin!=='https://accounts.google.com'||url.pathname!=='/o/oauth2/v2/auth')throw Error('Google-Adresse ungültig.');sessionStorage.setItem('ft_calendar_return',JSON.stringify({cid:firm().id,kind}));location.assign(url.href);}catch(err){say(err.message,true);button.disabled=false;}return;
+ }
+ if(act==='ui:calendarClear'){
+  const form=button.closest('form'),p=fields(form);if(!confirm('Diese Kalenderzuordnung entfernen? Bereits übertragene persönliche FireTime-Termine werden beim Abgleich entfernt.'))return;
+  await run(async()=>{await api('calendarSave',{companyId:firm().id,kind,userId:p.userId||'',calendarId:''});await load();},'Kalenderzuordnung entfernt.');return;
+ }
+ return UI_CALENDAR_OLD_ACTION(button);
+};
+submit=async function(form){
+ if(form.id.startsWith('uiCalendarForm')){
+  const p=fields(form),calendarId=String(p.calendarId||p.calendarChoice||'').trim();if(!calendarId){say('Bitte einen Kalender auswählen oder eine Kalender-ID eintragen.',true);return;}
+  await run(async()=>{await api('calendarSave',{companyId:firm().id,kind:form.dataset.kind,userId:p.userId||'',calendarId});await load();},'Kalender geprüft und gespeichert.');return;
+ }
+ return UI_CALENDAR_OLD_SUBMIT(form);
+};
+
+if(new URLSearchParams(location.search).get('calendar')==='connected'){
+ try{const context=JSON.parse(sessionStorage.getItem('ft_calendar_return')||'null');sessionStorage.removeItem('ft_calendar_return');if(context&&ST.token){ST.cid=context.cid;ST.tab=context.kind==='personal'?'profile':'settings';queueMicrotask(()=>load({force:true}));}history.replaceState(null,'',location.pathname);}
+ catch{sessionStorage.removeItem('ft_calendar_return');}
+}
+
+document.addEventListener('change',event=>{
+ const field=event.target,form=field.closest?.('#uiCalendarFormCompany');if(!form||field.name!=='userId')return;
+ const id=field.value,assigned=id?myUsers().find(u=>u.id===id)?.calendarId:firm().calendarId;
+ form.elements.namedItem('calendarChoice').value=assigned||'';form.elements.namedItem('calendarId').value='';
+});

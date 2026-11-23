@@ -15,9 +15,9 @@ for(const [table,identifier] of Object.entries(extra)){
  if(names.length>1)throw Error('Ambiguous table mapping '+identifier);
 }
 const schemas=vm.runInNewContext(source+';({...FT_HEADERS,'+Object.entries(extra).map(([k,v])=>JSON.stringify(k)+':'+v).join(',')+'})');
-schemas.EmployeePreferences=['id','companyId','userId','leaveHoursPerDay','calendarId','updatedBy','updatedAt'];
+schemas.EmployeePreferences=['id','companyId','userId','leaveHoursPerDay','calendarId','calendarConnectionKey','updatedBy','updatedAt'];
 schemas.ActivityBreakPolicies=['id','companyId','userId','activityId','mode','confirmed','minutes','reviewedBy','reviewedAt','reviewNote','updatedBy','updatedAt'];
-schemas.CalendarMirrors=['id','companyId','userId','sourceType','sourceId','calendarId','eventId','sourceHash','status','updatedAt'];
+schemas.CalendarMirrors=['id','companyId','userId','sourceType','sourceId','calendarId','eventId','sourceHash','connectionKey','status','updatedAt'];
 const nativeAliases=new Set(['ft_api','ft_safe_','ft_userCreate_','ft_userUpdate_','ft_commThreads_','ft_commCreate_','ft_commTaskStatus_','ft_activitySave_','ft_timerStop_','ft_reportApi_','ft_pushStatus_','ft_objectPausePending_','ft_tick']);
 const overrides={
  ft_hex_:"function ft_hex_(bytes){return Array.from(bytes,b=>((b+256)%256).toString(16).padStart(2,'0')).join('');}",
@@ -76,7 +76,7 @@ for(const name of ['ft_activate','ft_changePassword','ft_passwordResetConfirm_',
  native=native.replace(original,updated);
 }
 native=native.replace("  case 'adminOverview':return ft_adminOverview_(u,p);\n  case 'adminOverview':return ft_adminOverview_(u,p);","  case 'adminOverview':return ft_adminOverview_(u,p);");
-const exports=['ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
+const exports=['ft_calendarSelectionSave_','ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
 const globals='Utilities,PropertiesService,CacheService,SpreadsheetApp,DriveApp,CalendarApp,MailApp,DocumentApp,ScriptApp,LockService,UrlFetchApp,Logger,MimeType,ContentService,Date';
 const domain=fs.readFileSync(path.join(root,'src/domain.js'),'utf8');
 const generated=`// GENERATED from apps-script/Code.gs. Run npm run build. No runtime eval.\nexport function createCore(runtime){\nconst {${globals}}=runtime.globals;\n${native}\nconst FT_NATIVE_PREF_COLS=runtime.schema.EmployeePreferences,FT_NATIVE_BREAK_COLS=runtime.schema.ActivityBreakPolicies;\n${domain}\nreturn {${exports.join(',')},headers:FT_HEADERS};\n}\n`;
@@ -108,7 +108,7 @@ fs.writeFileSync(path.join(root,'dist/public/index.html'),html);
 const sw=fs.readFileSync(path.join(root,'dist/public/sw.js'),'utf8').replace(/firetime-shell-\d+-v\d+/g,'firetime-native-preview-v210');
 fs.writeFileSync(path.join(root,'dist/public/sw.js'),sw);
 fs.writeFileSync(path.join(root,'dist/public/config.js'),"window.FT_API_URL = location.origin + '/api';\n");
-const actions=['storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
+const actions=['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest','storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
 const manifest={version:'2.1.0-migration-candidate',sourceSha256:createHash('sha256').update(source).digest('hex'),tables:Object.keys(schemas),actions,overrides:Object.keys(overrides)};
 fs.writeFileSync(path.join(root,'src/contract.json'),JSON.stringify(manifest,null,2)+'\n');
 fs.copyFileSync(path.join(root,'src/contract.json'),path.join(root,'dist/contract.json'));
