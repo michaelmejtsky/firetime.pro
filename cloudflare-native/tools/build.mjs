@@ -53,6 +53,12 @@ const names=ast.body.filter(x=>x.type==='FunctionDeclaration').map(x=>x.id.name)
 for(const name of Object.keys(overrides))if(!names.includes(name))throw Error('Missing override '+name);
 let native=source;
 for(const node of [...ast.body].reverse())if(node.type==='FunctionDeclaration'&&(overrides[node.id.name]||nativeAliases.has(node.id.name))){const replacement=nativeAliases.has(node.id.name)?source.slice(node.start,node.end).replace('function '+node.id.name+'(', 'function ft_legacy_'+node.id.name.slice(3)+'('):overrides[node.id.name];native=native.slice(0,node.start)+replacement+native.slice(node.end);}
+// Larger logo input is supported only by the new native backend.
+{
+ const node=ast.body.find(x=>x.type==='FunctionDeclaration'&&x.id.name==='ft_logo_');
+ const original=source.slice(node.start,node.end);
+ native=native.replace(original,original.replace('bytes.length>2097152','bytes.length>10*1024*1024').replace('maximal 2 MB','maximal 10 MB'));
+}
 // Native account policy: four characters for activation, change and recovery.
 // Keep the legacy Apps Script deployment and protected first-start policy unchanged.
 for(const name of ['ft_activate','ft_changePassword','ft_passwordResetConfirm_','ft_passwordResetLink_']){
@@ -77,13 +83,14 @@ for(const file of fs.readdirSync(path.join(root,'src')))fs.copyFileSync(path.joi
 for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.copyFileSync(path.join(repo,file),path.join(root,'dist/public',file));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
+html=html.replaceAll('max. 2 MB','max. 10 MB');
 html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
 html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0-preview'")
  .replace("credentials:'omit'","credentials:'same-origin'")
  .replace("body:JSON.stringify(request),cache:","body:JSON.stringify(request),cache:");
 // Each user intent carries one idempotency key; no automatic retry of writes.
 html=html.replace("headers:{'Content-Type':'application/json'},\n      body:JSON.stringify(request)","headers:{'Content-Type':'application/json','X-Request-Id':crypto.randomUUID()},\n      body:JSON.stringify(request)");
-html=html.replace('<body>','<body><div style="padding:8px 16px;background:#7b431d;color:#fff;font:14px system-ui">FireTime Pro · Cloudflare-Testversion</div>');
+html=html.replace('<body>','<body><div style="padding:8px 16px;background:#173b69;color:#fff;font:14px system-ui">FireTime Pro · Cloudflare-Testversion</div>');
 html=html.replace('const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};','const views={dashboard,customers,license,staff,time,reports,totals:ftTotals_,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};').replace("['Zeit & Berichte',['reports']]","['Zeit & Berichte',['reports','totals']]").replaceAll('Post/Aufgaben','Aufgaben').replaceAll('ungelesene Nachrichten','ungelesene Aufgaben').replaceAll('Kalender teilen & Einladungen','Haupt- und Mitarbeiterkalender').replaceAll('Im Kalender teilen & Einladungen senden','In Haupt- und Mitarbeiterkalender übertragen').replaceAll('Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.','Monats-PDFs enthalten scharfen Text und getrennte Abschnitte für Arbeit und Bereitschaft.');
 html=html.replace('</head>','<style>'+fs.readFileSync(path.join(root,'ui/clarity.css'),'utf8')+'</style></head>').replace('</script></body>',fs.readFileSync(path.join(root,'ui/clarity.js'),'utf8')+'\n</script></body>');
 fs.writeFileSync(path.join(root,'dist/public/index.html'),html);

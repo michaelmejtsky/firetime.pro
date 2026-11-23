@@ -196,3 +196,17 @@ function uiDriveStoragePanel(){
 const UI_STORAGE_OLD_SETTINGS=settings,UI_STORAGE_OLD_CUSTOMERS=customers;
 settings=function(){return uiDriveStoragePanel()+UI_STORAGE_OLD_SETTINGS();};
 customers=function(){return uiDriveStoragePanel()+UI_STORAGE_OLD_CUSTOMERS();};
+
+// Accept larger source logos and resize before upload to keep every page fast.
+fileAsData=async function(file){
+ if(!file)return null;
+ if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>10*1024*1024){say('Logo: PNG/JPG/WEBP maximal 10 MB.',true);return null;}
+ const url=URL.createObjectURL(file);
+ try{
+  const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('Bild kann nicht gelesen werden.'));img.src=url;});
+  const factor=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(img.naturalWidth*factor));canvas.height=Math.max(1,Math.round(img.naturalHeight*factor));
+  const ctx=canvas.getContext('2d');if(!ctx)throw Error('Bild kann nicht verarbeitet werden.');ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  return canvas.toDataURL(file.type==='image/jpeg'?'image/jpeg':'image/png',.9);
+ }catch(err){say(err.message,true);return null;}finally{URL.revokeObjectURL(url);}
+};
