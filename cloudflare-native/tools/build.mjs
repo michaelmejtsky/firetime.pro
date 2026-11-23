@@ -59,6 +59,13 @@ for(const node of [...ast.body].reverse())if(node.type==='FunctionDeclaration'&&
  const original=source.slice(node.start,node.end);
  native=native.replace(original,original.replace('bytes.length>2097152','bytes.length>10*1024*1024').replace('maximal 2 MB','maximal 10 MB'));
 }
+// Task photos use the same 10 MiB limit for saving and reading.
+for(const name of ['ft_commPhotoSave_','ft_commPhoto_']){
+ const node=ast.body.find(x=>x.type==='FunctionDeclaration'&&x.id.name===name),original=source.slice(node.start,node.end);
+ const updated=original.replace('isPdf?10*1024*1024:700000','10*1024*1024').replace('maximal etwa 650 KB','maximal 10 MB').replace('!pdf&&size>2000000','!pdf&&size>10*1024*1024');
+ if(updated===original)throw Error('Missing native photo limit target '+name);
+ native=native.replace(original,updated);
+}
 // Native account policy: four characters for activation, change and recovery.
 // Keep the legacy Apps Script deployment and protected first-start policy unchanged.
 for(const name of ['ft_activate','ft_changePassword','ft_passwordResetConfirm_','ft_passwordResetLink_']){
@@ -84,6 +91,10 @@ for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.c
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
 html=html.replaceAll('max. 2 MB','max. 10 MB');
+html=html.replace('file.size>8*1024*1024','file.size>10*1024*1024').replace('JPG-/PNG-Foto bis 8 MB','JPG-/PNG-Foto bis 10 MB')
+ .replace('Math.min(1,1000/Math.max(img.naturalWidth,img.naturalHeight))','Math.min(1,2400/Math.max(img.naturalWidth,img.naturalHeight))')
+ .replace('Math.max(.45,.8-n*.065)','Math.max(.6,.9-n*.05)').replace('encoded.length<870000','encoded.length<=Math.floor(10*1024*1024*4/3)');
+
 html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
 html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0-preview'")
  .replace("credentials:'omit'","credentials:'same-origin'")
