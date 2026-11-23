@@ -2,7 +2,7 @@
   "name": "firetime-cloudflare-native",
   "private": true,
   "type": "module",
-  "version": "2.1.0-migration-candidate",
+  "version": "2.1.0",
   "scripts": {
     "build": "node tools/build.mjs && node tools/generate-exporter.mjs && node tools/build-freeze.mjs",
     "test": "node --test tests/*.test.mjs",

@@ -69,7 +69,7 @@ export class Runtime {
   this.jobs.set(id,{id,kind,payload,created_at:new Date().toISOString()});return id;
  }
  mail(message,notificationId){
-  if(this.env.MAIL_ENABLED!=='true'||!this.env.MAIL_API_KEY||!this.env.MAIL_FROM)throw Error('E-Mail-Versand ist noch nicht eingerichtet.');
+  if(this.env.MAIL_ENABLED!=='true'||!(this.env.MAIL_PROVIDER==='gmail'?this.env.GMAIL_READY==='true':this.env.MAIL_API_KEY&&this.env.MAIL_FROM))throw Error('E-Mail-Versand ist noch nicht eingerichtet.');
   const id=notificationId?'mail-'+notificationId:randomUUID();this.enqueue('mail',{message,notificationId},id);return {queued:true};
  }
  push(actor,kind,id,title,body,devices,unreadCount){

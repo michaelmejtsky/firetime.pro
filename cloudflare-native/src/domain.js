@@ -250,3 +250,11 @@ function ft_calendarSelectionSave_(actor,p){
  }
  ft_personalCalendarSync_(actor,company);return {saved:true,calendarId:p.calendarId};
 }
+
+function ft_pilotProvision_(){
+ const email=String(runtime.env.PILOT_ADMIN_EMAIL||'').trim().toLowerCase();if(!email||runtime.env.MAIL_ENABLED!=='true'||(runtime.env.MAIL_PROVIDER==='gmail'&&runtime.env.GMAIL_READY!=='true'))return {pending:true};
+ const company=ft_get_('Companies').find(c=>c.slug===runtime.env.PILOT_COMPANY_SLUG&&ft_bool_(c.active)),actor=ft_get_('Users').find(u=>u.role==='SYSADMIN'&&u.status==='ACTIVE');if(!company||!actor)return {pending:true};
+ const existing=ft_get_('Users').find(u=>String(u.email).toLowerCase()===email);
+ if(existing){if(existing.companyId!==company.id||existing.role!=='ADMIN')throw Error('Pilot-Admin-Adresse ist bereits anders zugeordnet.');if(existing.status==='INVITED'&&!ft_get_('Invites').some(i=>i.userId===existing.id))ft_invite_(actor,existing);return {existing:true};}
+ return ft_userCreate_(actor,{companyId:company.id,role:'ADMIN',name:runtime.env.PILOT_ADMIN_NAME||'Firmenadministration',email,monthlyHours:0,hourlyRate:0,leaveBalance:0,leaveEntitlement:0,openingHours:0,startDate:'2027-01-01',hoursStartMonth:'2027-01'});
+}

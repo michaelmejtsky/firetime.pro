@@ -8,7 +8,7 @@ Die bisherige produktive `config.js`, `index.html`, `cloudflare/worker.js` und `
 
 ## Frischer Neustart ohne Alt-Testdaten
 
-Für die neue Einrichtung ohne Datenübernahme gilt **`docs/NEUSTART.md`**. Ein geschützter `/first-start`-Dialog legt das Schema, einen neuen Systemadmin und BSB3100 an. Schlüssel und Passwort werden direkt vor Ort eingegeben. Bestehende Daten werden nicht überschrieben. Der alte FT_PEPPER ist nur bei einer Übernahme alter Passwörter erforderlich; für den Neustart wird ein neuer dauerhafter Schlüssel verwendet.
+Für die neue Einrichtung ohne Datenübernahme gilt **`docs/NEUSTART.md` und für den aktivierten Pilotbetrieb `docs/PRODUKTIVSTART.md`**. Ein geschützter `/first-start`-Dialog legt das Schema, einen neuen Systemadmin und BSB3100 an. Schlüssel und Passwort werden direkt vor Ort eingegeben. Bestehende Daten werden nicht überschrieben. Der alte FT_PEPPER ist nur bei einer Übernahme alter Passwörter erforderlich; für den Neustart wird ein neuer dauerhafter Schlüssel verwendet.
 
 ## Neue Dateiablage ohne R2
 
@@ -109,7 +109,7 @@ Die von Cloudflare zurückgegebene Testadresse öffnen, den separaten Testzugang
 
 | Dienst | Einstellungen/Secrets | Verhalten ohne Einrichtung |
 |---|---|---|
-| E-Mail | `MAIL_API_KEY`, verifizierter `MAIL_FROM`, `MAIL_ENABLED=true` | Kein Versand; Passwort-Reset kann nicht zugesagt werden |
+| E-Mail | Neuer Produktivpilot: zentrale Gmail-OAuth-Verbindung mit reiner Sendeberechtigung, siehe `docs/PRODUKTIVSTART.md`. Optional weiterhin Resend. | Ohne Freigabe keine Zustellung; Versandstatus in der Outbox |
 | Push | bestehende `VAPID_PRIVATE_JWK`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`, `PUSH_ENABLED=true` | Keine echten Push-Nachrichten |
 | Google Calendar | Neue Instanz: OAuth-Verbindung direkt in FireTime, siehe `docs/KALENDER.md`. Zentralen Webclient samt `/calendar-callback` konfigurieren. | Kunden verbinden ihr Google-Konto und wählen bestehende Kalender; keine Dienstkonten-Freigaben nötig |
 | Automatik | `AUTOMATION_ENABLED=true`, `MIGRATION_MODE=production`, `CUTOVER_CONFIRMED=true`, `WRITE_ENABLED=true` | Keine Erinnerungen, keine automatische 19-Uhr-Schließung, keine Hintergrund-PDFs |

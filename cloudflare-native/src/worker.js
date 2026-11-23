@@ -1,3 +1,5 @@
+import {productionSettings,productionStatus} from './production.mjs';
+import {startGmailConnect,finishGmailConnect} from './gmail.mjs';
 import {calendarAccountStatus,startCalendarConnect,finishCalendarConnect,calendarList,verifyCalendarSelection} from './calendar-oauth.mjs';
 import {hasFileStorage,driveStatus,startDriveConnect,finishDriveConnect,testDriveConnection} from './drive.mjs';
 import {initializeFresh,firstStartPage} from './first-start.mjs';
@@ -7,7 +9,7 @@ import {loadSnapshot,commit,Conflict,readReceipt,statement} from './store.mjs';
 import {prepareCalendars,drainOutbox} from './effects.mjs';
 import contract from './contract.json' with {type:'json'};
 const TYPES=new Set(['login','activate','resetRequest','resetConfirm','logout','password','brand','api','pushInfo']);
-const READS=new Set(['calendarAccountStatus','calendarList','calendarSelectionTest','storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
+const READS=new Set(['productionStatus','calendarAccountStatus','calendarList','calendarSelectionTest','storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
 function allowedOrigin(request,env){const origin=request.headers.get('Origin')||'';const self=new URL(request.url).origin;const allowed=new Set([self,...String(env.PUBLIC_ORIGINS||'').split(',').map(x=>x.trim()).filter(x=>/^https:\/\//.test(x))]);return allowed.has(origin)?origin:origin?'':self;}
 function headers(origin){return {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Request-Id, X-FireTime-Staging-Key','Vary':'Origin'};}
 function json(value,status=200,origin=''){return new Response(JSON.stringify(value),{status,headers:headers(origin)});}
@@ -16,6 +18,7 @@ function stagingAllowed(request,env){if(env.MIGRATION_MODE==='production')return
 async function body(request){if(Number(request.headers.get('Content-Length')||0)>16000000)throw Object.assign(Error('Anfrage zu groß.'),{status:413});const reader=request.body?.getReader();let length=0;const chunks=[];if(!reader)throw Error('Leere Anfrage.');while(true){const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>16000000){await reader.cancel();throw Object.assign(Error('Anfrage zu groß.'),{status:413});}chunks.push(value);}const bytes=new Uint8Array(length);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}return JSON.parse(new TextDecoder().decode(bytes));}
 function validate(input){if(!input||typeof input!=='object'||!TYPES.has(input.type))throw Error('Ungültige Anfrage.');if(input.type==='api'&&(!contract.actions.includes(input.action)||input.data&&typeof input.data!=='object'))throw Error('Unbekannte API-Aktion.');if(['login','activate','resetConfirm','password'].includes(input.type)&&JSON.stringify(input).length>2000)throw Error('Anfrage zu groß.');}
 export async function execute(env,input,requestId='',requestOrigin=''){
+ env=await productionSettings(env);
  if(env.MIGRATION_MODE==='production'&&env.CUTOVER_CONFIRMED!=='true')throw Object.assign(Error('Produktivumschaltung wurde noch nicht freigegeben.'),{status:503});
  if(!env.DB||!hasFileStorage(env))throw Object.assign(Error('Cloudflare-Datenbank oder Dateiablage fehlt.'),{status:503});
  if(!env.FT_PEPPER&&['login','activate','password','resetConfirm'].includes(input.type))throw Object.assign(Error('Passwortkonfiguration fehlt. FT_PEPPER als Worker-Secret einrichten.'),{status:503});
@@ -38,7 +41,10 @@ export async function execute(env,input,requestId='',requestOrigin=''){
     case 'password':value=core.ft_changePassword(input.token,input.current,input.next);break;
     case 'brand':value=core.ft_brandForLogin(input.slug);break;
     case 'api':
-     if(['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest'].includes(input.action)){
+     if(['productionStatus','gmailConnect'].includes(input.action)){
+      const actor=core.ft_auth_(input.token);if(actor.role!=='SYSADMIN')throw Object.assign(Error('Nur der Systemadmin darf den Systembetrieb verwalten.'),{status:403});
+      value=input.action==='productionStatus'?await productionStatus(env):await startGmailConnect(env,actor,digest(input.token),requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid');
+     }else if(['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest'].includes(input.action)){
       const actor=core.ft_auth_(input.token),p=input.data||{},origin=requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid';
       if(input.action==='calendarAccountStatus')value=await calendarAccountStatus(env,snapshot,p,origin);
       if(input.action==='calendarConnect')value=await startCalendarConnect(env,snapshot,p,digest(input.token),origin);
@@ -71,6 +77,15 @@ export async function execute(env,input,requestId='',requestOrigin=''){
  }
  throw new Conflict('Gleichzeitige Änderung. Bitte neu laden.');
 }
+async function provisionPilot(env){
+ if(env.MIGRATION_MODE!=='production'||env.WRITE_ENABLED!=='true'||env.AUTOMATION_ENABLED!=='true'||env.CUTOVER_CONFIRMED!=='true')return;
+ env=await productionSettings(env,{createPush:true});
+ for(let attempt=0;attempt<3;attempt++){
+  const snapshot=await loadSnapshot(env,{},{system:true}),runtime=new Runtime(snapshot),core=createCore(runtime);core.ft_pilotProvision_();
+  try{await commit(env,snapshot,runtime);break;}catch(err){if(!(err instanceof Conflict)||attempt===2)throw err;}
+ }
+ await drainOutbox(env);
+}
 export default {
  async fetch(request,env,ctx){
   const url=new URL(request.url),origin=allowedOrigin(request,env),path=url.pathname.replace(/^\/firetime\.pro(?=\/)/,'');
@@ -82,6 +97,12 @@ export default {
    if(!String(request.headers.get('Content-Type')||'').startsWith('application/json'))return json({ok:false,error:'JSON erforderlich.'},415,origin);
    try{const p=await body(request);if(JSON.stringify(p).length>4000)throw Object.assign(Error('Eingabe zu lang.'),{status:413});return json({ok:true,data:await initializeFresh(env,{...p,publicUrl:url.origin+'/'})},200,origin);}
    catch(err){const error=/D1_|SQLITE_|constraint/.test(String(err.message))?'Datenbankeinrichtung fehlgeschlagen. Konfiguration prüfen.':String(err.message||'Einrichtung fehlgeschlagen.').slice(0,250);return json({ok:false,error},err.status||400,origin);}
+  }
+  if(path==='/gmail-callback'){
+   const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
+   if(request.method!=='GET')return new Response('Nur GET erlaubt.',{status:405,headers:secureHeaders});
+   try{await finishGmailConnect(env,url);ctx.waitUntil(provisionPilot(env).catch(()=>console.warn('firetime-pilot-provision-pending')));return new Response(null,{status:303,headers:{...secureHeaders,Location:'/?gmail=connected'}});}
+   catch(err){return new Response(String(err.message||'Gmail-Verbindung fehlgeschlagen.').slice(0,250),{status:err.status||400,headers:{...secureHeaders,'Content-Type':'text/plain; charset=utf-8'}});}
   }
   if(path==='/calendar-callback'){
    const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
@@ -117,11 +138,11 @@ export default {
   const started=Date.now();let input;
   try{
    input=await body(request);validate(input);
-   if(input.type==='pushInfo')return json({ok:true,data:{configured:env.PUSH_ENABLED==='true'&&Boolean(env.VAPID_PUBLIC_KEY)&&Boolean(env.VAPID_PRIVATE_JWK),publicKey:env.PUSH_ENABLED==='true'?env.VAPID_PUBLIC_KEY||'':'',origin}},200,origin);
+   if(input.type==='pushInfo'){env=await productionSettings(env);return json({ok:true,data:{configured:env.PUSH_ENABLED==='true'&&Boolean(env.VAPID_PUBLIC_KEY)&&Boolean(env.VAPID_PRIVATE_JWK),publicKey:env.PUSH_ENABLED==='true'?env.VAPID_PUBLIC_KEY||'':'',origin}},200,origin);}
    const id=request.headers.get('X-Request-Id')||'';
    if(id&&!/^[a-zA-Z0-9_-]{12,100}$/.test(id))throw Error('Ungültige Anfragekennung.');
    const result=await execute(env,input,id,url.origin);
-   if(env.MIGRATION_MODE==='production'&&(env.AUTOMATION_ENABLED==='true'||env.CALENDAR_ENABLED==='true'))ctx.waitUntil(drainOutbox(env));
+   if(env.MIGRATION_MODE==='production'&&(env.AUTOMATION_ENABLED==='true'||env.CALENDAR_ENABLED==='true'))ctx.waitUntil(productionSettings(env).then(drainOutbox));
    return json(result,200,origin);
   }catch(err){
    const status=err instanceof Conflict?409:err.status||(/anmelden|Sitzung|Passwort ungültig|Zugang nicht aktiv/.test(err.message)?401:400);
@@ -132,11 +153,12 @@ export default {
   }
  },
  async scheduled(controller,env,ctx){
-  if(env.AUTOMATION_ENABLED!=='true'){if(env.CALENDAR_ENABLED==='true'&&env.WRITE_ENABLED==='true'&&env.CUTOVER_CONFIRMED==='true')ctx.waitUntil(drainOutbox(env));return;}
+  if(env.AUTOMATION_ENABLED!=='true'){if(env.CALENDAR_ENABLED==='true'&&env.WRITE_ENABLED==='true'&&env.CUTOVER_CONFIRMED==='true')ctx.waitUntil(productionSettings(env).then(drainOutbox));return;}
   if(env.WRITE_ENABLED!=='true'||env.MIGRATION_MODE!=='production'||env.CUTOVER_CONFIRMED!=='true')return;
   ctx.waitUntil((async()=>{
+   env=await productionSettings(env,{createPush:true});
    // File-provider failures must not roll back the clock or reminder bookkeeping.
-   for(const task of ['ft_timerTick_','ft_tick','ft_pdfWorker_'])try{
+   for(const task of ['ft_pilotProvision_','ft_timerTick_','ft_tick','ft_pdfWorker_'])try{
     for(let attempt=0;attempt<3;attempt++){
      const snapshot=await loadSnapshot(env,{},{system:true}),runtime=new Runtime(snapshot),core=createCore(runtime);
      core[task]();

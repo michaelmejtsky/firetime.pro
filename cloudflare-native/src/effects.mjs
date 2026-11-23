@@ -1,3 +1,4 @@
+import {sendGmail} from './gmail.mjs';
 import {calendarOAuthFetch,writableCalendar,validateCalendarJobKey} from './calendar-oauth.mjs';
 import {Buffer} from 'node:buffer';
 import {statement} from './store.mjs';
@@ -66,14 +67,20 @@ export async function drainOutbox(env){
   const payload=JSON.parse(job.payload);let gone=[];
   try{
    if(job.kind==='mail'){
-    if(env.MAIL_ENABLED!=='true'||!env.MAIL_API_KEY||!env.MAIL_FROM)throw Error('E-Mail-Zustellung deaktiviert.');
+    if(env.MAIL_ENABLED!=='true'||!(env.MAIL_PROVIDER==='gmail'?env.GMAIL_READY==='true':env.MAIL_API_KEY&&env.MAIL_FROM))throw Error('E-Mail-Zustellung deaktiviert.');
     const m=payload.message;
-    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.MAIL_API_KEY,'Content-Type':'application/json','Idempotency-Key':job.id},body:JSON.stringify({from:env.MAIL_FROM,to:[m.to],subject:m.subject,text:m.body}),signal:AbortSignal.timeout(10000)});
-    if(!response.ok)throw Error('E-Mail-Zustellung HTTP '+response.status);
+    if(env.MAIL_PROVIDER==='gmail'){
+     if(payload.gmailAttempted)throw Object.assign(Error('Gmail-Versandstatus nach Unterbrechung unklar. Gesendet-Ordner prüfen.'),{uncertain:true});
+     payload.gmailAttempted=true;
+     await statement(env.DB,'UPDATE outbox SET payload=? WHERE id=?',JSON.stringify(payload),job.id).run();
+     await sendGmail(env,m,job.id);
+    }
+    else{const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.MAIL_API_KEY,'Content-Type':'application/json','Idempotency-Key':job.id},body:JSON.stringify({from:env.MAIL_FROM,to:[m.to],subject:m.subject,text:m.body}),signal:AbortSignal.timeout(10000)});
+    if(!response.ok)throw Error('E-Mail-Zustellung HTTP '+response.status);}
    }else if(job.kind==='push'){
     if(env.PUSH_ENABLED!=='true'||!pushConfigured(env))throw Error('Push-Zustellung deaktiviert.');
     const kind=payload.notification.kind,tab=/AVAILABILITY/.test(kind)?'availability':/SHIFT|HANDOVER|PLAN|DUTY/.test(kind)?'standby':/TIMER/.test(kind)?'time':/LEAVE/.test(kind)?'leave':/SICK/.test(kind)?'sick':/MONTH/.test(kind)?'reports':'messages';
-    const results=await Promise.all(payload.devices.map(device=>pushOne(env,{id:device.id,subscription:{endpoint:device.endpoint,p256dh:device.p256dh,auth:device.auth}},{...payload.notification,url:'/firetime.pro/?tab='+tab})));
+    const results=await Promise.all(payload.devices.map(device=>pushOne(env,{id:device.id,subscription:{endpoint:device.endpoint,p256dh:device.p256dh,auth:device.auth}},{...payload.notification,url:'/?tab='+tab})));
     gone=results.filter(x=>x.gone||x.invalid).map(x=>x.id);
     const failed=results.filter(x=>!x.ok&&!x.gone&&!x.invalid);
     if(failed.length){payload.devices=payload.devices.filter(d=>failed.some(x=>x.id===d.id));throw Error('Push teilweise fehlgeschlagen.');}
@@ -90,7 +97,8 @@ export async function drainOutbox(env){
     statement(env.DB,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'")
    ]);return true;
   }catch(err){
-   const terminal=Number(job.attempts)+1>=8,error=String(err.message||'Zustellfehler').slice(0,150);
+   if(job.kind==='mail'&&env.MAIL_PROVIDER==='gmail'&&payload.gmailAttempted){if(err.definitelyNotSent===true)payload.gmailAttempted=false;else err.uncertain=true;}
+   const terminal=err.uncertain===true||Number(job.attempts)+1>=8,error=String(err.message||'Zustellfehler').slice(0,150);
    const changes=[statement(env.DB,"UPDATE outbox SET status=?,payload=?,available_at=?,lease_until=0,error=? WHERE id=?",terminal?'ERROR':'RETRY',JSON.stringify(payload),Date.now()+Math.min(3600000,30000*2**Number(job.attempts)),error,job.id),...await markNotification(env.DB,payload.notificationId,terminal?'ERROR':'QUEUED',error)];
    if(job.kind==='calendar'&&payload.mirrorId&&!payload.delete&&terminal)changes.push(statement(env.DB,"UPDATE records SET data=json_set(data,'$.status','ERROR') WHERE table_name='CalendarMirrors' AND record_id=? AND json_extract(data,'$.sourceHash')=? AND json_extract(data,'$.calendarId')=? AND json_extract(data,'$.eventId')=?",payload.mirrorId,payload.mirrorHash,payload.calendarId,payload.eventId));
    for(const id of gone)changes.push(statement(env.DB,"DELETE FROM records WHERE table_name='PushDevices' AND record_id=? AND company_id=?",id,payload.actor.companyId));

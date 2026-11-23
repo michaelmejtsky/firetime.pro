@@ -1,5 +1,5 @@
 {
-  "version": "2.1.0-migration-candidate",
+  "version": "2.1.0",
   "sourceSha256": "039dd5daad8056f7c90e8dc98a1fd3592b0bd94c820ebc34b152196c94aef6a3",
   "tables": [
     "Companies",
@@ -44,6 +44,8 @@
     "CalendarMirrors"
   ],
   "actions": [
+    "productionStatus",
+    "gmailConnect",
     "calendarAccountStatus",
     "calendarConnect",
     "calendarList",

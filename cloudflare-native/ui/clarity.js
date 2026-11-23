@@ -261,3 +261,18 @@ document.addEventListener('change',event=>{
  const id=field.value,assigned=id?myUsers().find(u=>u.id===id)?.calendarId:firm().calendarId;
  form.elements.namedItem('calendarChoice').value=assigned||'';form.elements.namedItem('calendarId').value='';
 });
+
+FT_CLARITY_READS.add('productionStatus');
+function uiProductionPanel(){
+ if(me()?.role!=='SYSADMIN')return '';
+ return '<section class="card"><h2>Systembetrieb · FireTime Pro</h2>'+uiRemote('productionStatus',{},s=>uiKpis([['Betrieb',s.production?'Produktiv':'Einrichtung'],['Automatische Abläufe',s.automations?'Aktiv':'Aus'],['E-Mail',s.mail.connected?'Verbunden':'Freigabe fehlt'],['Push',s.push.configured?'Eingerichtet':'Wird eingerichtet']])+'<p>Zentraler Absender: <strong>'+E(s.mail.email)+'</strong></p>'+(s.mail.connected?'<p class="ui-note">E-Mail-Versand ist verbunden. Einladungen und Erinnerungen werden im Hintergrund versendet.</p>':uiButton('Gmail-Versand verbinden','gmailConnect','',true)+'<p class="ui-caption">Einmal mit dem zentralen FireTime-Google-Konto bestätigen. Nur die Berechtigung zum Senden wird benötigt.</p>')+'<p>Firmenadmin BSB3100: <strong>'+E(s.pilotAdmin||'Nicht vorkonfiguriert')+'</strong>. Die einmalige Zugangseinrichtung erfolgt nach der Gmail-Verbindung automatisch.</p>'+uiFold('Zustellstatus',s.outbox.length?'<div class="table"><table><tr><th>Kanal</th><th>Status</th><th>Anzahl</th></tr>'+s.outbox.map(x=>'<tr><td>'+E(x.kind)+'</td><td>'+E(x.status)+'</td><td>'+E(x.count)+'</td></tr>').join('')+'</table></div>':'<p>Noch keine Zustellungen.</p>')+uiButton('Status aktualisieren','refresh'),'uiProductionStatus')+'</section>';
+}
+const UI_PRODUCTION_CUSTOMERS=customers,UI_PRODUCTION_ACTION=action;
+customers=function(){return uiProductionPanel()+UI_PRODUCTION_CUSTOMERS();};
+action=async function(button){
+ if(button.dataset.act==='ui:gmailConnect'){
+  button.disabled=true;try{const result=await api('gmailConnect'),url=new URL(result.url);if(url.origin!=='https://accounts.google.com'||url.pathname!=='/o/oauth2/v2/auth')throw Error('Google-Adresse ungültig.');location.assign(url.href);}catch(err){say(err.message,true);button.disabled=false;}return;
+ }
+ return UI_PRODUCTION_ACTION(button);
+};
+if(new URLSearchParams(location.search).get('gmail')==='connected'&&ST.token){ST.cid='';ST.tab='customers';queueMicrotask(()=>load({force:true}));history.replaceState(null,'',location.pathname);}

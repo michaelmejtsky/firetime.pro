@@ -76,7 +76,7 @@ for(const name of ['ft_activate','ft_changePassword','ft_passwordResetConfirm_',
  native=native.replace(original,updated);
 }
 native=native.replace("  case 'adminOverview':return ft_adminOverview_(u,p);\n  case 'adminOverview':return ft_adminOverview_(u,p);","  case 'adminOverview':return ft_adminOverview_(u,p);");
-const exports=['ft_calendarSelectionSave_','ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
+const exports=['ft_pilotProvision_','ft_calendarSelectionSave_','ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
 const globals='Utilities,PropertiesService,CacheService,SpreadsheetApp,DriveApp,CalendarApp,MailApp,DocumentApp,ScriptApp,LockService,UrlFetchApp,Logger,MimeType,ContentService,Date';
 const domain=fs.readFileSync(path.join(root,'src/domain.js'),'utf8');
 const generated=`// GENERATED from apps-script/Code.gs. Run npm run build. No runtime eval.\nexport function createCore(runtime){\nconst {${globals}}=runtime.globals;\n${native}\nconst FT_NATIVE_PREF_COLS=runtime.schema.EmployeePreferences,FT_NATIVE_BREAK_COLS=runtime.schema.ActivityBreakPolicies;\n${domain}\nreturn {${exports.join(',')},headers:FT_HEADERS};\n}\n`;
@@ -88,6 +88,7 @@ const gateway=fs.readFileSync(path.join(repo,'cloudflare/worker.js'),'utf8');
 fs.writeFileSync(path.join(root,'dist/push.mjs'),gateway.slice(gateway.indexOf('const PUSH_MAX_BATCH'),gateway.indexOf('async function pushInternal')).replace("kind:notification.kind||'MESSAGE'","kind:notification.kind||'MESSAGE',...(Number.isSafeInteger(notification.unreadCount)?{unreadCount:notification.unreadCount}:{})")+'\nexport {pushOne,pushConfigured};\n');
 for(const file of fs.readdirSync(path.join(root,'src')))fs.copyFileSync(path.join(root,'src',file),path.join(root,'dist',file));
 for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.copyFileSync(path.join(repo,file),path.join(root,'dist/public',file));
+const webManifest=JSON.parse(fs.readFileSync(path.join(root,'dist/public/manifest.webmanifest'),'utf8'));Object.assign(webManifest,{id:'/',start_url:'/',scope:'/',description:'Arbeitszeiten, Bereitschaften, Aufgaben und Urlaubsverwaltung',theme_color:'#142e56',background_color:'#0b1d35'});fs.writeFileSync(path.join(root,'dist/public/manifest.webmanifest'),JSON.stringify(webManifest,null,2));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
 html=html.replaceAll('max. 2 MB','max. 10 MB');
@@ -96,20 +97,20 @@ html=html.replace('file.size>8*1024*1024','file.size>10*1024*1024').replace('JPG
  .replace('Math.max(.45,.8-n*.065)','Math.max(.6,.9-n*.05)').replace('encoded.length<870000','encoded.length<=Math.floor(10*1024*1024*4/3)');
 
 html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
-html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0-preview'")
+html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0'")
  .replace("credentials:'omit'","credentials:'same-origin'")
  .replace("body:JSON.stringify(request),cache:","body:JSON.stringify(request),cache:");
 // Each user intent carries one idempotency key; no automatic retry of writes.
 html=html.replace("headers:{'Content-Type':'application/json'},\n      body:JSON.stringify(request)","headers:{'Content-Type':'application/json','X-Request-Id':crypto.randomUUID()},\n      body:JSON.stringify(request)");
-html=html.replace('<body>','<body><div style="padding:8px 16px;background:#173b69;color:#fff;font:14px system-ui">FireTime Pro · Cloudflare-Testversion</div>');
+// Native release: no preview banner on the production app.
 html=html.replace('const views={dashboard,customers,license,staff,time,reports,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};','const views={dashboard,customers,license,staff,time,reports,totals:ftTotals_,leave,work,standby,sick,availability,rules,settings,profile,messages:ftMessages_};').replace("['Zeit & Berichte',['reports']]","['Zeit & Berichte',['reports','totals']]").replaceAll('Post/Aufgaben','Aufgaben').replaceAll('ungelesene Nachrichten','ungelesene Aufgaben').replaceAll('Kalender teilen & Einladungen','Haupt- und Mitarbeiterkalender').replaceAll('Im Kalender teilen & Einladungen senden','In Haupt- und Mitarbeiterkalender übertragen').replaceAll('Jedes Firmenlogo wird auch in die PDF-Monatsberichte übernommen.','Monats-PDFs enthalten scharfen Text und getrennte Abschnitte für Arbeit und Bereitschaft.');
 html=html.replace('</head>','<style>'+fs.readFileSync(path.join(root,'ui/clarity.css'),'utf8')+'</style></head>').replace('</script></body>',fs.readFileSync(path.join(root,'ui/clarity.js'),'utf8')+'\n</script></body>');
 fs.writeFileSync(path.join(root,'dist/public/index.html'),html);
-const sw=fs.readFileSync(path.join(root,'dist/public/sw.js'),'utf8').replace(/firetime-shell-\d+-v\d+/g,'firetime-native-preview-v210');
+const sw=fs.readFileSync(path.join(root,'dist/public/sw.js'),'utf8').replace(/firetime-shell-\d+-v\d+/g,'firetime-shell-native-v210-'+createHash('sha256').update(html).digest('hex').slice(0,12));
 fs.writeFileSync(path.join(root,'dist/public/sw.js'),sw);
 fs.writeFileSync(path.join(root,'dist/public/config.js'),"window.FT_API_URL = location.origin + '/api';\n");
-const actions=['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest','storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
-const manifest={version:'2.1.0-migration-candidate',sourceSha256:createHash('sha256').update(source).digest('hex'),tables:Object.keys(schemas),actions,overrides:Object.keys(overrides)};
+const actions=['productionStatus','gmailConnect','calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest','storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
+const manifest={version:'2.1.0',sourceSha256:createHash('sha256').update(source).digest('hex'),tables:Object.keys(schemas),actions,overrides:Object.keys(overrides)};
 fs.writeFileSync(path.join(root,'src/contract.json'),JSON.stringify(manifest,null,2)+'\n');
 fs.copyFileSync(path.join(root,'src/contract.json'),path.join(root,'dist/contract.json'));
 console.log(`Built native candidate: ${actions.length} actions, ${Object.keys(schemas).length} tables; production files unchanged.`);
