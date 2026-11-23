@@ -18,3 +18,30 @@
 .ui-note{color:#244b7d}.ft-mobile-bar{background:#142e56;border-top-color:#375e8d}
 .ft-mobile-bar button.on{background:#2563eb;color:#fff}.ft-mobile-panel{background:#142e56;border-color:#375e8d}
 .ft-mobile-group button{background:#1b3c68}.ft-mobile-group button.on{background:#244f86;border-left-color:#60a5fa}
+/* Full dark-blue workspace, including cards, forms and expandable sections. */
+:root{color-scheme:dark;--ft-bg:#0b1d35;--ft-card:#142e4c;--ft-border:#345577;--ft-muted:#bdd0e6}
+.main{background:#0b1d35;color:#eff6ff}
+.main .card,.main details.ui-fold,.main .ui-kpi,.main .ft-duty-card{background:#142e4c;border-color:#345577;color:#eff6ff}
+.main h1,.main h2,.main h3,.main .metric,.main .ui-kpi strong{color:#eff6ff}
+.main .muted,.main .small,.main .field>span,.main th,.main .ui-caption,.main .ui-empty,.main .ui-kpi span,.main .ft-absence-help,.main .ft-leave-account-note{color:#bdd0e6}
+.main .field input,.main .field select,.main .field textarea,.main input,.main select,.main textarea{background:#0e233d;color:#f1f7ff;border-color:#496b91;color-scheme:dark}
+.main .btn{background:#23466d;color:#edf5ff;border-color:#4d719a}.main .btn.primary{background:#2563eb;color:#fff;border-color:#3b82f6}
+.main .btn.danger{background:#4a253b;color:#ffd1d5;border-color:#96516a}
+.main a{color:#93c5fd}.main td,.main th{border-color:#345577}
+.main .ui-tabs button,.main .ui-month-chip{background:#17385c;border-color:#496b91;color:#e4efff}.main .ui-tabs button.on{background:#2563eb;border-color:#60a5fa;color:white}
+.main .ui-note,.main .help,.main .ui-people label,.main .ft-msg-reply,.main .ft-time-pause-help{background:#1b3b60;color:#dcecff;border-color:#345577}
+.main .ui-note,.main .help{border-left-color:#60a5fa}
+.main .ft-absence-stat,.main .ft-absence-status,.main .ft-leave-stat{background:#1b3b60;color:#e4efff}
+.main .ft-plan-message{color:#c4ddf9}.main .ft-task-deadline{color:#f5d399}
+.main .ui-task,.main .ui-time-list .ui-task{background:#142e4c;color:#eff6ff;border-color:#345577}
+.main .ui-task[data-state=OPEN],.main .ui-task[data-state=RETURNED]{background:#422d40;border-color:#986072}
+.main .ui-task[data-state=ACCEPTED]{background:#413d29;border-color:#927f42}
+.main .ui-task[data-state=DONE]{background:#1c413f;border-color:#448573}
+.main .ui-task[data-state=CLOSED]{background:#142e4c;border-color:#345577}
+.main .ui-task-meta{color:#c0d2e6}.main .ui-task-body{border-top-color:#ffffff1a}
+.main .ui-task-status,.main .ui-pill{background:#294967;color:#e7f2ff}
+.main .ui-pill.ok,.main .ui-month-chip.done{background:#1c493f;color:#c3f6dd;border-color:#448573}
+.main .ui-pill.warn,.main .ui-month-chip.open{background:#494128;color:#ffe5a9;border-color:#927f42}
+.main .ui-pill.bad{background:#522c3d;color:#ffd0d8}.main .ui-pill.neutral{background:#29415c;color:#d2e3f5}
+.main .ui-row-open{background:#422d40}.main .ui-row-submitted{background:#413d29}.main .ui-row-approved{background:#1c413f}
+@media print{.main,.main .card,.main details.ui-fold,.main .ui-task,.main .ui-kpi{background:#fff!important;color:#172c44!important}.main h1,.main h2,.main h3,.main .metric,.main .ui-kpi strong,.main .ui-kpi span,.main .muted,.main .small,.main th,.main .ui-task-meta{color:#172c44!important}}
