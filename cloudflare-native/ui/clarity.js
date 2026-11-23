@@ -276,3 +276,8 @@ action=async function(button){
  return UI_PRODUCTION_ACTION(button);
 };
 if(new URLSearchParams(location.search).get('gmail')==='connected'&&ST.token){ST.cid='';ST.tab='customers';queueMicrotask(()=>load({force:true}));history.replaceState(null,'',location.pathname);}
+
+// Public information stays accessible from the sign-in screen.
+const UI_PUBLIC_AUTH=auth;
+auth=function(){const result=UI_PUBLIC_AUTH();const login=document.querySelector('.login');if(login&&!login.querySelector('[data-public-links]'))login.insertAdjacentHTML('beforeend','<nav data-public-links style="display:flex;gap:16px;flex-wrap:wrap;margin-top:22px;font-size:14px"><a href="/info" style="color:#93c5fd">Über FireTime</a><a href="/datenschutz" style="color:#93c5fd">Datenschutz</a><a href="/impressum" style="color:#93c5fd">Impressum</a></nav>');return result;};
+if(!ST.token)queueMicrotask(()=>auth());

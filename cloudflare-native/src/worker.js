@@ -1,3 +1,4 @@
+import {publicPage} from './public-pages.mjs';
 import {productionSettings,productionStatus} from './production.mjs';
 import {startGmailConnect,finishGmailConnect} from './gmail.mjs';
 import {calendarAccountStatus,startCalendarConnect,finishCalendarConnect,calendarList,verifyCalendarSelection} from './calendar-oauth.mjs';
@@ -89,6 +90,7 @@ async function provisionPilot(env){
 export default {
  async fetch(request,env,ctx){
   const url=new URL(request.url),origin=allowedOrigin(request,env),path=url.pathname.replace(/^\/firetime\.pro(?=\/)/,'');
+  if(['GET','HEAD'].includes(request.method)){const publicInfo=publicPage(path,env);if(publicInfo)return request.method==='HEAD'?new Response(null,{status:200,headers:publicInfo.headers}):publicInfo;}
   if(path==='/first-start'){
    if(env.FIRST_START_ENABLED!=='true')return json({ok:false,error:'Ersteinrichtung ist deaktiviert.'},404,origin);
    if(request.method==='GET')return firstStartPage();
