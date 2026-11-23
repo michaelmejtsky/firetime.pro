@@ -187,7 +187,7 @@ document.addEventListener('toggle',event=>{
 },true);
 document.addEventListener('change',event=>{const el=event.target;if(el.name==='uiYear'){ST.uiYear=el.value;page();}if(el.form?.id==='uiTimeForm'&&el.name==='start')ftTimeSyncEndDate_(el.form);});
 
-settings=function(){return FT_CLARITY_OLD.settings().replace('Google-Kalender-ID','Hauptkalender-ID für Bereitschaften').replace('Google-Kalender aktivieren','Haupt- und Mitarbeiterkalender aktivieren').replace('<h2>Arbeitszeitmodell</h2>','<h2>Arbeitszeitmodell</h2><p class="ui-note">Persönliche Kalender-IDs stehen in den Mitarbeiter-Stammdaten. Bereitschaften werden in den Hauptkalender und den jeweiligen Mitarbeiterkalender übertragen. Aufgabenfristen erscheinen im persönlichen Kalender. Alle Zielkalender müssen für das Kalender-Servicekonto mit Schreibrecht freigegeben sein.</p>');};
+settings=function(){return FT_CLARITY_OLD.settings().replace('Google-Kalender-ID','Hauptkalender-ID für Bereitschaften').replace('Google-Kalender aktivieren','Haupt- und Mitarbeiterkalender aktivieren').replace('<h2>Arbeitszeitmodell</h2>','<h2>Arbeitszeitmodell</h2><p class="ui-note">Kalender werden oben unter „Google Kalender · Firma“ zugeordnet. Nach dem Verbinden des Firmen-Google-Kontos kannst du dort den Hauptkalender oder einen Mitarbeiter auswählen und dessen Kalender-ID hinterlegen. Mitarbeiter können alternativ unter „Mein Konto“ ihr eigenes Google-Konto verbinden.</p>');};
 
 function uiDriveStoragePanel(){
  if(me()?.role!=='SYSADMIN')return '';

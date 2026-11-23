@@ -6,7 +6,7 @@
 /* Shared blue theme for sign-in, desktop and mobile navigation. */
 :root{--accent:#2563eb!important;--secondary:#142e56!important;color-scheme:light}
 .side{background:linear-gradient(180deg,#142e56,#0d2140);border-right-color:#274a76}
-.brand em{color:#93c5fd}.nav button.on{background:#2563eb;color:#fff}.nav button:hover{background:#244b7d;color:#fff}
+.brand em{color:#ff8a3d}.nav button.on{background:#2563eb;color:#fff}.nav button:hover{background:#244b7d;color:#fff}
 .login-wrap{background:radial-gradient(ellipse at top right,#285a96,#0d2140 70%);color-scheme:dark}
 .login{background:#142e56;border-color:#375e8d;box-shadow:0 20px 70px #06152c66}
 .btn.primary,.main .btn.primary{background:#2563eb;border-color:#2563eb;color:#fff}
