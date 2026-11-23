@@ -53,6 +53,15 @@ const names=ast.body.filter(x=>x.type==='FunctionDeclaration').map(x=>x.id.name)
 for(const name of Object.keys(overrides))if(!names.includes(name))throw Error('Missing override '+name);
 let native=source;
 for(const node of [...ast.body].reverse())if(node.type==='FunctionDeclaration'&&(overrides[node.id.name]||nativeAliases.has(node.id.name))){const replacement=nativeAliases.has(node.id.name)?source.slice(node.start,node.end).replace('function '+node.id.name+'(', 'function ft_legacy_'+node.id.name.slice(3)+'('):overrides[node.id.name];native=native.slice(0,node.start)+replacement+native.slice(node.end);}
+// Native account policy: four characters for activation, change and recovery.
+// Keep the legacy Apps Script deployment and protected first-start policy unchanged.
+for(const name of ['ft_activate','ft_changePassword','ft_passwordResetConfirm_','ft_passwordResetLink_']){
+ const node=ast.body.find(x=>x.type==='FunctionDeclaration'&&x.id.name===name);
+ const original=source.slice(node.start,node.end);
+ const updated=original.replaceAll('.length<12','.length<4').replaceAll('12–150','4–150').replaceAll('12 bis 150','4 bis 150').replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen');
+ if(updated===original)throw Error('Missing native password policy target '+name);
+ native=native.replace(original,updated);
+}
 native=native.replace("  case 'adminOverview':return ft_adminOverview_(u,p);\n  case 'adminOverview':return ft_adminOverview_(u,p);","  case 'adminOverview':return ft_adminOverview_(u,p);");
 const exports=['ft_nativeInitialize_','ft_api','ft_login','ft_activate','ft_logout','ft_changePassword','ft_passwordResetRequest_','ft_passwordResetConfirm_','ft_brandForLogin','ft_tick','ft_timerTick_','ft_pdfWorker_','ft_password_','ft_fastSha256Utf8_','ft_report_','ft_monthBounds_','ft_shiftRange_','ft_categoryHours_','ft_get_','ft_sha_','ft_safe_','ft_auth_'];
 const globals='Utilities,PropertiesService,CacheService,SpreadsheetApp,DriveApp,CalendarApp,MailApp,DocumentApp,ScriptApp,LockService,UrlFetchApp,Logger,MimeType,ContentService,Date';
@@ -68,6 +77,7 @@ for(const file of fs.readdirSync(path.join(root,'src')))fs.copyFileSync(path.joi
 for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.copyFileSync(path.join(repo,file),path.join(root,'dist/public',file));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
+html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
 html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0-preview'")
  .replace("credentials:'omit'","credentials:'same-origin'")
  .replace("body:JSON.stringify(request),cache:","body:JSON.stringify(request),cache:");
