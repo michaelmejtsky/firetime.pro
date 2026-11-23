@@ -27,7 +27,7 @@
     "MIGRATION_MODE": "production",
     "WRITE_ENABLED": "true",
     "CUTOVER_CONFIRMED": "true",
-    "FIRST_START_ENABLED": "true",
+    "FIRST_START_ENABLED": "false",
     "PUBLIC_ORIGINS": "",
     "MAIL_ENABLED": "false",
     "PUSH_ENABLED": "false",
