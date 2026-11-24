@@ -45,7 +45,15 @@ export async function finishCalendarConnect(env,url){
  const old=await rowFor(env,t.key),pub=old?JSON.parse(old.public_json):{};
  if(old&&(pub.sub!==user.sub||pub.clientId!==client.id))throw fail('Dieses Kalenderkonto ist bereits zugeordnet. Bitte dasselbe Google-Konto verwenden.',409);
  const refreshToken=data.refresh_token||(old?(await unseal(env,t.key,old.encrypted)).refreshToken:'');if(!refreshToken)throw fail('Google hat keinen dauerhaften Zugriff erteilt. Bitte erneut verbinden.',503);
- await sql(env.DB,'INSERT INTO integrations VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET encrypted=excluded.encrypted,public_json=excluded.public_json,updated_at=excluded.updated_at',t.key,await sealCalendar(env,t.key,{refreshToken}),JSON.stringify({companyId:t.cid,userId:t.uid,sub:user.sub,email:user.email,clientId:client.id}),new Date().toISOString()).run();return {connected:true};
+ // An explicit reconnection restores this credential's stopped calendar queue.
+ // Otherwise an old terminal failure would permanently block all later edits
+ // and deletions of the same event, even after Google access was restored.
+ await env.DB.batch([
+  sql(env.DB,'INSERT INTO integrations VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET encrypted=excluded.encrypted,public_json=excluded.public_json,updated_at=excluded.updated_at',t.key,await sealCalendar(env,t.key,{refreshToken}),JSON.stringify({companyId:t.cid,userId:t.uid,sub:user.sub,email:user.email,clientId:client.id}),new Date().toISOString()),
+  sql(env.DB,"UPDATE outbox SET status='QUEUED',attempts=0,available_at=0,lease_until=0,error='' WHERE kind='calendar' AND status='ERROR' AND json_extract(payload,'$.companyId')=? AND coalesce(json_extract(payload,'$.connectionKey'),'calendar:'||json_extract(payload,'$.companyId'))=?",t.cid,t.key),
+  sql(env.DB,"UPDATE records SET data=json_set(data,'$.status','QUEUED') WHERE table_name='CalendarMirrors' AND company_id=? AND json_extract(data,'$.status')='ERROR' AND coalesce(json_extract(data,'$.connectionKey'),'calendar:'||company_id)=?",t.cid,t.key),
+  sql(env.DB,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'")
+ ]);return {connected:true};
 }
 const tokens=new Map();
 async function access(env,key){const row=await rowFor(env,key);if(!row)throw fail('Google Kalender bitte zuerst in FireTime verbinden.',503);const pub=JSON.parse(row.public_json),client=calendarClient(env);if(pub.clientId!==client.id)throw fail('Google Kalender bitte erneut verbinden.',503);const secret=await unseal(env,key,row.encrypted),cacheKey=hash(key+'|'+secret.refreshToken+'|'+client.id),cached=tokens.get(cacheKey);if(cached?.until>Date.now()+60000)return cached.token;

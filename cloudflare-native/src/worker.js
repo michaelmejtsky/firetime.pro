@@ -109,7 +109,7 @@ export default {
   if(path==='/calendar-callback'){
    const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"};
    if(request.method!=='GET')return new Response('Nur GET erlaubt.',{status:405,headers:secureHeaders});
-   try{await finishCalendarConnect(env,url);return new Response(null,{status:303,headers:{...secureHeaders,Location:'/?calendar=connected'}});}
+   try{await finishCalendarConnect(env,url);ctx.waitUntil(productionSettings(env).then(drainOutbox));return new Response(null,{status:303,headers:{...secureHeaders,Location:'/?calendar=connected'}});}
    catch(err){return new Response(String(err.message||'Kalenderverbindung fehlgeschlagen.').slice(0,250),{status:err.status||400,headers:{...secureHeaders,'Content-Type':'text/plain; charset=utf-8'}});}
   }
   if(path==='/drive-callback'){

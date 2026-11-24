@@ -1,6 +1,6 @@
 # FireTime Pro – Cloudflare-Umbau
 
-**Stand: 23.11.2026 · Migrationskandidat, noch keine Produktivfreigabe.**
+**Stand: 24.11.2026 · Die frische Instanz ist für den vom Betreiber freigegebenen Firmenpilot konfiguriert. Prüfstand und Grenzen: [Systemprüfung](docs/PRUEFUNG_2026-11-24.md). Die historischen Import-/Staging-Anleitungen unten sind davon getrennt.**
 
 Der neue Worker führt die vorhandene Fachlogik auf Cloudflare aus. D1 ersetzt Sheets. Der neue Neustart verwendet private Dateien in Google Drive über die direkte Drive-API; die bisher vorbereitete R2-Staging-Variante bleibt optional. Normale Anmeldung, Stundenberechnung, Zeiterfassung, Urlaub, Planung, Aufgaben und PDFs benötigen kein Apps Script. Die bisherige Oberfläche bleibt im Bestand; die getrennte Cloudflare-Oberfläche erhält die vereinfachte Bedienung. Google Calendar bleibt eine optionale externe Integration über die offizielle REST-API. E-Mails benötigen einen verifizierten Absender bei Resend. Push wird direkt vom Worker zugestellt.
 
@@ -31,12 +31,12 @@ Die konkrete neue Instanz verwendet `wrangler.fresh.jsonc`, die bereits angelegt
 
 Die Oberfläche enthält Aufgabenreiter mit Statusfarben und aufklappbaren Details, Mehrfachzuordnung an Mitarbeiter, getrennte Monats-/Jahreskonten, Urlaubsübersichten, farbige Abgabematrizen und vereinfachte Stammdaten. Details und selten benötigte Angaben sind eingeklappt. Alte Nachrichten bleiben im Importbestand erhalten, sind in den Aufgabenansichten und Aufgaben-APIs ausgeblendet.
 
-- **Firmenprofil → Hauptkalender-ID:** gemeinsamer Google-Kalender für Bereitschaften.
-- **Mitarbeiter → Bearbeiten → Persönliche Kalender-ID:** Kalender der jeweiligen Person, optional. Die Google-Kalender-ID verwenden, keinen Freigabelink.
-- **Haupt- und Mitarbeiterkalender aktivieren:** setzt das Firmenmodul voraus. Zusätzlich müssen Worker-Flag, Google-Servicekonto und Schreibrechte eingerichtet sein. Jeder Zielkalender muss für das Servicekonto mit Schreibrecht freigegeben werden. Kalender-IDs allein erteilen keinen Zugriff.
+- **Firmenprofil → Google Kalender · Firma:** Firmen-Google-Konto per OAuth verbinden. Danach unter „Kalender zuordnen zu“ Hauptkalender oder aktiven Mitarbeiter wählen und bestehenden Kalender auswählen oder ID eintragen.
+- **Mein Konto → Mein Google-Kalender:** Mitarbeiter können alternativ ihr eigenes Google-Konto verbinden und den persönlichen Kalender zuordnen. Das verbundene Konto braucht Schreibzugriff; eine ID allein erteilt diesen nicht.
+- Für die frische Instanz ist `CALENDAR_AUTH=oauth` aktiv. Kunden benötigen kein eigenes Google-Cloud-Projekt und keine Dienstkontofreigabe. Die alte Dienstkonto-Variante betrifft ausschließlich andere ausdrücklich so konfigurierte Umgebungen.
 - Der festgelegte und veröffentlichte Bereitschaftsplan wird über den bisherigen Schritt „Kalender teilen“ in den Hauptkalender und die eingetragenen persönlichen Kalender übertragen. Ohne persönliche ID bleibt der bisherige Einladungsweg bestehen; bei direkter Spiegelung wird keine zusätzliche Einladung an dieselbe Person erzeugt.
 - Aufgabenfristen erscheinen ganztägig im persönlichen Kalender. Änderungen aktualisieren den bestehenden Termin; nach endgültiger Kontrolle/Abschluss wird er entfernt. Zurückgesendete Aufgaben bleiben sichtbar; erneut geöffnete abgeschlossene Aufgaben erhalten einen neuen Termin. Ein Kalenderwechsel entfernt den bisherigen Spiegel.
-- Änderungen werden zunächst dauerhaft vorgemerkt, anschließend über die Zustellwarteschlange abgearbeitet. Wiederholungen einer laufenden Übertragung erzeugen keine neuen Termine. Echte Google-Zustellung wurde lokal simuliert; eine Freigabe erfordert einen Test mit dem vorgesehenen Servicekonto.
+- Änderungen werden dauerhaft vorgemerkt und über die Zustellwarteschlange abgearbeitet. Eine ausdrücklich erneut verbundene Kalenderverbindung nimmt deren gestoppte Kalenderaufträge wieder auf; unklare Gmail-Aufträge werden dabei nicht erneut versendet. Echte Google-Zustellung wurde lokal simuliert; erforderlich bleibt ein Test mit dem vorgesehenen Firmen-/Mitarbeiterkonto.
 - Die neue Pausen-Checkbox bestätigt eine tatsächlich genommene Pause. Bei mehr als sechs Stunden werden mindestens 30 Minuten berücksichtigt; vorhandene manuelle Pausen zählen mit. Ohne Pause bleiben die tatsächlichen Stunden erhalten, eine Abweichung kann vom Admin dokumentiert geprüft werden. Ein automatischer Hintergrund-Stopp erfindet keine Pause.
 - Urlaub in Stunden wird nur mit hinterlegter Tagesstundenbasis oder passendem Büroprofil angezeigt. Bei flexiblen Modellen wird keine pauschale 8-Stunden-Annahme verwendet. Fehlt bei einem flexiblen Urlaub über Monats-/Jahresgrenzen die konkrete Tageszuordnung, zeigt die Teilperiodenübersicht „Zuordnung offen“ statt erfundener anteiliger Urlaubstage.
 

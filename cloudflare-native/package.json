@@ -16,7 +16,8 @@
   },
   "devDependencies": {
     "acorn": "^8.15.0",
-    "wrangler": "4.50.0"
+    "jsdom": "31.0.1",
+    "wrangler": "4.168.0"
   },
   "engines": {
     "node": ">=22.13"

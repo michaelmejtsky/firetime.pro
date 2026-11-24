@@ -97,6 +97,10 @@ html=html.replace('file.size>8*1024*1024','file.size>10*1024*1024').replace('JPG
  .replace('Math.max(.45,.8-n*.065)','Math.max(.6,.9-n*.05)').replace('encoded.length<870000','encoded.length<=Math.floor(10*1024*1024*4/3)');
 
 html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
+// A previous appinstalled event is not evidence that the app is still installed.
+// Users may uninstall it while the old localStorage flag remains in the browser.
+html=html.replace("const installed=()=>standalone()||localStorage.getItem(installKey)==='yes';","const installed=()=>standalone();")
+ .replace('Öffne das Installationssymbol in der Adressleiste von Chrome oder Edge oder verwende das Browsermenü „App installieren“.','Bitte in einem normalen Chrome- oder Edge-Fenster öffnen. Chrome: ⋮ → „Streamen, speichern und teilen“ → „Seite als App installieren“. Edge: ⋯ → „Apps“ → „Diese Site als App installieren“. Im Inkognito-/InPrivate-Fenster ist die Installation nicht verfügbar.');
 html=html.replace("const FT_VISIBLE_VERSION='1.8.28'","const FT_VISIBLE_VERSION='2.1.0'")
  .replace("credentials:'omit'","credentials:'same-origin'")
  .replace("body:JSON.stringify(request),cache:","body:JSON.stringify(request),cache:");

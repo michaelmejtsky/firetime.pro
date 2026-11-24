@@ -26,6 +26,23 @@ async function connect(env,token='a',kind='company',cid='c1'){
  const callback=new URL('/calendar-callback',origin);callback.search=new URLSearchParams({state:u.searchParams.get('state'),code:'test-code'});
  await finishCalendarConnect(env,callback);return callback;
 }
+test('explicit calendar reconnection resumes failed calendar jobs only for that connection and tenant',async()=>{
+ const env=envFor(),g=google();try{
+  await connect(env);env.MIGRATION_MODE='production';env.CUTOVER_CONFIRMED='true';
+  const data={companyId:'c1',connectionKey:'calendar:c1',calendarId:'existing@example.test',eventId:'recovery-event',create:true,data:{summary:'Prüftermin'}};
+  for(const [id,kind,payload] of [
+   ['recover','calendar',data],
+   ['other-company','calendar',{...data,companyId:'c2',connectionKey:'calendar:c2'}],
+   ['personal','calendar',{...data,userId:'u1',connectionKey:'calendar-user:c1:u1'}],
+   ['uncertain-mail','mail',{gmailAttempted:true,message:{to:'never@example.test'}}]
+  ])env.DB.sqlite.prepare("INSERT INTO outbox(id,kind,payload,status,attempts,available_at,created_at) VALUES(?,?,?,'ERROR',8,0,?)").run(id,kind,JSON.stringify(payload),new Date().toISOString());
+  await connect(env);
+  const status=id=>env.DB.sqlite.prepare('SELECT * FROM outbox WHERE id=?').get(id);
+  assert.equal(status('recover').status,'QUEUED');assert.equal(status('recover').attempts,0);
+  for(const id of ['other-company','personal','uncertain-mail'])assert.equal(status(id).status,'ERROR');
+  await drainOutbox(env);assert.equal(status('recover').status,'SENT');
+ }finally{g.restore();env.DB.sqlite.close();}
+});
 test('company OAuth binds session and tenant, encrypts tokens and consumes callback once',async()=>{
  const env=envFor(),g=google();try{
   await assert.rejects(()=>execute(env,call('1','calendarConnect',{companyId:'c1',kind:'company'}),'',origin),/Firmenadministratoren/);
