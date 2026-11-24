@@ -18,8 +18,12 @@ try{
  const pdf=Buffer.from('%PDF-1.4\n'+'synthetic '.repeat(20)).toString('base64');
  const saved=await request({type:'api',token:login.data.token,action:'pdfStore',data:{month:'2026-11',requestId:'workerd-smoke-pdf-request',base64:pdf}});
  const downloaded=await request({type:'api',token:login.data.token,action:'pdfChunk',data:{month:'2026-11',id:saved.data.id,index:0}});assert.equal(downloaded.data.base64,pdf);
+ const photo=Buffer.alloc(10*1024*1024-16);photo.set([137,80,78,71,13,10,26,10]);
+ const assigned=await request({type:'api',token:'a'.repeat(64),action:'tasksCreate',data:{companyId:'c1',recipientIds:['u1'],title:'Großes Testfoto',body:'Synthetischer Größen- und Speichertest',photo:{mime:'image/png',name:'synthetic-large.png',data:photo.toString('base64')}}});
+ const thread=assigned.data.threads[0];const image=await request({type:'api',token:login.data.token,action:'commPhoto',data:{threadId:thread.id,attachmentId:thread.attachmentId}});
+ assert.equal(Buffer.from(image.data.data,'base64').length,photo.length);
  const health=await mf.dispatchFetch('https://preview.test/health');assert.equal((await health.json()).mode,'staging');
- console.log('PASS: real workerd + D1 + R2: login, shell, activity, PDF upload/download, health. No remote deployment.');
+ console.log('PASS: real workerd + D1 + R2: login, shell, activity, PDF, near-10-MiB task attachment upload/download, health. No remote deployment.');
 }finally{await mf.dispose();env.DB.sqlite.close();}
 
 const firstStartKey='synthetic-first-start-key-not-for-production';
