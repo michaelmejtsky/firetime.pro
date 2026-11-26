@@ -91,6 +91,11 @@ for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.c
 const webManifest=JSON.parse(fs.readFileSync(path.join(root,'dist/public/manifest.webmanifest'),'utf8'));Object.assign(webManifest,{id:'/',start_url:'/',scope:'/',description:'Arbeitszeiten, Bereitschaften, Aufgaben und Urlaubsverwaltung',theme_color:'#142e56',background_color:'#0b1d35'});fs.writeFileSync(path.join(root,'dist/public/manifest.webmanifest'),JSON.stringify(webManifest,null,2));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
+// Named controls such as <input name="id"> shadow HTMLFormElement properties
+// in Safari. Read the DOM attribute for form dispatch and field-change handlers.
+html=html.replaceAll('form.id===',"form.getAttribute('id')===")
+ .replaceAll('x.form?.id',"x.form?.getAttribute('id')")
+ .replace("f.id!=='timeForm'","f.getAttribute('id')!=='timeForm'");
 html=html.replaceAll('max. 2 MB','max. 10 MB');
 html=html.replace('file.size>8*1024*1024','file.size>10*1024*1024').replace('JPG-/PNG-Foto bis 8 MB','JPG-/PNG-Foto bis 10 MB')
  .replace('Math.min(1,1000/Math.max(img.naturalWidth,img.naturalHeight))','Math.min(1,2400/Math.max(img.naturalWidth,img.naturalHeight))')

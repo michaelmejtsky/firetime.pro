@@ -15,7 +15,7 @@ async function ui(role='1',{storedInstalled=false}={}){
  const errors=[],pending=new Set(),vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e.message));
  const dom=new JSDOM(html,{url:'https://isolated.test/',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){
   w.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
-  w.confirm=()=>true;w.prompt=()=> 'Bitte Foto ergänzen';w.alert=()=>{};
+  w.confirm=()=>true;w.prompt=()=> 'Bitte Foto ergänzen';w.alert=()=>{};w.scrollTo=()=>{};
   w.crypto.randomUUID=randomUUID;Object.defineProperty(w.crypto,'subtle',{value:webcrypto.subtle});
   w.TextEncoder=TextEncoder;w.TextDecoder=TextDecoder;w.Response=Response;w.AbortController=AbortController;
   w.fetch=async(url,opts={})=>{
@@ -78,6 +78,37 @@ test('manual time form submits the selected activity and one confirmed automatic
   f.dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await x.settle();
   const rows=x.env.DB.sqlite.prepare("SELECT data FROM records WHERE table_name='Activities'").all().map(r=>JSON.parse(r.data));
   assert.equal(rows.length,1);assert.equal(rows[0].userId,'u1');assert.equal(rows[0].breakMinutes,30);assert.equal(rows[0].type,'OBJECT');assert.deepEqual(x.errors,[]);
+ }finally{x.close();}
+});
+// Safari exposes a named form control before the form's own `id` property.
+// JSDOM does not reproduce named-property clobbering, so model it explicitly.
+function shadowFormId(form){
+ const control=form.elements.namedItem('id');assert.ok(control);
+ Object.defineProperty(form,'id',{configurable:true,get:()=>control});
+ assert.notEqual(typeof form.id,'string');
+}
+test('staff save creates and edits an employee when the hidden id field shadows form.id',async()=>{
+ const x=await ui('a');try{
+  await x.view('staff');let f=x.w.document.querySelector('#staffForm');shadowFormId(f);
+  f.elements.namedItem('name').value='Neue Testperson';f.elements.namedItem('email').value='new-staff@example.test';
+  await x.click('#staffForm [data-ft-staff-save="1"]');
+  const find=()=>x.env.DB.sqlite.prepare("SELECT data FROM records WHERE table_name='Users' AND email='new-staff@example.test'").get();
+  assert.ok(find(),'The employee must be saved even when invitation delivery is unavailable');
+  const u=JSON.parse(find().data);assert.equal(u.name,'Neue Testperson');assert.equal(u.status,'INVITED');
+  await x.click('[data-act="editStaff"][data-id="'+u.id+'"]');f=x.w.document.querySelector('#staffForm');shadowFormId(f);
+  f.elements.namedItem('name').value='Bearbeitete Testperson';f.elements.namedItem('monthlyHours').value='30,5';
+  await x.click('#staffForm [data-ft-staff-save="1"]');
+  assert.equal(JSON.parse(find().data).name,'Bearbeitete Testperson');assert.equal(JSON.parse(find().data).monthlyHours,30.5);
+  assert.deepEqual(x.errors,[]);
+ }finally{x.close();}
+});
+test('time form submits when its hidden id control shadows form.id',async()=>{
+ const x=await ui();try{
+  await x.view('time');const f=x.w.document.querySelector('#uiTimeForm');shadowFormId(f);
+  f.elements.namedItem('start').value='2026-11-06T08:00';f.elements.namedItem('end').value='2026-11-06T09:00';
+  f.dispatchEvent(new x.w.Event('submit',{bubbles:true,cancelable:true}));await x.settle();
+  assert.equal(x.env.DB.sqlite.prepare("SELECT count(*) n FROM records WHERE table_name='Activities'").get().n,1);
+  assert.deepEqual(x.errors,[]);
  }finally{x.close();}
 });
 test('native install entry remains available after a previous installation was removed',async()=>{

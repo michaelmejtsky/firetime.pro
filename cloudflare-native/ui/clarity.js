@@ -166,15 +166,15 @@ action=async function(button){
  if(act==='ui:breakReview'){const note=prompt('Pausenabweichung prüfen. Tatsächliche Arbeitszeit bleibt unverändert. Grund / Prüfergebnis:');if(!note)return;await run(async()=>{await api('breakReview',{activityId:id,companyId:firm().id,note});await load();},'Pausenabweichung geprüft.');return;}
 };
 submit=async function(form){
- if(form.id==='uiTaskEditForm'){const p=fields(form);await run(async()=>{await api('taskUpdate',{companyId:firm().id,threadId:form.dataset.thread,title:p.title,dueDate:p.dueDate||''});await ftCommFetch_(true);},'Aufgabenangaben gespeichert; Kalenderübertragung vorgemerkt.');return;}
- if(form.id==='uiTaskCreateForm'){
+ if(form.getAttribute('id')==='uiTaskEditForm'){const p=fields(form);await run(async()=>{await api('taskUpdate',{companyId:firm().id,threadId:form.dataset.thread,title:p.title,dueDate:p.dueDate||''});await ftCommFetch_(true);},'Aufgabenangaben gespeichert; Kalenderübertragung vorgemerkt.');return;}
+ if(form.getAttribute('id')==='uiTaskCreateForm'){
   const button=form.querySelector('button[type=submit]');button.disabled=true;
   try{const p=fields(form),recipientIds=[...form.querySelectorAll('[name="recipientIds"]:checked')].map(x=>x.value);if(!recipientIds.length)throw Error('Bitte mindestens einen Mitarbeiter auswählen.');
    const photo=await ftCommPhotoData_(form.elements.namedItem('photo'));const result=await api('tasksCreate',{companyId:firm().id,kind:'TASK',recipientIds,title:p.title,body:p.body,dueDate:p.dueDate||'',photo});
    ST.commCompose=false;ST.uiTaskFilter='OPEN';ST.commOpen=result.threads?.[0]?.id||'';await ftCommFetch_(true);say(result.created+' Aufgabe'+(result.created===1?'':'n')+' zugeordnet.');
   }catch(err){say(err.message,true);}finally{if(button.isConnected)button.disabled=false;}return;
  }
- if(form.id==='uiTimeForm'){
+ if(form.getAttribute('id')==='uiTimeForm'){
   const p=fields(form),choice=ftDirectActivityPayload_(p.activitySelection),minutes=Number(p.breakMinutes||0),mode=p.autoBreak?'AUTO':minutes>0?'MANUAL':'NONE';
   if(mode==='NONE'&&(new Date(p.end)-new Date(p.start))>6*3600000&&!confirm('Du bestätigst, dass keine Pause genommen wurde. Die Arbeitszeit wird vollständig gespeichert und die Pausenabweichung zur Prüfung markiert.'))return;
   const button=form.querySelector('button[type=submit]');button.disabled=true;try{await api('activitySave',{...p,...choice,companyId:firm().id,breakMode:mode,breakConfirmed:true});ST.edit='';FT_CLARITY_CACHE.clear();if(!p.id&&p.start)ST.month=p.start.slice(0,7);await load();say('Arbeitszeit gespeichert.');}catch(err){say(err.message,true);}finally{if(button.isConnected)button.disabled=false;}return;
@@ -185,7 +185,7 @@ document.addEventListener('toggle',event=>{
  const detail=event.target;if(!detail.matches?.('details[data-task]')||!detail.open)return;
  ST.commOpen=detail.dataset.task;const row=ST.comm?.threads?.find(x=>x.id===ST.commOpen);if(row?.unread){api('commRead',{companyId:firm().id,threadId:row.id}).then(()=>{row.unread=false;ftCommSetBadge_((ST.comm?.threads||[]).filter(t=>t.kind==='TASK'&&t.unread).length);}).catch(()=>{});}
 },true);
-document.addEventListener('change',event=>{const el=event.target;if(el.name==='uiYear'){ST.uiYear=el.value;page();}if(el.form?.id==='uiTimeForm'&&el.name==='start')ftTimeSyncEndDate_(el.form);});
+document.addEventListener('change',event=>{const el=event.target;if(el.name==='uiYear'){ST.uiYear=el.value;page();}if(el.form?.getAttribute('id')==='uiTimeForm'&&el.name==='start')ftTimeSyncEndDate_(el.form);});
 
 settings=function(){return FT_CLARITY_OLD.settings().replace('Google-Kalender-ID','Hauptkalender-ID für Bereitschaften').replace('Google-Kalender aktivieren','Haupt- und Mitarbeiterkalender aktivieren').replace('<h2>Arbeitszeitmodell</h2>','<h2>Arbeitszeitmodell</h2><p class="ui-note">Kalender werden oben unter „Google Kalender · Firma“ zugeordnet. Nach dem Verbinden des Firmen-Google-Kontos kannst du dort den Hauptkalender oder einen Mitarbeiter auswählen und dessen Kalender-ID hinterlegen. Mitarbeiter können alternativ unter „Mein Konto“ ihr eigenes Google-Konto verbinden.</p>');};
 
@@ -244,7 +244,7 @@ action=async function(button){
  return UI_CALENDAR_OLD_ACTION(button);
 };
 submit=async function(form){
- if(form.id.startsWith('uiCalendarForm')){
+ if((form.getAttribute('id')||'').startsWith('uiCalendarForm')){
   const p=fields(form),calendarId=String(p.calendarId||p.calendarChoice||'').trim();if(!calendarId){say('Bitte einen Kalender auswählen oder eine Kalender-ID eintragen.',true);return;}
   await run(async()=>{await api('calendarSave',{companyId:firm().id,kind:form.dataset.kind,userId:p.userId||'',calendarId});await load();},'Kalender geprüft und gespeichert.');return;
  }
