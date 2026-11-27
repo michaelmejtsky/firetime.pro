@@ -52,6 +52,18 @@ const overrides={
 const names=ast.body.filter(x=>x.type==='FunctionDeclaration').map(x=>x.id.name);
 for(const name of Object.keys(overrides))if(!names.includes(name))throw Error('Missing override '+name);
 let native=source;
+// Incidents can start at any hour and end only when the employee stops them.
+// Keep the 19:00 safeguard for ordinary work and the legacy deployment.
+for(const [name,from,to] of [
+ ['ft_timerStart_',"if(clock>=19)","if(clock>=19&&String(p.type||'OBJECT')!=='INCIDENT')"],
+ ['ft_timerPauseAction_','if(now>=deadline)',"if(timer.type!=='INCIDENT'&&now>=deadline)"],
+ ['ft_timerClose_','if(finish>endOfDay)',"if(timer.type!=='INCIDENT'&&finish>endOfDay)"],
+ ['ft_timerSweep_','timers.filter(x=>now>=',"timers.filter(x=>x.type!=='INCIDENT'&&now>="]
+]){
+ const node=ast.body.find(x=>x.type==='FunctionDeclaration'&&x.id.name===name),original=source.slice(node.start,node.end);
+ if(!original.includes(from))throw Error('Missing incident timer target '+name);
+ overrides[name]=original.replace(from,to);
+}
 for(const node of [...ast.body].reverse())if(node.type==='FunctionDeclaration'&&(overrides[node.id.name]||nativeAliases.has(node.id.name))){const replacement=nativeAliases.has(node.id.name)?source.slice(node.start,node.end).replace('function '+node.id.name+'(', 'function ft_legacy_'+node.id.name.slice(3)+'('):overrides[node.id.name];native=native.slice(0,node.start)+replacement+native.slice(node.end);}
 // Larger logo input is supported only by the new native backend.
 {
@@ -91,6 +103,8 @@ for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.c
 const webManifest=JSON.parse(fs.readFileSync(path.join(root,'dist/public/manifest.webmanifest'),'utf8'));Object.assign(webManifest,{id:'/',start_url:'/',scope:'/',description:'Arbeitszeiten, Bereitschaften, Aufgaben und Urlaubsverwaltung',theme_color:'#142e56',background_color:'#0b1d35'});fs.writeFileSync(path.join(root,'dist/public/manifest.webmanifest'),JSON.stringify(webManifest,null,2));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
+html=html.replace('Automatische Schließung am selben Tag um 19:00 Uhr.','Bereitschaftseinsätze laufen bis „Arbeit beenden“, auch über Mitternacht. Andere Tätigkeiten werden um 19:00 Uhr automatisch beendet.')
+ .replace('Arbeitsbeginn nach 19:00 Uhr bitte manuell eintragen.','Bereitschaftseinsätze kannst du jederzeit starten und nach der Rückkehr beenden. Andere Tätigkeiten nach 19:00 Uhr bitte manuell eintragen.');
 // Named controls such as <input name="id"> shadow HTMLFormElement properties
 // in Safari. Read the DOM attribute for form dispatch and field-change handlers.
 html=html.replaceAll('form.id===',"form.getAttribute('id')===")
