@@ -162,6 +162,10 @@
     "ft_calendarTest_",
     "ft_setup",
     "doPost",
-    "doGet"
+    "doGet",
+    "ft_timerStart_",
+    "ft_timerPauseAction_",
+    "ft_timerClose_",
+    "ft_timerSweep_"
   ]
 }
