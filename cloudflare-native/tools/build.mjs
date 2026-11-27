@@ -102,6 +102,7 @@ html=html.replace('file.size>8*1024*1024','file.size>10*1024*1024').replace('JPG
  .replace('Math.max(.45,.8-n*.065)','Math.max(.6,.9-n*.05)').replace('encoded.length<870000','encoded.length<=Math.floor(10*1024*1024*4/3)');
 
 html=html.replaceAll('mindestens 12 Zeichen','mindestens 4 Zeichen').replaceAll('minlength=\"12\"','minlength=\"4\"');
+html=html.replace(".then(()=>say('Mitarbeiter gespeichert und Einladung verschickt.'))",".then(result=>say('Mitarbeiter gespeichert. '+(result?.message||'Einladung zum Versand vorgemerkt.'),result?.confirmed!==true))");
 // A previous appinstalled event is not evidence that the app is still installed.
 // Users may uninstall it while the old localStorage flag remains in the browser.
 html=html.replace("const installed=()=>standalone()||localStorage.getItem(installKey)==='yes';","const installed=()=>standalone();")
@@ -118,7 +119,7 @@ fs.writeFileSync(path.join(root,'dist/public/index.html'),html);
 const sw=fs.readFileSync(path.join(root,'dist/public/sw.js'),'utf8').replace(/firetime-shell-\d+-v\d+/g,'firetime-shell-native-v210-'+createHash('sha256').update(html).digest('hex').slice(0,12));
 fs.writeFileSync(path.join(root,'dist/public/sw.js'),sw);
 fs.writeFileSync(path.join(root,'dist/public/config.js'),"window.FT_API_URL = location.origin + '/api';\n");
-const actions=['productionStatus','gmailConnect','calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest','storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
+const actions=['invitationStatus','productionStatus','gmailConnect','calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest','storageStatus','driveStorageTest','driveConnect','taskUpdate','breakReview','reportSubmissions','tasksCreate','yearOverview','availabilityOverview','pdfVector','summaryPdf',...new Set([...source.slice(source.indexOf('function ft_api('),source.indexOf('function ft_workflowReady_(')).matchAll(/case '([^']+)'/g)].map(x=>x[1]))];
 const manifest={version:'2.1.0',sourceSha256:createHash('sha256').update(source).digest('hex'),tables:Object.keys(schemas),actions,overrides:Object.keys(overrides)};
 fs.writeFileSync(path.join(root,'src/contract.json'),JSON.stringify(manifest,null,2)+'\n');
 fs.copyFileSync(path.join(root,'src/contract.json'),path.join(root,'dist/contract.json'));

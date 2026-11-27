@@ -1,6 +1,7 @@
 import {publicPage} from './public-pages.mjs';
 import {productionSettings,productionStatus} from './production.mjs';
 import {startGmailConnect,finishGmailConnect} from './gmail.mjs';
+import {invitationStatus,readMailDelivery} from './mail-delivery.mjs';
 import {calendarAccountStatus,startCalendarConnect,finishCalendarConnect,calendarList,verifyCalendarSelection} from './calendar-oauth.mjs';
 import {hasFileStorage,driveStatus,startDriveConnect,finishDriveConnect,testDriveConnection} from './drive.mjs';
 import {initializeFresh,firstStartPage} from './first-start.mjs';
@@ -10,7 +11,7 @@ import {loadSnapshot,commit,Conflict,readReceipt,statement} from './store.mjs';
 import {prepareCalendars,drainOutbox} from './effects.mjs';
 import contract from './contract.json' with {type:'json'};
 const TYPES=new Set(['login','activate','resetRequest','resetConfirm','logout','password','brand','api','pushInfo']);
-const READS=new Set(['productionStatus','calendarAccountStatus','calendarList','calendarSelectionTest','storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
+const READS=new Set(['invitationStatus','productionStatus','calendarAccountStatus','calendarList','calendarSelectionTest','storageStatus','driveStorageTest','home','adminOverview','profileGet','licenseGet','activityTypesGet','timerStatus','commList','commPulse','commPhoto','pushStatus','planWorkflow','shiftPeriodSummary','leaveAccount','leavePolicyGet','absenceHistory','absencePdfArchive','absencePdfChunk','report','pdfJobStatus','pdfArchive','pdfChunk','pdfBatchArchive','pdfBatchChunk','rulesGet','calendarTest','audit','reportSubmissions','yearOverview','availabilityOverview','pdfVector','summaryPdf']);
 function allowedOrigin(request,env){const origin=request.headers.get('Origin')||'';const self=new URL(request.url).origin;const allowed=new Set([self,...String(env.PUBLIC_ORIGINS||'').split(',').map(x=>x.trim()).filter(x=>/^https:\/\//.test(x))]);return allowed.has(origin)?origin:origin?'':self;}
 function headers(origin){return {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, X-Request-Id, X-FireTime-Staging-Key','Vary':'Origin'};}
 function json(value,status=200,origin=''){return new Response(JSON.stringify(value),{status,headers:headers(origin)});}
@@ -42,7 +43,9 @@ export async function execute(env,input,requestId='',requestOrigin=''){
     case 'password':value=core.ft_changePassword(input.token,input.current,input.next);break;
     case 'brand':value=core.ft_brandForLogin(input.slug);break;
     case 'api':
-     if(['productionStatus','gmailConnect'].includes(input.action)){
+     if(input.action==='invitationStatus'){
+      core.ft_auth_(input.token);value=await invitationStatus(env,snapshot,input.data||{});
+     }else if(['productionStatus','gmailConnect'].includes(input.action)){
       const actor=core.ft_auth_(input.token);if(actor.role!=='SYSADMIN')throw Object.assign(Error('Nur der Systemadmin darf den Systembetrieb verwalten.'),{status:403});
       value=input.action==='productionStatus'?await productionStatus(env):await startGmailConnect(env,actor,digest(input.token),requestOrigin||env.FT_PUBLIC_GITHUB_URL||'https://firetime.invalid');
      }else if(['calendarAccountStatus','calendarConnect','calendarList','calendarSave','calendarSelectionTest'].includes(input.action)){
@@ -67,7 +70,10 @@ export async function execute(env,input,requestId='',requestOrigin=''){
    for(const row of runtime.tables.get('PlanMonths').rows)if(row.shareStatus==='SENT'&&(runtime.original.get('PlanMonths'+'\0'+row.id)!==JSON.stringify(row)||(row.companyId===(input.data?.companyId||snapshot.user?.companyId)&&row.month===input.data?.month))){row.shareStatus='QUEUED';row.warnings='Kalenderübertragung vorgemerkt. Zustellstatus folgt im Hintergrund.';}
    if(value&&typeof value==='object'&&!Array.isArray(value)){value.calendarQueued=true;value.calendarUpdated=false;value.warning='Kalenderübertragung vorgemerkt; noch nicht als zugestellt bestätigt.';}
   }
-  if(runtime.jobs.size&&typeof value==='string')value+=' (Zur Zustellung vorgemerkt.)';
+  if(input.type==='api'&&input.action==='userInvite'){
+   const mail=[...runtime.jobs.values()].find(j=>j.kind==='mail');
+   if(mail){const user=snapshot.records.filter(r=>r.table_name==='Users').map(r=>JSON.parse(r.data)).find(u=>u.id===input.data?.id);mail.payload.invitation={userId:user.id,companyId:user.companyId||''};value={jobId:mail.id,status:'QUEUED',confirmed:false,message:'Einladung ist zum Versand vorgemerkt; Gmail hat sie noch nicht bestätigt.'};}
+  }else if(runtime.jobs.size&&typeof value==='string')value+=' (Zur Zustellung vorgemerkt.)';
   const result={ok:true,data:value};
   const receipt=input.type==='api'&&logicalWrite&&requestId?{id:requestId,actorId:snapshot.user.id,hash:requestHash,response:result}:null;
   if(env.WRITE_ENABLED!=='true'&&(runtime.changedRows().length||runtime.jobs.size||runtime.newFiles.size))throw Object.assign(Error('Dieser Abruf benötigt einen Schreibzugriff; Testsystem bleibt schreibgeschützt.'),{status:503});
@@ -144,6 +150,13 @@ export default {
    const id=request.headers.get('X-Request-Id')||'';
    if(id&&!/^[a-zA-Z0-9_-]{12,100}$/.test(id))throw Error('Ungültige Anfragekennung.');
    const result=await execute(env,input,id,url.origin);
+   if(input.type==='api'&&input.action==='userInvite'&&result.data?.jobId){
+    // The invitation and its token are already committed. Check this exact mail
+    // now instead of reporting success merely because a background job exists.
+    const configured=await productionSettings(env);
+    try{await drainOutbox(configured,{jobIds:[result.data.jobId]});}catch{console.warn('firetime-invitation-delivery-pending');}
+    result.data={...result.data,...await readMailDelivery(env,result.data.jobId)};
+   }
    if(env.MIGRATION_MODE==='production'&&(env.AUTOMATION_ENABLED==='true'||env.CALENDAR_ENABLED==='true'))ctx.waitUntil(productionSettings(env).then(drainOutbox));
    return json(result,200,origin);
   }catch(err){

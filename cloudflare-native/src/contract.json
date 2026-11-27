@@ -44,6 +44,7 @@
     "CalendarMirrors"
   ],
   "actions": [
+    "invitationStatus",
     "productionStatus",
     "gmailConnect",
     "calendarAccountStatus",

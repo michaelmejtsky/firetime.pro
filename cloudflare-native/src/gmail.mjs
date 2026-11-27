@@ -26,15 +26,37 @@ export async function finishGmailConnect(env,url){
  const old=await sql(env.DB,"SELECT * FROM integrations WHERE key='gmail'").first(),pub=old?JSON.parse(old.public_json):{};
  if(old&&(pub.sub!==account.sub||pub.clientId!==env.GOOGLE_DRIVE_CLIENT_ID))throw fail('Bitte dasselbe zentrale Google-Konto verwenden.',409);
  const refreshToken=tokens.refresh_token||(old?(await unsealSystem(env,context(env),old.encrypted)).refreshToken:'');if(!refreshToken)throw fail('Dauerhafter Google-Zugriff fehlt. Bitte erneut verbinden.',503);
- await sql(env.DB,"INSERT INTO integrations VALUES('gmail',?,?,?) ON CONFLICT(key) DO UPDATE SET encrypted=excluded.encrypted,public_json=excluded.public_json,updated_at=excluded.updated_at",await sealSystem(env,context(env),{refreshToken}),JSON.stringify({sub:account.sub,email:String(account.email).toLowerCase(),clientId:env.GOOGLE_DRIVE_CLIENT_ID}),new Date().toISOString()).run();return {connected:true};
+ await env.DB.batch([
+  sql(env.DB,"INSERT INTO integrations VALUES('gmail',?,?,?) ON CONFLICT(key) DO UPDATE SET encrypted=excluded.encrypted,public_json=excluded.public_json,updated_at=excluded.updated_at",await sealSystem(env,context(env),{refreshToken}),JSON.stringify({sub:account.sub,email:String(account.email).toLowerCase(),clientId:env.GOOGLE_DRIVE_CLIENT_ID}),new Date().toISOString()),
+  // Resume recent invitations known NOT to have reached Gmail. Ambiguous sends
+  // stay stopped: reconnecting must never silently duplicate a sent message.
+  sql(env.DB,"UPDATE outbox SET status='QUEUED',attempts=0,available_at=0,lease_until=0,error='' WHERE kind='mail' AND status='ERROR' AND coalesce(json_extract(payload,'$.gmailAttempted'),0)=0 AND json_extract(payload,'$.message.subject') LIKE 'Dein Zugang zu FireTime Pro%' AND created_at>?",new Date(Date.now()-6*86400000).toISOString()),
+  sql(env.DB,"UPDATE metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='revision'")
+ ]);return {connected:true};
 }
 const cache=new Map();
-async function access(env){const row=await sql(env.DB,"SELECT * FROM integrations WHERE key='gmail'").first();if(!row)throw fail('Zentralen Gmail-Versand bitte verbinden.',503);const pub=JSON.parse(row.public_json);if(pub.clientId!==env.GOOGLE_DRIVE_CLIENT_ID||pub.email!==env.GOOGLE_DRIVE_ACCOUNT)throw fail('Zentrales Gmail-Konto stimmt nicht überein.',503);const secret=await unsealSystem(env,context(env),row.encrypted),key=hash(secret.refreshToken+'|'+env.GOOGLE_DRIVE_CLIENT_ID),old=cache.get(key);if(old?.until>Date.now()+60000)return {token:old.token,email:pub.email};
+async function access(env,{force=false}={}){const row=await sql(env.DB,"SELECT * FROM integrations WHERE key='gmail'").first();if(!row)throw fail('Zentralen Gmail-Versand bitte verbinden.',503);const pub=JSON.parse(row.public_json);if(pub.clientId!==env.GOOGLE_DRIVE_CLIENT_ID||pub.email!==env.GOOGLE_DRIVE_ACCOUNT)throw fail('Zentrales Gmail-Konto stimmt nicht überein.',503);const secret=await unsealSystem(env,context(env),row.encrypted),key=hash(secret.refreshToken+'|'+env.GOOGLE_DRIVE_CLIENT_ID),old=cache.get(key);if(!force&&old?.until>Date.now()+60000)return {token:old.token,email:pub.email};
  const data=await checked(await fetch('https://oauth2.googleapis.com/token',{method:'POST',body:new URLSearchParams({grant_type:'refresh_token',refresh_token:secret.refreshToken,client_id:env.GOOGLE_DRIVE_CLIENT_ID,client_secret:env.GOOGLE_DRIVE_CLIENT_SECRET}),signal:AbortSignal.timeout(15000)}),'Gmail-Zugriff abgelaufen. Bitte erneut verbinden');if(!data.access_token)throw fail('Google-Zugriff fehlt.',503);if(cache.size>8)cache.clear();cache.set(key,{token:data.access_token,until:Date.now()+Number(data.expires_in||3600)*1000});return {token:data.access_token,email:pub.email};}
 export function gmailRaw(email,message,jobId){
  const address=String(message.to||'').trim();if(!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(address))throw fail('Ungültige Empfängeradresse.');
  const subject=Buffer.from(String(message.subject||'FireTime Pro').replace(/[\r\n]/g,' ')).toString('base64'),body=Buffer.from(String(message.body||'')).toString('base64').match(/.{1,76}/g)?.join('\r\n')||'';
  const raw=['From: FireTime Pro <'+email+'>','To: '+address,'Subject: =?UTF-8?B?'+subject+'?=','Message-ID: <firetime-'+hash(jobId)+'@'+email.split('@')[1]+'>','MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',''+body].join('\r\n');return Buffer.from(raw).toString('base64url');
 }
-export async function sendGmail(env,message,jobId){let c;try{c=await access(env);}catch(err){err.definitelyNotSent=true;throw err;}let response;try{response=await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:JSON.stringify({raw:gmailRaw(c.email,message,jobId)}),signal:AbortSignal.timeout(15000)});}catch{throw Object.assign(Error('Gmail-Versandstatus unklar. Vor erneutem Versand im Gesendet-Ordner prüfen.'),{uncertain:true});}
- if(!response.ok)throw Object.assign(Error('Gmail-Zustellung HTTP '+response.status),{uncertain:response.status>=500,definitelyNotSent:response.status<500});let data;try{data=await response.json();}catch{throw Object.assign(Error('Gmail-Bestätigung unklar. Gesendet-Ordner prüfen.'),{uncertain:true});}if(!data.id)throw Object.assign(Error('Gmail-Bestätigung fehlt. Gesendet-Ordner prüfen.'),{uncertain:true});return data.id;}
+export async function sendGmail(env,message,jobId){
+ let c;try{c=await access(env);}catch(err){err.definitelyNotSent=true;throw err;}
+ const send=async()=>{let raw;try{raw=gmailRaw(c.email,message,jobId);}catch(err){err.definitelyNotSent=true;throw err;}
+  try{return await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:JSON.stringify({raw}),signal:AbortSignal.timeout(15000)});}catch{throw Object.assign(Error('Gmail-Versandstatus unklar. Vor erneutem Versand im Gesendet-Ordner prüfen.'),{uncertain:true});}};
+ let response=await send();
+ // A rejected access token is a definite non-send. Refresh once instead of
+ // reusing the same invalid cached token until every queued retry has failed.
+ if(response.status===401){try{c=await access(env,{force:true});}catch(err){err.definitelyNotSent=true;throw err;}response=await send();}
+ if(!response.ok){
+  let detail={};try{detail=await response.json();}catch{}
+  const reason=detail?.error?.errors?.[0]?.reason||detail?.error?.details?.find(x=>x.reason)?.reason||'';
+  const hint=['accessNotConfigured','SERVICE_DISABLED'].includes(reason)?'Gmail API im zentralen Google-Projekt aktivieren.':
+   ['insufficientPermissions','ACCESS_TOKEN_SCOPE_INSUFFICIENT'].includes(reason)?'Gmail-Sendefreigabe erneuern.':
+   response.status===401?'Gmail-Zugriff erneuern.':response.status===429?'Google-Versandlimit erreicht; später erneut versuchen.':'';
+  throw Object.assign(Error('Gmail-Zustellung HTTP '+response.status+(hint?': '+hint:'')),{uncertain:response.status>=500,definitelyNotSent:response.status<500});
+ }
+ let data;try{data=await response.json();}catch{throw Object.assign(Error('Gmail-Bestätigung unklar. Gesendet-Ordner prüfen.'),{uncertain:true});}if(!data.id)throw Object.assign(Error('Gmail-Bestätigung fehlt. Gesendet-Ordner prüfen.'),{uncertain:true});return data.id;
+}

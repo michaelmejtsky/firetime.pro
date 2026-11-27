@@ -262,10 +262,10 @@ document.addEventListener('change',event=>{
  form.elements.namedItem('calendarChoice').value=assigned||'';form.elements.namedItem('calendarId').value='';
 });
 
-FT_CLARITY_READS.add('productionStatus');
+FT_CLARITY_READS.add('productionStatus');FT_CLARITY_READS.add('invitationStatus');
 function uiProductionPanel(){
  if(me()?.role!=='SYSADMIN')return '';
- return '<section class="card"><h2>Systembetrieb · FireTime Pro</h2>'+uiRemote('productionStatus',{},s=>uiKpis([['Betrieb',s.production?'Produktiv':'Einrichtung'],['Automatische Abläufe',s.automations?'Aktiv':'Aus'],['E-Mail',s.mail.connected?'Verbunden':'Freigabe fehlt'],['Push',s.push.configured?'Eingerichtet':'Wird eingerichtet']])+'<p>Zentraler Absender: <strong>'+E(s.mail.email)+'</strong></p>'+(s.mail.connected?'<p class="ui-note">E-Mail-Versand ist verbunden. Einladungen und Erinnerungen werden im Hintergrund versendet.</p>':uiButton('Gmail-Versand verbinden','gmailConnect','',true)+'<p class="ui-caption">Einmal mit dem zentralen FireTime-Google-Konto bestätigen. Nur die Berechtigung zum Senden wird benötigt.</p>')+'<p>Firmenadmin BSB3100: <strong>'+E(s.pilotAdmin||'Nicht vorkonfiguriert')+'</strong>. Die einmalige Zugangseinrichtung erfolgt nach der Gmail-Verbindung automatisch.</p>'+uiFold('Zustellstatus',s.outbox.length?'<div class="table"><table><tr><th>Kanal</th><th>Status</th><th>Anzahl</th></tr>'+s.outbox.map(x=>'<tr><td>'+E(x.kind)+'</td><td>'+E(x.status)+'</td><td>'+E(x.count)+'</td></tr>').join('')+'</table></div>':'<p>Noch keine Zustellungen.</p>')+uiButton('Status aktualisieren','refresh'),'uiProductionStatus')+'</section>';
+ return '<section class="card"><h2>Systembetrieb · FireTime Pro</h2>'+uiRemote('productionStatus',{},s=>uiKpis([['Betrieb',s.production?'Produktiv':'Einrichtung'],['Automatische Abläufe',s.automations?'Aktiv':'Aus'],['E-Mail',s.mail.connected?'Verbunden':'Freigabe fehlt'],['Push',s.push.configured?'Eingerichtet':'Wird eingerichtet']])+'<p>Zentraler Absender: <strong>'+E(s.mail.email)+'</strong></p>'+uiButton(s.mail.connected?'Gmail-Zugriff erneuern':'Gmail-Versand verbinden','gmailConnect','',true)+'<p class="ui-caption">Eine gespeicherte Verbindung bestätigt noch keinen Versand. Bei fehlender Freigabe mit dem zentralen Google-Konto erneut verbinden.</p>'+((s.mail.lastErrors||[]).length?uiFold('Letzte E-Mail-Fehler',(s.mail.lastErrors||[]).map(x=>'<p><b>'+E(x.status)+'</b> · '+E(x.error)+'<br><small>'+E(x.createdAt)+'</small></p>').join(''),true):'')+'<p>Firmenadmin BSB3100: <strong>'+E(s.pilotAdmin||'Nicht vorkonfiguriert')+'</strong>. Die einmalige Zugangseinrichtung erfolgt nach der Gmail-Verbindung automatisch.</p>'+uiFold('Zustellstatus',s.outbox.length?'<div class="table"><table><tr><th>Kanal</th><th>Status</th><th>Anzahl</th></tr>'+s.outbox.map(x=>'<tr><td>'+E(x.kind)+'</td><td>'+E(x.status)+'</td><td>'+E(x.count)+'</td></tr>').join('')+'</table></div>':'<p>Noch keine Zustellungen.</p>')+uiButton('Status aktualisieren','refresh'),'uiProductionStatus')+'</section>';
 }
 const UI_PRODUCTION_CUSTOMERS=customers,UI_PRODUCTION_ACTION=action;
 customers=function(){return uiProductionPanel()+UI_PRODUCTION_CUSTOMERS();};
@@ -281,3 +281,21 @@ if(new URLSearchParams(location.search).get('gmail')==='connected'&&ST.token){ST
 const UI_PUBLIC_AUTH=auth;
 auth=function(){const result=UI_PUBLIC_AUTH();const login=document.querySelector('.login');if(login&&!login.querySelector('[data-public-links]'))login.insertAdjacentHTML('beforeend','<nav data-public-links style="display:flex;gap:16px;flex-wrap:wrap;margin-top:22px;font-size:14px"><a href="/info" style="color:#93c5fd">Über FireTime</a><a href="/datenschutz" style="color:#93c5fd">Datenschutz</a><a href="/impressum" style="color:#93c5fd">Impressum</a></nav>');return result;};
 if(!ST.token)queueMicrotask(()=>auth());
+
+const UI_MAIL_ACTION=action,UI_MAIL_STAFF=staff;
+staff=function(){
+ const template=document.createElement('template');template.innerHTML=UI_MAIL_STAFF();
+ for(const button of template.content.querySelectorAll('[data-act="invite"]'))button.insertAdjacentHTML('afterend',uiButton('Versandstatus prüfen','inviteStatus',button.dataset.id));
+ return template.innerHTML;
+};
+action=async function(button){
+ const act=button.dataset.act;
+ if(act==='invite'||act==='ui:inviteStatus'){
+  if(act==='invite'&&!confirm('Einladungslink erneut versenden?'))return;
+  button.disabled=true;
+  try{const result=await api(act==='invite'?'userInvite':'invitationStatus',{id:button.dataset.id});say(result?.message||'Versand ist noch nicht bestätigt.',result?.confirmed!==true);}
+  catch(err){say('Einladung nicht als versendet bestätigt: '+String(err.message||err),true);}
+  finally{if(button.isConnected)button.disabled=false;}return;
+ }
+ return UI_MAIL_ACTION(button);
+};

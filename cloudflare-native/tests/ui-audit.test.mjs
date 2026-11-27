@@ -111,6 +111,18 @@ test('time form submits when its hidden id control shadows form.id',async()=>{
   assert.deepEqual(x.errors,[]);
  }finally{x.close();}
 });
+test('employee invitation and status controls never label queued mail as sent',async()=>{
+ const x=await ui('a');try{
+  Object.assign(x.env,{MAIL_ENABLED:'true',MAIL_API_KEY:'synthetic-test-only',MAIL_FROM:'sender@example.test'});
+  await x.view('staff');
+  await x.click('[data-act="invite"][data-id="u1"]');
+  let toast=x.w.document.querySelector('#toast');
+  assert.match(toast.textContent,/vorgemerkt/);assert.doesNotMatch(toast.textContent,/verschickt|erfolgreich versendet/);assert.ok(toast.classList.contains('bad'));
+  await x.click('[data-act="ui:inviteStatus"][data-id="u1"]');
+  toast=x.w.document.querySelector('#toast');assert.match(toast.textContent,/noch nicht bestätigt/);
+  assert.deepEqual(x.errors,[]);
+ }finally{x.close();}
+});
 test('native install entry remains available after a previous installation was removed',async()=>{
  const x=await ui('1',{storedInstalled:true});try{
   assert.ok(x.w.document.querySelector('#ft-install-open').classList.contains('is-visible'));

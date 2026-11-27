@@ -57,11 +57,12 @@ async function markNotification(db,id,status,error){
  if(!id)return [];
  return [statement(db,"UPDATE records SET data=json_set(data,'$.status',?,'$.sentAt',?,'$.error',?) WHERE table_name='Notifications' AND record_id=?",status,new Date().toISOString(),error,id)];
 }
-export async function drainOutbox(env){
- const calendarOnly=env.AUTOMATION_ENABLED!=='true';
+export async function drainOutbox(env,{jobIds=[]}={}){
+ if(!Array.isArray(jobIds)||jobIds.length>8||jobIds.some(id=>typeof id!=='string'||id.length>150))throw Error('Ungültige Zustellauswahl.');
+ const targeted=jobIds.length>0,calendarOnly=env.AUTOMATION_ENABLED!=='true'&&!targeted;
  if(env.CALENDAR_AUTH==='oauth'&&(env.WRITE_ENABLED!=='true'||env.CUTOVER_CONFIRMED!=='true'))return {processed:0};
  if(env.MIGRATION_MODE!=='production'||(calendarOnly&&env.CALENDAR_ENABLED!=='true'))return {processed:0};
- const now=Date.now(),due=(await statement(env.DB,"SELECT current.* FROM outbox current WHERE (((current.status='QUEUED' OR current.status='RETRY') AND current.available_at<=?) OR (current.status='RUNNING' AND current.lease_until<?)) AND (current.kind<>'calendar' OR NOT EXISTS (SELECT 1 FROM outbox previous WHERE previous.kind='calendar' AND previous.rowid<current.rowid AND previous.status<>'SENT' AND json_extract(previous.payload,'$.calendarId')=json_extract(current.payload,'$.calendarId') AND json_extract(previous.payload,'$.eventId')=json_extract(current.payload,'$.eventId'))) AND (?=0 OR current.kind='calendar') ORDER BY current.rowid LIMIT 8",now,now,calendarOnly?1:0).all()).results;
+ const now=Date.now(),selection=targeted?' AND current.id IN ('+jobIds.map(()=>'?').join(',')+')':'',due=(await statement(env.DB,"SELECT current.* FROM outbox current WHERE (((current.status='QUEUED' OR current.status='RETRY') AND current.available_at<=?) OR (current.status='RUNNING' AND current.lease_until<?)) AND (current.kind<>'calendar' OR NOT EXISTS (SELECT 1 FROM outbox previous WHERE previous.kind='calendar' AND previous.rowid<current.rowid AND previous.status<>'SENT' AND json_extract(previous.payload,'$.calendarId')=json_extract(current.payload,'$.calendarId') AND json_extract(previous.payload,'$.eventId')=json_extract(current.payload,'$.eventId'))) AND (?=0 OR current.kind='calendar')"+selection+" ORDER BY current.rowid LIMIT 8",now,now,calendarOnly?1:0,...jobIds).all()).results;
  const results=await Promise.all(due.map(async job=>{
   const claimed=await statement(env.DB,"UPDATE outbox SET status='RUNNING',lease_until=?,attempts=attempts+1 WHERE id=? AND (status IN ('QUEUED','RETRY') OR (status='RUNNING' AND lease_until<?)) RETURNING id",now+120000,job.id,now).first();if(!claimed)return false;
   const payload=JSON.parse(job.payload);let gone=[];
