@@ -1,0 +1,25 @@
+// Static browser QA harness. Every fixture is computed by the real native backend
+// against local synthetic data. It does not connect to a user account or deployment.
+import fs from 'node:fs';
+import path from 'node:path';
+import {testEnv,seed} from '../tests/helpers.mjs';
+import {execute} from '../dist/worker.js';
+const env=testEnv(),db=env.DB.sqlite;
+for(const [id,name] of [['u1','Anna Berger'],['u2','Lukas Mayer'],['a1','Demo Administration']]){const r=JSON.parse(db.prepare("SELECT data FROM records WHERE table_name='Users' AND record_id=?").get(id).data);r.name=name;db.prepare("UPDATE records SET data=? WHERE table_name='Users' AND record_id=?").run(JSON.stringify(r),id);}
+for(const [id,status,title,recipientId] of [['t1','OPEN','RWA Wartung dokumentieren','u1'],['t2','ACCEPTED','Feuerlöscher kontrollieren','u2'],['t3','DONE','Wartungsbericht prüfen','u1'],['t4','RETURNED','Fotodokumentation ergänzen','u1'],['t5','CLOSED','Objektkontrolle abgeschlossen','u2']])seed(env,'CommThreads',{id,companyId:'c1',kind:'TASK',createdBy:'a1',recipientId,titleEncoded:Buffer.from(title).toString('base64url'),bodyEncoded:Buffer.from('Synthetische Testaufgabe. Bitte die Durchführung kontrollieren und mit einem Foto dokumentieren.').toString('base64url'),status,dueDate:'2026-12-15',createdAt:'2026-11-20T10:00:00Z',updatedAt:'2026-11-20T10:00:00Z'});
+seed(env,'Activities',{id:'demo-work',companyId:'c1',userId:'u1',type:'OTHER',activityOptionId:'rwa',start:'2026-11-10T07:00:00Z',end:'2026-11-10T11:00:00Z',breakMinutes:0,object:'Demogebäude',description:'Wartung RWA – synthetische Vorschau'});
+seed(env,'ActivityTypes',{id:'rwa',companyId:'c1',type:'OTHER',label:'Wartung RWA',active:true,sort:1});
+seed(env,'Leaves',{id:'l1',companyId:'c1',userId:'u1',from:'2026-12-15',to:'2026-12-18',days:4,status:'PENDING',createdAt:'2026-11-20T09:00:00Z'});
+seed(env,'Months',{id:'m1',companyId:'c1',userId:'u2',month:'2026-10',status:'SUBMITTED'});
+seed(env,'EmployeePreferences',{id:'p1',companyId:'c1',userId:'u1',leaveHoursPerDay:5,calendarId:'anna-demo@example.test'});
+seed(env,'AvailabilitySubmissions',{id:'v1',companyId:'c1',userId:'u1',month:'2026-10',submittedAt:'2026-09-20T08:00:00Z'});
+const fixtures={};for(const role of ['a','1']){
+ const token=role.repeat(64),set=fixtures[role]={};
+ for(const view of ['shell','dashboard','time','reports','leave','availability','standby','staff','settings','rules','totals','profile'])set['home:'+view]=await execute(env,{type:'api',token,action:'home',data:{month:'2026-11',companyId:'c1',view,reportsMode:view==='reports'?'selected':view==='dashboard'&&role==='1'?'self':'none',userId:'u1'}});
+ for(const [action,data] of [['commList',{companyId:'c1'}],['commPulse',{companyId:'c1'}],['yearOverview',{companyId:'c1',year:2026,month:'2026-11'}],['availabilityOverview',{companyId:'c1',month:'2026-11'}],['rulesGet',{companyId:'c1',month:'2026-11'}],['reportSubmissions',{companyId:'c1',month:'2026-11'}],['adminOverview',{companyId:'c1',month:'2026-11'}],['absenceHistory',{companyId:'c1',userId:'u1',fromYear:2026,toYear:2026}],['pushStatus',{companyId:'c1'}]])try{set[action]=await execute(env,{type:'api',token,action,data});}catch{}
+ for(const id of ['u1','u2'])set['report:'+id]=await execute(env,{type:'api',token,action:'report',data:{companyId:'c1',userId:role==='1'?'u1':id,month:'2026-11'}});
+}
+const root=path.resolve('private/ui-preview');fs.mkdirSync(path.join(root,'.openai'),{recursive:true});fs.cpSync('dist/public',path.join(root,'dist'),{recursive:true});fs.writeFileSync(path.join(root,'.openai/hosting.json'),JSON.stringify({static:{directory:'dist'}}));
+let html=fs.readFileSync(path.join(root,'dist/index.html'),'utf8');const setup=`const UI_DEMO_FIXTURES=${JSON.stringify(fixtures)};const UI_DEMO_ROLE=new URLSearchParams(location.search).get('demo')==='staff'?'1':'a';sessionStorage.setItem('ft_token',UI_DEMO_ROLE.repeat(64));const UI_REAL_FETCH=window.fetch.bind(window);window.fetch=async (url,opts={})=>{if(String(url).endsWith('/api')){const q=JSON.parse(opts.body||'{}');const key=q.type==='api'?q.action==='home'?'home:'+(q.data?.view||'dashboard'):q.action==='report'?'report:'+(q.data?.userId||'u1'):q.action:q.type;const result=q.type==='pushInfo'?{ok:true,data:{configured:false,publicKey:''}}:UI_DEMO_FIXTURES[UI_DEMO_ROLE][key]||{ok:false,error:'Statische Testansicht: dieser Schreibzugriff ist deaktiviert.'};return new Response(JSON.stringify(result),{status:result.ok?200:400,headers:{'Content-Type':'application/json'}});}return UI_REAL_FETCH(url,opts);};`;
+html=html.replace('<script src="./config.js"></script>','<script>'+setup+'</script><script src="./config.js"></script>').replace('<body>','<body><div style="background:#d8edf1;color:#12313a;padding:10px;font:15px system-ui">Synthetische UI-Testdaten · <a href="?demo=admin">Administration</a> · <a href="?demo=staff">Mitarbeiter</a></div>');fs.writeFileSync(path.join(root,'dist/index.html'),html);
+fs.writeFileSync(path.join(root,'dist/config.js'),"window.FT_API_URL='https://synthetic-firetime.example.test/api';\n");console.log(root);
