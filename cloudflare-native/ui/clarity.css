@@ -45,3 +45,6 @@
 .main .ui-pill.bad{background:#522c3d;color:#ffd0d8}.main .ui-pill.neutral{background:#29415c;color:#d2e3f5}
 .main .ui-row-open{background:#422d40}.main .ui-row-submitted{background:#413d29}.main .ui-row-approved{background:#1c413f}
 @media print{.main,.main .card,.main details.ui-fold,.main .ui-task,.main .ui-kpi{background:#fff!important;color:#172c44!important}.main h1,.main h2,.main h3,.main .metric,.main .ui-kpi strong,.main .ui-kpi span,.main .muted,.main .small,.main th,.main .ui-task-meta{color:#172c44!important}}
+
+/* Scrolling to the edge must not trigger pull-to-refresh while entering data. */
+html,body{overscroll-behavior-y:none}

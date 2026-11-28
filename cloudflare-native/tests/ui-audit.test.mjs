@@ -8,12 +8,13 @@ import {execute} from '../dist/worker.js';
 
 // Execute the shipped HTML and event handlers against an isolated real backend.
 // No network, user account, Google service or real recipient is involved.
-async function ui(role='1',{storedInstalled=false}={}){
+async function ui(role='1',{storedInstalled=false,storage={},url='https://isolated.test/'}={}){
  const env=testEnv();env.CALENDAR_AUTH='oauth';
  for(const [id,status] of [['open','OPEN'],['accepted','ACCEPTED'],['done','DONE'],['returned','RETURNED'],['closed','CLOSED']])seed(env,'CommThreads',{id,companyId:'c1',kind:'TASK',createdBy:'a1',recipientId:'u1',titleEncoded:Buffer.from('Prüfauftrag '+status).toString('base64url'),bodyEncoded:Buffer.from('Durchführung dokumentieren').toString('base64url'),status,dueDate:'2026-12-15',createdAt:'2026-11-01T09:00:00Z',updatedAt:'2026-11-01T09:00:00Z'});
  const html=fs.readFileSync(new URL('../dist/public/index.html',import.meta.url),'utf8').replace('<script src="./config.js"></script>','<script>window.FT_API_URL="https://isolated.test/api";</script>');
  const errors=[],pending=new Set(),vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e.message));
- const dom=new JSDOM(html,{url:'https://isolated.test/',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){
+ const dom=new JSDOM(html,{url,runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){
+  for(const [key,value] of Object.entries(storage))w.localStorage.setItem(key,value);
   w.matchMedia=()=>({matches:false,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){}});
   w.confirm=()=>true;w.prompt=()=> 'Bitte Foto ergänzen';w.alert=()=>{};w.scrollTo=()=>{};
   w.crypto.randomUUID=randomUUID;Object.defineProperty(w.crypto,'subtle',{value:webcrypto.subtle});
@@ -128,4 +129,39 @@ test('native install entry remains available after a previous installation was r
   assert.ok(x.w.document.querySelector('#ft-install-open').classList.contains('is-visible'));
   await x.click('#ft-install-open');assert.equal(x.w.document.querySelector('#ft-install-mask').getAttribute('aria-hidden'),'false');
  }finally{x.close();}
+});
+
+test('availability selection keeps its fold open and survives reload in the same month',async()=>{
+ const x=await ui();let storage,url;
+ try{
+  await x.view('availability');await x.click('[data-act="ui:availabilityMonth"][data-id="2026-12"]');
+  const editor=x.w.document.querySelector('#uiAvailabilityEditor');assert.ok(editor);editor.open=true;
+  await x.click('[data-act="availDay"][data-id="5"]');
+  assert.equal(x.w.document.querySelector('#uiAvailabilityEditor').open,true);assert.equal(x.w.eval('ST.avail[5]'),'YES');
+  await x.click('[data-act="availDay"][data-id="6"]');
+  assert.equal(x.w.document.querySelector('#uiAvailabilityEditor').open,true);
+  storage=Object.fromEntries(Object.entries(x.w.localStorage));url=x.w.location.href;
+  assert.match(url,/tab=availability/);assert.match(url,/month=2026-12/);assert.deepEqual(x.errors,[]);
+ }finally{x.close();}
+ const reloaded=await ui('1',{storage,url});try{
+  assert.equal(reloaded.w.eval('ST.tab'),'availability');assert.equal(reloaded.w.eval('ST.month'),'2026-12');
+  await reloaded.view('availability');assert.equal(reloaded.w.eval('ST.avail[5]'),'YES');assert.equal(reloaded.w.eval('ST.avail[6]'),'YES');
+  assert.equal(reloaded.w.document.querySelector('#uiAvailabilityEditor').open,true);
+  await reloaded.click('[data-act="ui:availabilityMonth"][data-id="2027-01"]');assert.notEqual(reloaded.w.eval('ST.avail[5]'),'YES');
+  await reloaded.click('[data-act="ui:availabilityMonth"][data-id="2026-12"]');assert.equal(reloaded.w.eval('ST.avail[5]'),'YES');
+  assert.deepEqual(reloaded.errors,[]);
+ }finally{reloaded.close();}
+ const other=await ui('2',{storage,url});try{await other.view('availability');assert.notEqual(other.w.eval('ST.avail[5]'),'YES');}finally{other.close();}
+});
+
+test('mobile navigation puts availability in the bar and standby in More for staff and admin',async()=>{
+ for(const role of ['1','a']){
+  const x=await ui(role);try{
+   assert.ok(x.w.document.querySelector('.ft-mobile-bar [data-tab="availability"]'));
+   assert.ok(!x.w.document.querySelector('.ft-mobile-bar [data-tab="standby"]'));
+   assert.ok(x.w.document.querySelector('.ft-mobile-sheet [data-tab="standby"]'));
+   assert.ok(!x.w.document.querySelector('.ft-mobile-sheet [data-tab="availability"]'));
+   await x.click('.ft-mobile-bar [data-tab="availability"]');assert.equal(x.w.eval('ST.tab'),'availability');
+  }finally{x.close();}
+ }
 });

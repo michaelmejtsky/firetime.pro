@@ -299,3 +299,51 @@ action=async function(button){
  }
  return UI_MAIL_ACTION(button);
 };
+
+// Keep the availability editor open and retain device drafts across reloads.
+const UI_AVAIL_RENDER=availability,UI_AVAIL_ACTION=action,UI_AVAIL_PAGE=page,UI_AVAIL_API=api;
+function uiAvailDraftKey(month=ST.month){return 'ft_availability_draft_v1:'+JSON.stringify([me()?.id,firm()?.id,month]);}
+function uiAvailRememberRoute(){
+ const url=new URL(location.href);
+ if(ST.tab==='availability'){url.searchParams.set('tab','availability');url.searchParams.set('month',ST.month);}
+ else if(url.searchParams.get('tab')==='availability'){url.searchParams.delete('tab');url.searchParams.delete('month');}
+ history.replaceState(history.state,'',url);
+}
+availability=function(){
+ const initialized=ST.availMonth===ST.month;
+ let html=UI_AVAIL_RENDER();
+ const submitted=ST.h.availSubmissions.some(x=>x.userId===me().id),key=uiAvailDraftKey();
+ try{
+  if(submitted)localStorage.removeItem(key);
+  else if(!initialized){
+   const draft=JSON.parse(localStorage.getItem(key)||'null');
+   if(draft&&typeof draft==='object'&&!Array.isArray(draft)){
+    ST.avail={};for(let day=1;day<=days(ST.month);day++)if(['YES','NO'].includes(draft[day]))ST.avail[day]=draft[day];
+    ST.uiAvailOpen=true;html=UI_AVAIL_RENDER();
+   }
+  }
+ }catch{}
+ // Only this editor gets a stable identifier; overview folding is independent.
+ const template=document.createElement('template');template.innerHTML=html;
+ const editor=[...template.content.children].filter(el=>el.tagName==='DETAILS')[1];
+ if(editor){editor.id='uiAvailabilityEditor';editor.open=Boolean(ST.uiAvailOpen);if(!submitted)editor.querySelector('.ui-fold-body').insertAdjacentHTML('afterbegin','<p class="ui-caption">Deine Auswahl wird auf diesem Gerät gesichert. Mit „Zwischenspeichern“ im System speichern; mit „Verbindlich abgeben“ für die Planung freigeben.</p>');}
+ return template.innerHTML;
+};
+document.addEventListener('toggle',event=>{
+ if(event.target?.id==='uiAvailabilityEditor'&&event.target.isConnected)ST.uiAvailOpen=event.target.open;
+},true);
+action=async function(button){
+ if(['availDay','availAllYes','availAllNo'].includes(button.dataset.act)){
+  ST.uiAvailOpen=document.getElementById('uiAvailabilityEditor')?.open??true;
+  const scrollX=window.scrollX,scrollY=window.scrollY;
+  await UI_AVAIL_ACTION(button);
+  try{localStorage.setItem(uiAvailDraftKey(),JSON.stringify(ST.avail));}catch{say('Auswahl konnte auf diesem Gerät nicht gesichert werden. Bitte zwischenspeichern.',true);}
+  window.scrollTo(scrollX,scrollY);return;
+ }
+ return UI_AVAIL_ACTION(button);
+};
+api=function(name,p={}){
+ const key=uiAvailDraftKey(p.month||ST.month);
+ return UI_AVAIL_API(name,p).then(result=>{if(['availabilitySave','availabilitySubmit'].includes(name))try{localStorage.removeItem(key);}catch{}return result;});
+};
+page=function(){const result=UI_AVAIL_PAGE();if(ST.h?.me)uiAvailRememberRoute();return result;};

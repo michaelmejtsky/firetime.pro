@@ -103,6 +103,12 @@ for(const file of ['index.html','sw.js','manifest.webmanifest','.nojekyll'])fs.c
 const webManifest=JSON.parse(fs.readFileSync(path.join(root,'dist/public/manifest.webmanifest'),'utf8'));Object.assign(webManifest,{id:'/',start_url:'/',scope:'/',description:'Arbeitszeiten, Bereitschaften, Aufgaben und Urlaubsverwaltung',theme_color:'#142e56',background_color:'#0b1d35'});fs.writeFileSync(path.join(root,'dist/public/manifest.webmanifest'),JSON.stringify(webManifest,null,2));
 fs.cpSync(path.join(repo,'assets'),path.join(root,'dist/public/assets'),{recursive:true});
 let html=fs.readFileSync(path.join(root,'dist/public/index.html'),'utf8');
+html=html.replace('month:monthOf(new Date()),rules:',"month:(new URLSearchParams(location.search).get('tab')==='availability'&&/^\\d{4}-(0[1-9]|1[0-2])$/.test(new URLSearchParams(location.search).get('month')||'')?new URLSearchParams(location.search).get('month'):monthOf(new Date())),rules:");
+html=html.replace("if(ST.token&&FT_LOAD_SEQ===shellSeq&&ST.tab==='dashboard'&&ST.cid===initialCid)\n      load();", "if(ST.token&&FT_LOAD_SEQ===shellSeq&&['dashboard','availability'].includes(ST.tab)&&ST.cid===initialCid){\n      if(ST.tab==='availability')ST.availMonth='';\n      load();}");
+html=html.replace("top=['dashboard','time','standby','messages']","top=['dashboard','time','availability','messages']")
+ .replace("['work','availability','sick']","['work','standby','sick']")
+ .replace("standby:'▦',messages:","standby:'▦',availability:'▦',messages:")
+ .replace("t==='standby'?'Bereitschaft':","t==='availability'?'Verfügbarkeit':t==='standby'?'Bereitschaft':");
 html=html.replace('Automatische Schließung am selben Tag um 19:00 Uhr.','Bereitschaftseinsätze laufen bis „Arbeit beenden“, auch über Mitternacht. Andere Tätigkeiten werden um 19:00 Uhr automatisch beendet.')
  .replace('Arbeitsbeginn nach 19:00 Uhr bitte manuell eintragen.','Bereitschaftseinsätze kannst du jederzeit starten und nach der Rückkehr beenden. Andere Tätigkeiten nach 19:00 Uhr bitte manuell eintragen.');
 // Named controls such as <input name="id"> shadow HTMLFormElement properties
